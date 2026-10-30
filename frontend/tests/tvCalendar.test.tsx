@@ -542,43 +542,41 @@ describe('Search', () => {
 // ---------------------------------------------------------------- frame
 
 describe('tabs', () => {
-  it('Series | Calendar | Import | Libraries | Options in the URL (Calendar the default), so Back works; Options holds Upgrades; no Import badge', async () => {
+  it('Series | Calendar | Import only (v327) in the URL (Calendar the default), so Back works; no Import badge', async () => {
     unmatched = [{ id: 7, path_id: TV.id, path_name: 'TV', folder: 'Mystery', guess_title: null, guess_year: null, candidates: [], reason: null, tier: 'none' }];
     page(true);
     await screen.findAllByTestId('tv-agenda-row');
     expect(screen.queryByTestId('tv-title')).toBeNull();
-    expect(screen.getAllByRole('tab').slice(0, 5).map(t => t.textContent)).toEqual(['Series', 'Calendar', 'Import', 'Libraries', 'Options']);
+    expect(screen.getAllByTestId(/^tv-tab-/).filter(t => t.getAttribute('role') === 'tab').map(t => t.textContent)).toEqual(['Series', 'Calendar', 'Import']);
     expect(screen.getByTestId('tv-tab-calendar').getAttribute('aria-selected')).toBe('true');
     expect(screen.queryByTestId('tv-import-badge')).toBeNull();
     fireEvent.click(screen.getByTestId('tv-tab-series'));
     expect(await screen.findByTestId(/^tv-series(-empty)?$/)).toBeTruthy();
     expect(screen.getByTestId('tv-section').getAttribute('data-view')).toBe('series');
-    fireEvent.click(screen.getByTestId('tv-tab-options'));
-    await screen.findByTestId('tv-upgrades');
-    expect(loc).toBe('/settings/tv?view=options');
-    fireEvent.click(screen.getByTestId('tv-tab-libraries'));
-    expect(loc).toBe('/settings/tv?view=libraries');
-    expect(screen.getByTestId('tv-paths').closest('div[style*="display: none"]')).toBeNull();
+    expect(screen.queryByTestId('tv-tab-options')).toBeNull();
+    expect(screen.queryByTestId('tv-tab-libraries')).toBeNull();
     fireEvent.click(screen.getByTestId('tv-tab-import'));
     await screen.findByTestId('tv-import-start');
-    expect(screen.getByTestId('tv-paths').parentElement!.style.display).toBe('none');
+    expect(loc).toBe('/settings/tv?view=import');
+    expect(screen.queryByTestId('tv-paths')).toBeNull();
+    expect(screen.queryByTestId('tv-upgrades')).toBeNull();
   });
 
   it('Back walks the tabs (history)', async () => {
     function Back() { const nav = useNavigate(); return <button type="button" data-testid="back" onClick={() => nav(-1)} />; }
     render(<MemoryRouter initialEntries={['/settings/tv']}><TvLibrarySettings wide /><Where /><Back /></MemoryRouter>);
     await screen.findAllByTestId('tv-agenda-row');
-    fireEvent.click(screen.getByTestId('tv-tab-options'));
+    fireEvent.click(screen.getByTestId('tv-tab-series'));
     fireEvent.click(screen.getByTestId('tv-tab-import'));
     expect(loc).toBe('/settings/tv?view=import');
     fireEvent.click(screen.getByTestId('back'));
-    await waitFor(() => expect(screen.getByTestId('tv-tab-options').getAttribute('aria-selected')).toBe('true'));
+    await waitFor(() => expect(screen.getByTestId('tv-tab-series').getAttribute('aria-selected')).toBe('true'));
     fireEvent.click(screen.getByTestId('back'));
     await waitFor(() => expect(screen.getByTestId('tv-tab-calendar').getAttribute('aria-selected')).toBe('true'));
     expect(loc).toBe('/settings/tv');
   });
 
-  it('No TV libraries: Calendar and Search offer Choose libraries, which opens Libraries', async () => {
+  it('No TV libraries: Calendar and Search offer Choose libraries, which opens Settings > TV', async () => {
     paths = [];
     page(true, '/settings/tv?view=series');
     expect((await screen.findByTestId('tv-no-libraries')).textContent).toBe('No TV libraries' + 'Choose libraries');
@@ -587,8 +585,7 @@ describe('tabs', () => {
     const drop = screen.getByTestId('tv-search-drop');
     expect(within(drop).getByTestId('tv-no-libraries')).toBeTruthy();
     fireEvent.click(within(drop).getByTestId('tv-choose-libraries'));
-    expect(loc).toBe('/settings/tv?view=libraries');
-    expect((screen.getByTestId('tv-search') as HTMLInputElement).value).toBe('');
+    expect(loc).toBe('/settings/tv/settings');
   });
 
   it('no helper text, American English, sentence case', () => {

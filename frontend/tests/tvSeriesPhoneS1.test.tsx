@@ -71,7 +71,7 @@ describe('v226 S1 phone Series list', () => {
     expect(open).toHaveBeenCalledWith(SHOWS[0]);
   });
 
-  it('a full-width 5-part segmented control, icon over label, no slider; search kept', async () => {
+  it('a full-width 3-part segmented control (v327), icon over label, no slider; search kept', async () => {
     setPhone(true);
     mount(false);
     await screen.findAllByTestId('tv-phone-row');
@@ -81,7 +81,7 @@ describe('v226 S1 phone Series list', () => {
     expect(tabs.style.width).toBe('100%');
     expect(tabs.parentElement!.className).not.toContain('tvt-scroll');
     const parts = within(tabs).getAllByRole('tab');
-    expect(parts.map(p => p.textContent)).toEqual(['Series', 'Calendar', 'Import', 'Libraries', 'Options']);
+    expect(parts.map(p => p.textContent)).toEqual(['Series', 'Calendar', 'Import']);
     for (const p of parts) {
       expect(p.style.flexDirection).toBe('column');
       expect(p.style.minWidth).toBe('0px');

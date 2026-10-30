@@ -26,6 +26,7 @@ function setup(wide: boolean) {
 const routes = <Routes>
   <Route path="/" element={<div data-testid="home" />} />
   <Route path="/settings/:section" element={<SettingsPage />} />
+  <Route path="/settings/:section/*" element={<SettingsPage />} />
 </Routes>;
 const at = (path: string) => render(<MemoryRouter initialEntries={['/elsewhere', path]} initialIndex={1}>{routes}</MemoryRouter>);
 
@@ -39,7 +40,7 @@ describe('desktop TV Calendar full-width', () => {
     expect(screen.getByTestId('tv-stub')).toBeTruthy();
     expect(screen.queryByTestId('settings-nav')).toBeNull();
     expect(screen.queryByTestId('settings-logo')).toBeNull();
-    expect(close.getAttribute('aria-label')).toBe('Close calendar');
+    expect(close.getAttribute('aria-label')).toBe('Close TV');
     expect(close.textContent).toBe('');                                    // icon only
     expect(close.closest('header')).toBeTruthy();
     expect(close.className).toBe('a1-chev');                              // v326: Home's own chevron, centered (fixed)
@@ -47,12 +48,15 @@ describe('desktop TV Calendar full-width', () => {
     expect(screen.getByTestId('settings-main').style.maxWidth).toBe('');   // takes the full width
   });
 
-  it('?view=calendar is the same view; other TV tabs and a show page keep the Settings layout', async () => {
+  it('v327: every TV view (Series, Calendar, Import, a show page) is full-width with no Settings nav; Settings > TV keeps the Settings layout', async () => {
     setup(true);
-    at('/settings/tv?view=calendar');
-    expect(await screen.findByTestId('tv-calendar-close')).toBeTruthy();
-    cleanup();
-    for (const p of ['/settings/tv?view=series', '/settings/tv?view=import', '/settings/tv?view=options', '/settings/tv?view=series&show=4']) {
+    for (const p of ['/settings/tv?view=calendar', '/settings/tv?view=series', '/settings/tv?view=import', '/settings/tv?view=series&show=4']) {
+      at(p);
+      expect(await screen.findByTestId('tv-calendar-close')).toBeTruthy();
+      expect(screen.queryByTestId('settings-nav')).toBeNull();
+      cleanup();
+    }
+    for (const p of ['/settings/tv/settings', '/settings/tv?view=options', '/settings/tv?view=libraries']) {
       at(p);
       expect(await screen.findByTestId('settings-nav')).toBeTruthy();
       expect(screen.queryByTestId('tv-calendar-close')).toBeNull();

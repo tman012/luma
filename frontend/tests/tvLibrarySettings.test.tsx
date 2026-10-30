@@ -10,7 +10,7 @@ import { SECTION_GAP, TvLibrarySettings as TvSettingsBare, UPGRADE_OPTIONS } fro
 import { episodeCount, lastScanText, needsReview, reviewCount, showLabel, showSubtitle } from '@/components/library/tvLibraryApi';
 
 /** The Import view unless at says otherwise (Calendar is the default view: tvCalendar.test.tsx). */
-const TvLibrarySettings = ({ at = '/?view=import', ...p }: { wide: boolean; at?: string }): ReactElement =>
+const TvLibrarySettings = ({ at = '/?view=import', ...p }: { wide: boolean; at?: string; mode?: 'views' | 'settings' }): ReactElement =>
   <MemoryRouter initialEntries={[at]}><TvSettingsBare {...p} /></MemoryRouter>;
 const res = (body: unknown, status = 200) => ({ ok: status < 300, status, json: async () => body }) as Response;
 const PATH = { id: 'p_0000aaaa', name: 'TV', path: '/media/TV', status: 'ok' };
@@ -74,11 +74,15 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('Settings > TV', () => {
   it('lists the paths, the shows with their files, the review rows and Upgrades', async () => {
-    render(<TvLibrarySettings wide />);
-    await screen.findByText('Severance (2022)');
+    // v327: the library selector lives on Settings > TV (mode settings), not in the TV views
+    const s = render(<TvLibrarySettings wide mode="settings" at="/settings/tv/settings" />);
     await screen.findAllByTestId('lib-select-row');
     const libs = within(screen.getByTestId('tv-paths')).getAllByTestId('lib-select-row');
     expect(libs.map(r => [r.textContent, r.getAttribute('aria-checked')])).toEqual([['TV/media/TV', 'true'], ['Anime/media/Anime', 'false']]);
+    s.unmount();
+    render(<TvLibrarySettings wide />);
+    await screen.findByText('Severance (2022)');
+    expect(screen.queryByTestId('tv-paths')).toBeNull();
     const rows = screen.getAllByTestId('tv-show');
     expect(within(rows[0]!).getByTestId('tv-show-subtitle').textContent).toBe('4 episodes \u00b7 3 need review');
     expect(within(rows[0]!).getByTestId('tv-review-dot').getAttribute('aria-label')).toBe('Needs review');
@@ -91,7 +95,7 @@ describe('Settings > TV', () => {
   });
 
   it('selects Library paths as TV libraries; no add-path or folder picker', async () => {
-    render(<TvLibrarySettings wide={false} />);
+    render(<TvLibrarySettings wide={false} mode="settings" at="/settings/tv/settings" />);
     const rows = await screen.findAllByTestId('lib-select-row');
     expect(screen.queryByTestId('tv-add-path')).toBeNull();
     expect(screen.queryByText('Add path')).toBeNull();
@@ -104,14 +108,18 @@ describe('Settings > TV', () => {
     await waitFor(() => expect(calls.filter(c => c.url === '/api/settings/tv/library').length).toBe(n + 1));
   });
 
-  it('Import hides when no library is selected and shows once one is', async () => {
+  it('Import hides when no library is selected (Choose libraries instead); Settings > TV selects one', async () => {
     selected = [];
     settings = { ...settings, paths: [] };
-    render(<TvLibrarySettings wide />);
-    const rows = await screen.findAllByTestId('lib-select-row');
+    const v = render(<TvLibrarySettings wide />);
+    await screen.findByTestId('tv-choose-libraries');
     expect(screen.queryByTestId('tv-import-start')).toBeNull();
+    v.unmount();
+    render(<TvLibrarySettings wide mode="settings" at="/settings/tv/settings" />);
+    const rows = await screen.findAllByTestId('lib-select-row');
     fireEvent.click(rows[0]!);
-    await screen.findByTestId('tv-import-start');
+    await waitFor(() => expect(calls.filter(c => c.method === 'PUT' && c.url === '/api/settings/tv/libraries').map(c => c.body))
+      .toEqual([{ selected: ['p_0000aaaa'] }]));
   });
 
   it('Import starts an import, shows its progress, then the last import', async () => {
@@ -159,7 +167,7 @@ describe('Settings > TV', () => {
   });
 
   it('Upgrades saves Replace and Keep both', async () => {
-    render(<TvLibrarySettings wide at="/?view=options" />);
+    render(<TvLibrarySettings wide mode="settings" at="/settings/tv/settings" />);
     expect((await screen.findByTestId('tv-upgrades-keep_both')).getAttribute('aria-checked')).toBe('true');
     fireEvent.click(await screen.findByTestId('tv-upgrades-replace_verified'));
     await waitFor(() => expect(screen.getByTestId('tv-upgrades-replace_verified').getAttribute('aria-checked')).toBe('true'));

@@ -176,7 +176,7 @@ describe('SectionTrackersList', () => {
 describe('Settings > TV', () => {
   const page = (path: string) => render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes><Route path="/settings/:section?" element={<SettingsPage />} /></Routes>
+      <Routes><Route path="/settings/:section?" element={<SettingsPage />} /><Route path="/settings/:section/*" element={<SettingsPage />} /></Routes>
     </MemoryRouter>);
 
   it('shows on luma-test builds for the owner, with the TV tracker list under Options', async () => {
@@ -188,7 +188,7 @@ describe('Settings > TV', () => {
       if (url.endsWith('/api/settings/tv')) return res({ paths: [], upgrades: { mode: 'keep_both' }, rescan_interval_h: 6 });
       return res({}, 404);
     }));
-    await act(async () => { page('/settings/tv?view=options'); });
+    await act(async () => { page('/settings/tv/settings'); });   // v327: Options live on Settings > TV
     await waitFor(() => expect(screen.getByTestId('tv-upgrades')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('section-trackers-tv')).toBeTruthy());
     await waitFor(() => expect(rows()).toHaveLength(4));
@@ -202,7 +202,7 @@ describe('Settings > TV', () => {
       if (url.includes('/api/settings/sections/tv/trackers')) return res({ section: 'tv', trackers: [] });
       return res({}, 404);
     }));
-    await act(async () => { page('/settings/tv?view=options'); });   // v325: Calendar (the default) has no Settings nav
+    await act(async () => { page('/settings/tv/settings'); });   // v327: the TV views have no Settings nav; Settings > TV does
     const nav = screen.getByTestId('settings-nav');
     await waitFor(() => expect(Array.from(nav.querySelectorAll('a')).map(a => a.textContent))
       .toEqual(['Home screen', 'Rooms', 'Connectors', 'Notifications', 'Trackers', 'Library paths', 'Movies', 'TV', 'Automation']));

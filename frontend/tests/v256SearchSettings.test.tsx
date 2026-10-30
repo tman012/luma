@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-const tvOptions = () => render(<MemoryRouter initialEntries={['/?view=options']}><TvLibrarySettings wide /></MemoryRouter>);
+const tvOptions = () => render(<MemoryRouter initialEntries={['/settings/tv/settings']}><TvLibrarySettings wide mode="settings" /></MemoryRouter>);
 
 describe('v256 TV Options > Search', () => {
   it('shows the three rows in sentence case, before Trackers', async () => {

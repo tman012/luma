@@ -6,7 +6,7 @@
  * libraries selector; Options holds Upgrades, Search (v256) and Trackers. Importing only reads
  * the library folders and Add only writes tv.db. */
 import { useCallback, useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
-import { useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { T } from '@/theme/tokens';
 import { FONT } from '@/components/start/StartUI';
 import { NoticeToast } from '@/components/start/SetupToast';
@@ -36,17 +36,21 @@ import {
 } from './tvLibraryApi';
 import { isDay, localDay, weekStart } from './tvCalendarApi';
 import { TvSearchSettings } from './SearchSettings';
+import { TV_SETTINGS_PATH } from './tvSettingsRoutes';
 
 /** Space between sections (Import, Review, Shows; Upgrades, Trackers), as on Library paths. */
 export const SECTION_GAP = 28;
 export const TV_VIEWS = [
   { id: 'series', label: 'Series' }, { id: 'calendar', label: 'Calendar' }, { id: 'import', label: 'Import' },
-  { id: 'libraries', label: 'Libraries' }, { id: 'options', label: 'Options' },
 ] as const;
+export { TV_SETTINGS_PATH, TV_SETTINGS_VIEWS } from './tvSettingsRoutes';
 export type TvView = typeof TV_VIEWS[number]['id'];
 export const tvView = (v: string | null): TvView => (TV_VIEWS.find(x => x.id === v)?.id ?? 'calendar');
 
-export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: ReactNode }) {
+/** mode 'views': Series | Calendar | Import (Home > Calendar). mode 'settings': Settings > TV, Library options then Options. */
+export function TvLibrarySettings({ wide, options, mode = 'views' }: { wide: boolean; options?: ReactNode; mode?: 'views' | 'settings' }) {
+  const navigate = useNavigate();
+  const settingsMode = mode === 'settings';
   const [settingsView, setSettingsView] = useState<TvSettingsView | null>(null);
   const [lib, setLib] = useState<TvLibrary | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -143,7 +147,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   const noLibs = (
     <div data-testid="tv-no-libraries" style={{ minHeight: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
       <span style={{ fontSize: 15, fontWeight: 500, color: 'rgba(255,255,255,0.95)' }}>No TV libraries</span>
-      <button type="button" className="lp-focus" data-testid="tv-choose-libraries" onClick={() => pickView('libraries')} style={{ ...primary, cursor: 'pointer' }}>
+      <button type="button" className="lp-focus" data-testid="tv-choose-libraries" onClick={() => { setQ(''); navigate(TV_SETTINGS_PATH); }} style={{ ...primary, cursor: 'pointer' }}>
         Choose libraries
       </button>
     </div>
@@ -165,6 +169,50 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
         <TvOwnedSearch q={q} shows={lib ? lib.shows : null} onOpen={openShow} keys={keys} active={active} />
       )} />
   );
+
+  const optionsBody = (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: SECTION_GAP }}>
+        <div data-testid="tv-upgrades">
+          <h3 style={sectionLabel}>Upgrades</h3>
+          <UpgradesChoice value={settingsView.upgrades.mode} onChange={mode => {
+            const before = settingsView;
+            setSettingsView({ ...settingsView, upgrades: { mode } });
+            saveUpgrades(mode).then(r => { if (r.ok) setSettingsView(r.data); else { setSettingsView(before); say(r.error); } });
+          }} />
+        </div>
+        <QualityProfiles />
+        <PreferredGroups value={settingsView.preferred_groups ?? []} onChange={g => {
+          const before = settingsView;
+          setSettingsView({ ...settingsView, preferred_groups: g });
+          savePreferredGroups(g).then(r => { if (r.ok) setSettingsView(r.data); else { setSettingsView(before); say(r.error); } });
+        }} />
+        {settingsView.naming && (
+          <NamingSettings value={settingsView.naming} say={say}
+            onSaved={n => setSettingsView(v => (v ? { ...v, naming: n } : v))} />
+        )}
+        <TvSearchSettings value={settingsView.automation ?? {}} onChange={patch => {
+          const before = settingsView;
+          setSettingsView({ ...settingsView, automation: { ...settingsView.automation, ...patch } });
+          saveAutomation(patch).then(r => { if (r.ok) setSettingsView(r.data); else { setSettingsView(before); say(r.error); } });
+        }} />
+        {options}
+      </div>
+  );
+  if (settingsMode) {
+    return (
+      <WideCtx.Provider value={wide}>
+      <section data-testid="tv-settings" style={{ ...pad(wide), display: 'flex', flexDirection: 'column', gap: SECTION_GAP, fontFamily: FONT }}>
+        <style>{libraryPathsCss}</style>
+        <style>{trackersCss}</style>
+        {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
+        <div data-testid="tv-library-options">
+          <LibrarySelector url={TV_LIBRARIES_URL} label="Library options" testId="tv-paths" onChange={onLibraries} />
+        </div>
+        <div data-testid="tv-options">{optionsBody}</div>
+      </section>
+      </WideCtx.Provider>
+    );
+  }
 
   let body: ReactNode;
   if (view === 'calendar') {
@@ -214,35 +262,6 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
         )}
       </div>
     );
-  } else if (view === 'options') {
-    body = (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: SECTION_GAP }}>
-        <div data-testid="tv-upgrades">
-          <h3 style={sectionLabel}>Upgrades</h3>
-          <UpgradesChoice value={settingsView.upgrades.mode} onChange={mode => {
-            const before = settingsView;
-            setSettingsView({ ...settingsView, upgrades: { mode } });
-            saveUpgrades(mode).then(r => { if (r.ok) setSettingsView(r.data); else { setSettingsView(before); say(r.error); } });
-          }} />
-        </div>
-        <QualityProfiles />
-        <PreferredGroups value={settingsView.preferred_groups ?? []} onChange={g => {
-          const before = settingsView;
-          setSettingsView({ ...settingsView, preferred_groups: g });
-          savePreferredGroups(g).then(r => { if (r.ok) setSettingsView(r.data); else { setSettingsView(before); say(r.error); } });
-        }} />
-        {settingsView.naming && (
-          <NamingSettings value={settingsView.naming} say={say}
-            onSaved={n => setSettingsView(v => (v ? { ...v, naming: n } : v))} />
-        )}
-        <TvSearchSettings value={settingsView.automation ?? {}} onChange={patch => {
-          const before = settingsView;
-          setSettingsView({ ...settingsView, automation: { ...settingsView.automation, ...patch } });
-          saveAutomation(patch).then(r => { if (r.ok) setSettingsView(r.data); else { setSettingsView(before); say(r.error); } });
-        }} />
-        {options}
-      </div>
-    );
   } else {
     body = null;
   }
@@ -275,10 +294,6 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
           <div style={{ marginTop: 12 }}>{control}</div>
         </>
       )}
-      {/* The Libraries view stays mounted so the selection (and the paths Add offers) is always current. */}
-      <div style={{ marginTop: 20, display: view === 'libraries' ? undefined : 'none' }}>
-        <LibrarySelector url={TV_LIBRARIES_URL} label="Libraries" testId="tv-paths" onChange={onLibraries} />
-      </div>
       {body && <div data-testid="tv-view" style={{ marginTop: 20 }}>{body}</div>}
     </section>
     </WideCtx.Provider>
@@ -292,11 +307,9 @@ const PHONE_TAB_ICONS: Record<TvView, ReactNode> = {
   series: <><rect x="3" y="5" width="18" height="12" rx="2" /><path d="M8 21h8" /></>,
   calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
   import: <path d="M12 3v12M7 10l5 5 5-5M4 21h16" />,
-  libraries: <path d="M4 4v16M9 4v16M14 4l5 16" />,
-  options: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2" /></>,
 };
 
-/** v226 (Taylor's S1): on a phone the views are a full-width 5-part segmented control, an icon over each
+/** v226 (Taylor's S1): on a phone the views are a full-width 3-part segmented control, an icon over each
  * label, equal parts that fit 320 to 430px with nothing cut off (no horizontal slider). */
 function PhoneSegmented({ value, onPick }: { value: TvView; onPick: (v: TvView) => void }) {
   return (

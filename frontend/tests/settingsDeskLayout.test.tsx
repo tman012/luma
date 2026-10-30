@@ -10,8 +10,8 @@ const auth = { authenticated: true, loading: false, implicit: false, logout: vi.
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 // Layout only: the panels are stubs (their own tests cover them).
 vi.mock('@/components/library/LibraryPathsSettings', () => ({ LibraryPathsSettings: () => <div data-testid="lp-stub" /> }));
-// TV draws its own title row ("TV" and the Calendar | Import | Libraries | Options control, docs/design/tv.md §1).
-vi.mock('@/components/library/TvLibrarySettings', () => ({ TvLibrarySettings: () => <div data-testid="tv-stub"><h2>TV</h2></div> }));
+// v327: Settings > TV takes the shell's title (as Movies); the TV views draw their own tab row, no title.
+vi.mock('@/components/library/TvLibrarySettings', () => ({ TvLibrarySettings: () => <div data-testid="tv-stub" /> }));
 vi.mock('@/components/settings/SectionTrackersList', () => ({ SectionTrackersList: () => <div data-testid="st-stub" /> }));
 vi.mock('@/minimal', async orig => ({ ...(await orig<typeof import('@/minimal')>()), isMinimal: () => true }));
 
@@ -32,6 +32,7 @@ function setup(wide: boolean) {
 const at = (path: string) => render(<MemoryRouter initialEntries={[path]}><Routes>
   <Route path="/settings" element={<SettingsPage />} />
   <Route path="/settings/:section" element={<SettingsPage />} />
+  <Route path="/settings/:section/*" element={<SettingsPage />} />
 </Routes></MemoryRouter>);
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -58,22 +59,26 @@ describe('desktop Settings layout', () => {
     expect([page.style.maxWidth, page.style.margin]).toEqual(['', '']);
   });
 
-  it('content follows at the same 40px gap; TV takes the freed width, the panel title on the heading line', async () => {
+  it('content follows at the same 40px gap; Settings > TV is a normal 720 page; the TV views take the full width', async () => {
     setup(true);
-    const v = at('/settings/tv?view=series')   // v325: Calendar (the default) is full-width, no nav;
+    const v = at('/settings/tv/settings');   // v327: Settings > TV, Movies' shell
     const nav = await screen.findByTestId('settings-nav');
     await screen.findByRole('heading', { level: 2, name: 'TV' });
     const page = nav.parentElement!;
     const main = screen.getByTestId('settings-main');
     expect(page.style.gap).toBe('40px');
     expect(nav.style.width).toBe('220px');
-    expect(main.style.maxWidth).toBe('');
+    expect(main.style.maxWidth).toBe('720px');
     expect(main.style.flex).toBe('1 1 0%');
-    // both columns start at the row top: the panel title and the heading share a line
     expect(page.style.alignItems).toBe('');
-    expect(main.firstElementChild!.getAttribute('data-testid')).toBe('tv-stub');   // the TV panel's own title row, no second title
     expect(main.querySelectorAll('h2')).toHaveLength(1);
     v.unmount();
+    const s = at('/settings/tv?view=series');   // the TV views: no nav, no title, full width
+    await screen.findByTestId('tv-stub');
+    expect(screen.queryByTestId('settings-nav')).toBeNull();
+    expect(screen.getByTestId('settings-main').querySelectorAll('h2')).toHaveLength(0);
+    expect(screen.getByTestId('settings-main').style.maxWidth).toBe('');
+    s.unmount();
     at('/settings/library-paths');
     await waitFor(() => expect(screen.getByTestId('settings-main').style.maxWidth).toBe('720px'));
   });

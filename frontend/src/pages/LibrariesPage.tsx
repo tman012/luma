@@ -30,6 +30,7 @@ import { TrackersSettings, useTrackersAccess } from '@/components/trackers/Track
 import { LibraryPathsSettings } from '@/components/library/LibraryPathsSettings';
 import { SectionTrackersList } from '@/components/settings/SectionTrackersList';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
+import { TV_SETTINGS_PATH, TV_SETTINGS_VIEWS } from '@/components/library/tvSettingsRoutes';
 import { MoviesSettings } from '@/components/movies/MoviesSettings';
 import { GenreRouletteSettings } from '@/components/automation/GenreRouletteSettings';
 import { AnticipatedSettings } from '@/components/automation/AnticipatedSettings';
@@ -62,7 +63,7 @@ export function LibrariesRedirect() {
 
 export function SettingsPage() {
   const { authenticated, loading, user, implicit, logout } = useAuth();
-  const { section } = useParams();
+  const { section, '*': sub } = useParams();
   const wide = useKioskWidth();
   const navigate = useNavigate();
   const { hash } = useLocation();
@@ -77,6 +78,16 @@ export function SettingsPage() {
   // Premium pass: Plex lives under Connectors (Plex sign-in still returns to /settings/plex).
   if (section === 'plex') return <Navigate to="/settings/connectors#plex" replace />;
   const known = SETTINGS_SECTIONS.find(s => s.slug === section);
+  // v327 (Taylor 10:42): Settings > TV is one page (TV_SETTINGS_PATH); /settings/tv stays the TV views
+  // (Series | Calendar | Import) that Home > Calendar opens. Old Libraries/Options deep links land on Settings > TV.
+  if (known?.slug === 'tv') {
+    const v = query.get('view');
+    if (!sub && v && (TV_SETTINGS_VIEWS as readonly string[]).includes(v)) return <Navigate to={TV_SETTINGS_PATH} replace />;
+    if (sub && sub !== 'settings') return <Navigate to={TV_SETTINGS_PATH} replace />;
+  }
+  const tvSettings = known?.slug === 'tv' && sub === 'settings';
+  const tvViews = known?.slug === 'tv' && !tvSettings;
+  const sectionHref = (slug: string) => (slug === 'tv' ? TV_SETTINGS_PATH : `/settings/${slug}`);
   if (section && !known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   const ownerOnly = (slug: string) => slug === 'connectors' || slug === 'notifications' || slug === 'library-paths' || slug === 'tv' || slug === 'movies' || slug === 'rooms' || slug === 'automation';
   if (known && ownerOnly(known.slug) && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
@@ -101,17 +112,18 @@ export function SettingsPage() {
           : slug === 'rooms'
             ? (owner ? <RoomsSettings wide={wide} onExit={() => navigate('/settings')} /> : null)
           : slug === 'tv'
-            ? (owner ? <TvLibrarySettings wide={wide} options={<SectionTrackersList section="tv" label="Trackers" wide={wide} />} /> : null)
+            ? (owner ? <TvLibrarySettings wide={wide} mode={tvSettings ? 'settings' : 'views'} options={<SectionTrackersList section="tv" label="Trackers" wide={wide} />} /> : null)
             : <HomeScreenSection admin={admin} wide={wide} />;
   // Trackers draws its own title row (desktop) and header (phone: Plus, pushed pages); TV its title row (desktop).
-  const ownChrome = known?.slug === 'trackers' || known?.slug === 'rooms' || (wide && known?.slug === 'tv');
+  const ownChrome = known?.slug === 'trackers' || known?.slug === 'rooms' || (wide && tvViews);
 
   if (wide) {
     if (!known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
     const signOut = async () => { setBusy(true); await logout(); navigate('/login', { replace: true }); };
     // v325 (Taylor): TV Calendar is its own full-width view, no Settings nav; the up arrow (top-left, in the
     // logo's place) closes it to Home. Another TV tab (?view=...) or a show page is the normal Settings layout.
-    const calendar = known.slug === 'tv' && (query.get('view') ?? 'calendar') === 'calendar' && !query.get('show');
+    // v327 (Taylor 10:42): no TV view (Series, Calendar, Import) shows the Settings nav; HomeChevron closes each to Home.
+    const calendar = tvViews;
     return (
       <div style={settingsPage} data-step="settings" data-layout="desktop">
         <GlowLayer />
@@ -120,7 +132,7 @@ export function SettingsPage() {
           {calendar ? (
             // v326 (Taylor): Home's own chevron (shared component), same glyph, size, color and spot; no circle.
             <>
-              <HomeChevron up withCss aria-label="Close calendar" data-testid="tv-calendar-close" onClick={() => navigate('/')} />
+              <HomeChevron up withCss aria-label="Close TV" data-testid="tv-calendar-close" onClick={() => navigate('/')} />
               <span style={{ height: 64 }} />
             </>
           ) : (
@@ -140,7 +152,7 @@ export function SettingsPage() {
                 const on = s.slug === known.slug;
                 return (
                   <li key={s.slug}>
-                    <Link to={`/settings/${s.slug}`} className="luma-section-item" aria-current={on ? 'page' : undefined}
+                    <Link to={sectionHref(s.slug)} className="luma-section-item" aria-current={on ? 'page' : undefined}
                       style={{ ...navItem, ...(on ? navItemOn : null) }}>
                       {on && <span style={bar} aria-hidden="true" />}
                       {s.label}
@@ -150,7 +162,7 @@ export function SettingsPage() {
               })}
             </ul>
           </nav>}
-          <main data-testid="settings-main" style={{ flex: 1, minWidth: 0, maxWidth: known.slug === 'tv' || known.slug === 'rooms' ? undefined : known.slug === 'automation' ? 1120 : 720 }}>
+          <main data-testid="settings-main" style={{ flex: 1, minWidth: 0, maxWidth: tvViews || known.slug === 'rooms' ? undefined : known.slug === 'automation' ? 1120 : 720 }}>
             {!ownChrome && <h2 style={deskTitle}>{known.label}</h2>}
             {content(known.slug)}
           </main>
@@ -173,7 +185,7 @@ export function SettingsPage() {
             <ul style={{ listStyle: 'none', margin: '16px 0 0', padding: 0 }} data-testid="settings-list">
               {sections.map((s, i) => (
                 <li key={s.slug}>
-                  <Link to={`/settings/${s.slug}`} className="luma-sheet-row" style={sheetRow}>
+                  <Link to={sectionHref(s.slug)} className="luma-sheet-row" style={sheetRow}>
                     <span style={{ flex: 1 }}>{s.label}</span>
                     <span style={{ display: 'inline-flex', color: 'rgba(255,255,255,0.3)' }}><ChevronIcon size={18} /></span>
                     {i < sections.length - 1 && <span style={divider} aria-hidden="true" />}
@@ -184,7 +196,7 @@ export function SettingsPage() {
           </div>
         ) : (
           <div key={known.slug} className="luma-push" data-testid="settings-section">
-            {!ownChrome && <SheetHeader title={known.label} onBack={() => navigate('/settings')} onClose={() => navigate('/')} />}
+            {!ownChrome && <SheetHeader title={known.label} onBack={tvViews ? undefined : () => navigate('/settings')} onClose={() => navigate('/')} />}
             <div data-scroll-content style={{ paddingBottom: SHEET_SCROLL_PAD }}>{content(known.slug)}</div>
           </div>
         )}

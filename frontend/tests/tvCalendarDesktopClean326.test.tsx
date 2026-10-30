@@ -12,7 +12,7 @@ afterEach(cleanup);
 describe('v326 desktop TV Calendar clean', () => {
   it('Home and the calendar both render the one HomeChevron component', () => {
     expect(src('components/search/HomeSearchR3.tsx')).toMatch(/<HomeChevron up=\{shown\}/);
-    expect(src('pages/LibrariesPage.tsx')).toMatch(/<HomeChevron up withCss aria-label="Close calendar"/);
+    expect(src('pages/LibrariesPage.tsx')).toMatch(/<HomeChevron up withCss aria-label="Close TV"/);
     // no private copies of the glyph or its spot
     for (const f of ['components/search/HomeSearchR3.tsx', 'pages/LibrariesPage.tsx']) {
       expect(src(f)).not.toContain('M7.4 15.4');
