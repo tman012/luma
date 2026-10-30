@@ -184,7 +184,7 @@ describe('Series detail page', () => {
       expect(screen.queryByTestId(id)).toBeNull();
     expect(document.querySelectorAll('[role="checkbox"], input[type="checkbox"]').length).toBe(0);
     const show = screen.getByTestId('tv-detail-monitored');
-    expect(screen.getByTestId('tv-detail-header').contains(show)).toBe(true);   // v321: on the banner (no poster)
+    expect(screen.getByTestId('tv-detail-hero').contains(show)).toBe(true);   // v321: on the banner (no poster)
     expect([show.getAttribute('aria-label'), show.getAttribute('aria-pressed'), show.style.width]).toEqual(['Monitored', 'true', '40px']);
     expect(screen.getAllByTestId('tv-detail-monitored')).toHaveLength(1);
     for (const sec of screen.getAllByTestId('tv-detail-season')) {
@@ -301,7 +301,7 @@ describe('v185 Designer polish', () => {
     page();
     const flag = await screen.findByTestId('tv-detail-monitored');
     // v321: no poster; the chip sits on the banner, top right beside Edit
-    expect(flag.closest('[data-testid="tv-detail-header"]')).toBeTruthy();
+    expect(flag.closest('[data-testid="tv-detail-hero"]')).toBeTruthy();
     expect([flag.style.width, flag.style.height]).toEqual(['40px', '40px']);
     const svg = flag.querySelector('svg')!;
     expect([svg.getAttribute('width'), svg.getAttribute('height')]).toEqual(['22', '22']);

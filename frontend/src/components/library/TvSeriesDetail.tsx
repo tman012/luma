@@ -184,7 +184,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
         </button>
       )}
 
-      <TvSeriesHero title={view.title} meta={meta} facts={facts} bannerUrl={view.banner_url} backdropPath={view.backdrop_path} phone={!wide}
+      <TvSeriesHero title={view.title} meta={meta} facts={facts} bannerUrl={view.banner_url} phone={!wide}
         edit={<button type="button" className="lp-focus" data-testid="tv-detail-edit" onClick={() => setEditing(true)} style={heroEditBtn}>Edit</button>}
         flag={(
           <MonitorFlag on={view.monitored} title={view.title} testid="tv-detail-monitored" size={POSTER_FLAG} glyph={POSTER_GLYPH}
