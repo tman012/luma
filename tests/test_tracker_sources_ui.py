@@ -155,7 +155,7 @@ def test_sources_panels_use_the_kiosk_theme():
         src = _read(rel)
         assert "import { START_GLOW } from '@/components/start/StartUI';" in src
         assert "backgroundColor: 'var(--color-kiosk-black)', backgroundImage: START_GLOW" in src
-        assert "linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)), #15102a" in src
+        assert "linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)), #111318" in src  # v325: MOTION.md §7 #12, #111318 (was #15102a)
         assert "border: '1px solid rgba(255,255,255,0.08)'" in src
         assert "expanded ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)'" in src
         assert '...srcPrimaryBtn' in src and "'#1d4ed8'" not in src   # primary = theme accent #3b82f6
