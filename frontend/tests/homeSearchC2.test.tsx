@@ -82,7 +82,9 @@ describe('C2 palette states', () => {
     fireEvent.keyDown(input, { key: 'ArrowDown' }); fireEvent.keyDown(input, { key: 'ArrowUp' });
     expect(input.getAttribute('aria-activedescendant')).toBe('lsp-row-0');
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ tmdbId: 841, ratingKey: undefined }));
+    // v324: opens through openWhenReady (Home's path), so the popup follows the warm-up (600 ms cap).
+    await act(async () => { vi.advanceTimersByTime(700); });
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ tmdbId: 841, ratingKey: undefined })));
     await act(async () => { vi.advanceTimersByTime(CLOSE_MS + 50); });
     expect(screen.queryByTestId('search-palette')).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('opener')));
@@ -175,7 +177,7 @@ describe('C2 Enter/Space on a focused control is that control only (Tester MED)'
   it('Enter in the input still opens the highlighted row', async () => {
     await setup();
     fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Enter' });
-    expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ ratingKey: 1 }));
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ ratingKey: 1 })));
   });
 });
 

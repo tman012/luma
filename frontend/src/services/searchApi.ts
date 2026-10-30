@@ -89,7 +89,7 @@ export const TMDB_BUSY_TEXT = 'TMDB is busy. Try again in a minute.';
 // ---------------------------------------------------------------------------
 
 import { posterUrl as tmdbPosterUrl, tmdbImg } from '@/utils/image';
-import { scheduleWarm, warmDetail } from '@/services/modalPrefetch';
+import { openWhenReady, scheduleWarm, warmDetail } from '@/services/modalPrefetch';
 
 function titleKey(title: string, year: number | string | null | undefined): string {
   return `${(title || '').toLowerCase()}_${year || ''}`;
@@ -246,10 +246,24 @@ export async function batchCheckOwnership(
 
 /** Warm a result's detail popup colors (hover, focus, tap), with the same
  *  ids the popup will be opened with. */
-function warmResult(item: SearchMovie, opts?: { images?: boolean }): Promise<void> {
+/** The ids a result's popup opens (and is warmed) with. */
+export function resultIds(item: SearchMovie): { kind: 'movie' | 'tv'; ratingKey?: number; tmdbId?: number } {
   const rk = item.isOwned && item.rating_key ? Number(item.rating_key) : undefined;
   const tmdb = item.tmdb_id || item.id;
-  return warmDetail(item.media_type === 'tv' ? 'tv' : 'movie', rk, tmdb ? Number(tmdb) : undefined, opts).catch(() => {});
+  return { kind: item.media_type === 'tv' ? 'tv' : 'movie', ratingKey: rk, tmdbId: tmdb ? Number(tmdb) : undefined };
+}
+
+function warmResult(item: SearchMovie, opts?: { images?: boolean }): Promise<void> {
+  const { kind, ratingKey, tmdbId } = resultIds(item);
+  return warmDetail(kind, ratingKey, tmdbId, opts).catch(() => {});
+}
+
+/** A result tap opens its popup exactly like a Home card tap (MinimalHomePage openCard):
+ *  openWhenReady with the tapped element, then `open`. */
+export function openResult(item: SearchMovie, el: HTMLElement | null | undefined, open: () => void): Promise<void> {
+  const { kind, ratingKey, tmdbId } = resultIds(item);
+  if (!ratingKey && !tmdbId) return Promise.resolve();
+  return openWhenReady(kind, ratingKey, tmdbId, el ?? null, open);
 }
 
 /** Phone search: warm what's on screen as soon as results land: the top rows

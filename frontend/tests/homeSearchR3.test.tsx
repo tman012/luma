@@ -1,5 +1,5 @@
 /** v227 R3 (Taylor's pick): desktop and tablet Home search at the top of the page. */
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const modals = { openMovie: vi.fn(), openTv: vi.fn(), close: vi.fn() };
@@ -98,7 +98,9 @@ describe('R3 layout (1440 and 1024)', () => {
     expect(screen.getByTestId('r3-grid').lastElementChild).toBe(screen.getByTestId('r3-person'));
     expect(screen.queryByText('Play')).toBeNull();
     fireEvent.click(cards[0]!);
-    expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 1, tmdbId: 438631, origin: 'search' });
+    // v324: Home's openWhenReady path (pressed card, then the popup).
+    expect(cards[0]!.getAttribute('data-pressed')).toBe('true');
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 1, tmdbId: 438631, origin: 'search' }));
     fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Escape' });
     expect(screen.queryByTestId('r3-results')).toBeNull();
   });

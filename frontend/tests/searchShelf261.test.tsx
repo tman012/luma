@@ -45,7 +45,8 @@ describe('v261 phone search is prod 1b4ea74 SearchShelf', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(250); });
     expect(fetchMock).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // v324: results also warm their popups (Home's queue); the search itself is still 2 requests.
+    expect(fetchMock.mock.calls.filter(([u]) => /search/.test(String(u)))).toHaveLength(2);
   });
 
   it('every result, owned first and deduped, then people; prod Title Case count; filters; proxied art', async () => {

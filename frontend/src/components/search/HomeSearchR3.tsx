@@ -12,6 +12,7 @@ import { FONT } from '@/components/start/StartUI';
 import { HomeChevron, homeChevCss } from '@/components/home/HomeChevron';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import {
+  openResult, warmResult, warmResults,
   performSearch, getPosterUrl, getProfileUrl, getTitle, getYear, TMDB_BUSY_TEXT,
   type SearchMovie, type SearchPerson, type SearchResults,
 } from '@/services/searchApi';
@@ -182,12 +183,17 @@ export function HomeSearchR3() {
   }, [searching]);
   const view = useMemo(() => buildR3(res, lastQ.current), [res]);
 
-  const open = (item: SearchMovie) => {
+  // Same open as a Home card tap (openWhenReady through openResult).
+  const open = (item: SearchMovie, el?: HTMLElement | null) => {
     const tmdbId = item.tmdb_id || item.id;
     const opts = { ratingKey: (item.isOwned && item.rating_key) ? item.rating_key : undefined, tmdbId: tmdbId ?? undefined, origin: 'search' as const };
     if (!opts.ratingKey && !opts.tmdbId) return;
-    if (item.media_type === 'tv') openTv(opts); else openMovie(opts);
+    void openResult(item, el, () => { if (item.media_type === 'tv') openTv(opts); else openMovie(opts); });
   };
+  useEffect(() => {
+    if (!res) return;
+    return warmResults([...res.owned, ...res.unowned]);
+  }, [res]);
   const openPerson = (p: SearchPerson) =>
     window.dispatchEvent(new CustomEvent('search-query', { detail: { query: p.name, tab: 'people', personId: p.id } }));
 
@@ -274,7 +280,7 @@ type WlFor = (m: SearchMovie) => { inList: boolean; onAdd: () => void; tv?: bool
 
 /** v246 D3 (Taylor-approved): filter chips over one 7-column grid (titles, then people); filtered on the client. */
 function D3Results({ titles, people, onOpen, onPerson, wlFor }: {
-  titles: SearchMovie[]; people: SearchPerson[]; onOpen: (m: SearchMovie) => void; onPerson: (p: SearchPerson) => void; wlFor: WlFor;
+  titles: SearchMovie[]; people: SearchPerson[]; onOpen: (m: SearchMovie, el?: HTMLElement | null) => void; onPerson: (p: SearchPerson) => void; wlFor: WlFor;
 }) {
   const [f, setF] = useState<D3Filter>('all');
   const movies = titles.filter(m => m.media_type !== 'tv');
@@ -298,7 +304,7 @@ function D3Results({ titles, people, onOpen, onPerson, wlFor }: {
         ))}
       </div>
       <div className="d3-grid" data-testid="r3-grid">
-        {shownTitles.map((m, i) => <PosterCard key={`${m.media_type}-${m.rating_key ?? m.id}-${i}`} item={m} onOpen={() => onOpen(m)} wl={wlFor(m)} />)}
+        {shownTitles.map((m, i) => <PosterCard key={`${m.media_type}-${m.rating_key ?? m.id}-${i}`} item={m} onOpen={(el) => onOpen(m, el)} wl={wlFor(m)} />)}
         {shownPeople.map(p => {
           const img = getProfileUrl(p);
           return (
@@ -314,13 +320,14 @@ function D3Results({ titles, people, onOpen, onPerson, wlFor }: {
   );
 }
 
-function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: () => void; wl?: { inList: boolean; onAdd: () => void; tv?: boolean } }) {
+function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: (el: HTMLElement) => void; wl?: { inList: boolean; onAdd: () => void; tv?: boolean } }) {
   const img = sizedPlexImg(getPosterUrl(item), 272, 408);
   const title = getTitle(item);
   const [broken, setBroken] = useState<string | null>(null);   // the URL that failed
   return (
     <div className="r3-cardw">
-      <button type="button" className="r3-card" data-testid="r3-card" data-owned={item.isOwned ? 'true' : 'false'} onClick={onOpen} aria-label={title}>
+      <button type="button" className="r3-card" data-testid="r3-card" data-owned={item.isOwned ? 'true' : 'false'} onClick={(e) => onOpen(e.currentTarget)}
+        onPointerEnter={() => { void warmResult(item); }} onPointerDown={() => { void warmResult(item); }} onFocus={() => { void warmResult(item); }} aria-label={title}>
         <span className="r3-po">
           {img && broken !== img ? <img key={img} src={img} alt="" loading="lazy" onError={() => setBroken(img)} />
             : <span className="r3-ph" data-testid="r3-placeholder" data-title={title} aria-hidden="true" />}

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import {
+  openResult, warmResult, warmResults,
   performSearch, getPosterUrl, getProfileUrl, getTitle, getYear, TMDB_BUSY_TEXT,
   type SearchMovie, type SearchPerson, type SearchResults,
 } from '@/services/searchApi';
@@ -177,18 +178,26 @@ export function HomeSearchPalette() {
     listRef.current?.querySelector<HTMLElement>(`[data-row="${hi}"]`)?.scrollIntoView?.({ block: 'nearest' });
   }, [hi]);
 
-  const choose = (r: Row) => {
-    close();
+  const choose = (r: Row, el?: HTMLElement | null) => {
     if (r.kind === 'person') {
+      close();
       window.dispatchEvent(new CustomEvent('search-query', { detail: { query: r.item.name, tab: 'people', personId: r.item.id } }));
       return;
     }
     const item = r.item;
     const tmdbId = item.tmdb_id || item.id;
     const opts = { ratingKey: (item.isOwned && item.rating_key) ? item.rating_key : undefined, tmdbId: tmdbId ?? undefined, origin: 'search' as const };
-    if (!opts.ratingKey && !opts.tmdbId) return;
-    if (item.media_type === 'tv') openTv(opts); else openMovie(opts);
+    if (!opts.ratingKey && !opts.tmdbId) { close(); return; }
+    // Same open as a Home card tap (openWhenReady through openResult); the palette closes as the popup opens.
+    void openResult(item, el ?? listRef.current?.querySelector<HTMLElement>(`[data-row="${hi}"]`), () => {
+      close();
+      if (item.media_type === 'tv') openTv(opts); else openMovie(opts);
+    });
   };
+  useEffect(() => {
+    if (!res) return;
+    return warmResults([...res.owned, ...res.unowned]);
+  }, [res]);
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
@@ -271,7 +280,7 @@ export function HomeSearchPalette() {
                   return (
                     <div key={i} id={`lsp-row-${i}`} data-row={i} role="option" aria-selected={i === hi}
                       className="lsp-row" data-hi={i === hi ? 'true' : 'false'}
-                      onMouseEnter={() => setHi(i)} onClick={() => choose(r)}>
+                      onMouseEnter={() => { setHi(i); if (r.kind !== 'person') void warmResult(r.item); }} onClick={(e) => choose(r, e.currentTarget)}>
                       {r.kind === 'person'
                         ? <div className="lsp-pp">{img && <img src={img} alt="" />}</div>
                         : <div className="lsp-th">{img && <img src={img} alt="" />}</div>}

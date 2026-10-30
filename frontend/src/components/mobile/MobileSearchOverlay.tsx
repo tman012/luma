@@ -6,6 +6,7 @@ import {
   batchCheckOwnership,
   getPosterUrl,
   getProfileUrl,
+  openResult,
   warmResult,
   warmResults,
   getTitle,
@@ -19,7 +20,6 @@ import {
 import { mediaKey } from '@/services/ownership';
 import { withBase } from '@/urlHelpers';
 import { sizedPlexImg, tmdbImg } from '@/utils/image';
-import { openWhenReady } from '@/services/modalPrefetch';
 const MAX_SUGGESTIONS = 5;
 
 /** Normalize title for dedup: lowercase, & → and, strip non-alphanum except spaces */
@@ -282,10 +282,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
     if (!opts.ratingKey && !opts.tmdbId) return;
     // The popup opens only once it can show fully composed (the tapped row
     // shows a pressed state meanwhile, 600 ms cap).
-    const kind = item.media_type === 'tv' ? 'tv' : 'movie';
-    void openWhenReady(kind, opts.ratingKey ? Number(opts.ratingKey) : undefined,
-      opts.tmdbId ? Number(opts.tmdbId) : undefined, el ?? null,
-      () => (kind === 'tv' ? openTv(opts) : openMovie(opts)));
+    void openResult(item, el, () => (item.media_type === 'tv' ? openTv(opts) : openMovie(opts)));
     // Don't close search — user may come back from modal
   };
 

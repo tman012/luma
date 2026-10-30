@@ -4,7 +4,10 @@ import { useRef, useState, useMemo, useCallback, useEffect } from 'react';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import {
+  openResult,
   performSearch,
+  warmResult,
+  warmResults,
   getTitle,
   getYear,
   type SearchMovie,
@@ -45,6 +48,11 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modalHost = useModalHost();
+  // Rows on screen are warmed as soon as results land, through Home's 4-at-a-time queue.
+  useEffect(() => {
+    if (!results) return;
+    return warmResults([...results.owned, ...results.unowned]);
+  }, [results]);
 
   // Paint html background to match sheet — prevents safe-area bleed-through
   useEffect(() => {
@@ -115,13 +123,11 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
     debounceRef.current = setTimeout(() => doSearch(value.trim()), 300);
   }, [doSearch]);
 
-  const handleResultClick = useCallback((item: SearchMovie) => {
-    handleClose();
-    setTimeout(() => {
-      const rk = item.rating_key;
+  // Same open as a Home card tap: pressed row, warm up to the 600 ms cap, then the popup; the shelf closes under it.
+  const handleResultClick = useCallback((item: SearchMovie, el?: HTMLElement | null) => {
+    void openResult(item, el, () => {
       const tmdbId = item.tmdb_id || item.id;
-      // Route through the shared modal-navigation util so movie/TV resolution
-      // matches every other surface (no per-page divergence).
+      const rk = item.rating_key;
       openModalForItem(
         modalHost,
         {
@@ -132,7 +138,8 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
         'search',
         { searchQuery: query.trim() || undefined, ...(onPersonSearch ? { onPersonSearch } : {}) },
       );
-    }, 320);
+      handleClose();
+    });
   }, [handleClose, modalHost, query, onPersonSearch]);
 
   // Build deduped lists by type
@@ -319,9 +326,11 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
               key={`result-${i}`}
               type="button"
               data-testid="search-result"
-              onClick={() => {
+              onPointerDown={media ? () => { void warmResult(media); } : undefined}
+              onTouchStart={media ? () => { void warmResult(media); } : undefined}
+              onClick={(e) => {
                 if (!isPerson) {
-                  handleResultClick(media!);
+                  handleResultClick(media!, e.currentTarget);
                 } else if (person?.id) {
                   // Open the person modal instead of silently closing the sheet.
                   handleClose();
