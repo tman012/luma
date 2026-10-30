@@ -4,7 +4,7 @@ process.env.TZ = 'America/New_York';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TvSeriesHero, BANNER_RATIO, PATH_MAX, TITLE_MAX, BOTTOM_MAX, GAP_TITLE, GAP_META, GAP_FIELDS, GAP_SEASONS, PAGE_GAP, HERO_MIN_H, HERO_MIN_H_PHONE, EDIT_INSET, EDIT_INSET_PHONE, CONTROLS_H } from '@/components/library/TvSeriesHero';
+import { TvSeriesHero, BANNER_RATIO, PATH_MAX, TITLE_MAX, BOTTOM_MAX, GAP_TITLE, GAP_META, GAP_FIELDS, GAP_SEASONS, PAGE_GAP, HERO_MIN_H, HERO_MIN_H_PHONE, EDIT_INSET, EDIT_INSET_PHONE, CONTROLS_H, TYPE_DESK, PATH_MAX_DESK, BOTTOM_MAX_DESK } from '@/components/library/TvSeriesHero';
 import { TvSeriesDetail } from '@/components/library/TvSeriesDetail';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 
@@ -81,7 +81,7 @@ describe('v321 series header', () => {
     expect([corner.style.position, corner.style.top, corner.style.right]).toEqual(['absolute', '0px', '0px']);
     expect(corner.contains(screen.getByTestId('e'))).toBe(true);
     const t = screen.getByTestId('tv-detail-title');
-    expect([t.className, t.style.margin, t.style.fontSize]).toEqual(['', '0px auto', '36px']);
+    expect([t.className, t.style.margin, t.style.fontSize]).toEqual(['', '0px auto', '40px']);
     expect([...h.children].map(c => c.getAttribute('data-testid'))).toEqual(['tv-detail-corner', 'tv-detail-title', 'tv-detail-meta', 'tv-detail-text']);
   });
   it('the detail page: a show with a backdrop but no banner renders no art box', async () => {
@@ -135,20 +135,20 @@ describe('v321 series header', () => {
     const row = screen.getByTestId('tv-detail-text');
     expect(screen.getByTestId('tv-detail-corner').contains(screen.getByTestId('e'))).toBe(true);
     expect(t.tagName).toBe('H1'); expect(t.textContent).toBe('VisionQuest');
-    expect(t.style.fontSize).toBe('36px'); expect(t.style.fontWeight).toBe('700'); expect(t.style.fontFamily).toContain('Google Sans Flex');
+    expect(t.style.fontSize).toBe('40px'); expect(t.style.fontWeight).toBe('700'); expect(t.style.fontFamily).toContain('Google Sans Flex');
     expect([t.style.textAlign, t.style.textOverflow, t.style.whiteSpace, t.style.maxWidth]).toEqual(['center', 'ellipsis', 'nowrap', `min(${TITLE_MAX}px, calc(100% - 240px))`]);   // clear of Edit
     expect(t.style.margin).toBe('0px auto');
     expect([...screen.getByTestId('tv-detail-hero').children].map(c => c.getAttribute('data-testid')))
       .toEqual(['tv-detail-corner', 'tv-detail-title', 'tv-detail-meta', 'tv-detail-text']);
-    expect([meta.style.margin, meta.style.fontSize, meta.style.textAlign]).toEqual([`${GAP_META}px auto 0px`, '14px', 'center']);
+    expect([meta.style.margin, meta.style.fontSize, meta.style.textAlign]).toEqual([`${TYPE_DESK.gapMeta}px auto 0px`, '17px', 'center']);
     expect(meta.style.color).toMatch(/rgb\(201, 202, 210\)|#c9cad2/);
     expect(meta.textContent).toBe('2026 \u00b7 Disney+ \u00b7 Returning series');
-    expect([row.style.margin, row.style.alignItems]).toEqual([`${GAP_FIELDS}px auto 0px`, 'center']);
-    expect(row.style.maxWidth).toContain(`${BOTTOM_MAX}px`);
+    expect([row.style.margin, row.style.alignItems]).toEqual([`${TYPE_DESK.gapFields}px auto 0px`, 'center']);
+    expect(row.style.maxWidth).toContain(`${BOTTOM_MAX_DESK}px`);
     expect([GAP_TITLE, GAP_META, GAP_FIELDS, GAP_SEASONS]).toEqual([20, 12, 16, 28]);
     expect(screen.getByTestId('tv-detail-hero').style.marginBottom).toBe(`${GAP_SEASONS - PAGE_GAP}px`);
     const lab = row.querySelector('dt')!, val = row.querySelector('dd')!;
-    expect([lab.style.fontSize, lab.style.textShadow, val.style.fontSize, val.style.textShadow]).toEqual(['11.5px', '', '13px', '']);
+    expect([lab.style.fontSize, lab.style.textShadow, val.style.fontSize, val.style.textShadow]).toEqual(['14px', '', '16px', '']);
   });
   it('with a banner: the h1 stays in the DOM, visually hidden (clip, not display:none); the meta takes its slot at 20px', () => {
     hero();
@@ -159,25 +159,25 @@ describe('v321 series header', () => {
     expect([t.style.position, t.style.width, t.style.height, t.style.overflow, t.style.clip]).toEqual(['absolute', '1px', '1px', 'hidden', 'rect(0px, 0px, 0px, 0px)']);
     expect(t.style.display).not.toBe('none'); expect(t.getAttribute('aria-hidden')).toBeNull();
     const meta = screen.getByTestId('tv-detail-meta');
-    expect(meta.style.margin).toBe(`${GAP_TITLE}px auto 0px`);
-    expect(screen.getByTestId('tv-detail-text').style.margin).toBe(`${GAP_FIELDS}px auto 0px`);
+    expect(meta.style.margin).toBe(`${TYPE_DESK.gapTitle}px auto 0px`);
+    expect(screen.getByTestId('tv-detail-text').style.margin).toBe(`${TYPE_DESK.gapFields}px auto 0px`);
     // a banner that fails: no art, the title shows again with meta 12px under it
     fireEvent.error(screen.getByTestId('tv-detail-art'));
     expect(screen.getByTestId('tv-detail-title').className).toBe('');
-    expect(screen.getByTestId('tv-detail-title').style.fontSize).toBe('36px');
-    expect(screen.getByTestId('tv-detail-meta').style.margin).toBe(`${GAP_META}px auto 0px`);
+    expect(screen.getByTestId('tv-detail-title').style.fontSize).toBe('40px');
+    expect(screen.getByTestId('tv-detail-meta').style.margin).toBe(`${TYPE_DESK.gapMeta}px auto 0px`);
   });
   it('fields row below the card (with Episodes), path ellipsis; Edit keeps its dark fill', async () => {
     render(<TvSeriesDetail seriesId={1} wide onBack={() => {}} say={() => {}} />);
     const facts = await screen.findByTestId('tv-detail-facts');
-    expect(facts.style.justifyContent).toBe('center'); expect(facts.style.gap).toBe('40px');
+    expect(facts.style.justifyContent).toBe('center'); expect(facts.style.gap).toBe('48px');
     expect(screen.getByTestId('tv-detail-fact-episodes').textContent).toBe('Episodes6 of 6');        // in the row
     expect(facts.closest('[data-testid="tv-detail-header"]')).toBeNull();                          // v9: below the card
     expect(screen.queryByTestId('tv-detail-episodes')).toBeNull();                                   // no separate count line
     // below the card: the title, the meta, then the seasons
     const hero = screen.getByTestId('tv-detail-hero');
     expect([...hero.children].map(c => c.getAttribute('data-testid'))).toEqual(['tv-detail-header', 'tv-detail-title', 'tv-detail-meta', 'tv-detail-text']);
-    expect(screen.getByTestId('tv-detail-fact-path').style.maxWidth).toBe(`${PATH_MAX}px`);
+    expect(screen.getByTestId('tv-detail-fact-path').style.maxWidth).toBe(`${PATH_MAX_DESK}px`);
     const pv = screen.getByTestId('tv-detail-fact-path').querySelector('dd')!;
     expect(pv.getAttribute('title')).toBe(pv.textContent);                                   // the full path on hover
     expect(pv.style.textOverflow).toBe('ellipsis');
@@ -256,5 +256,31 @@ describe('r3 (Tester PREP FAIL on e89d15ee): exact ratio and a floor for the con
     hero();
     card = screen.getByTestId('tv-detail-header');
     expect(card.style.minHeight).toBe(`${HERO_MIN_H}px`);
+  });
+});
+
+describe('v325 TYPE-series (Designer): desktop type scale', () => {
+  it('desktop: meta 17/500/24, labels 14/500, values 16/600/22, path capped at 360 with the full path as its tooltip', async () => {
+    render(<TvSeriesDetail seriesId={1} wide onBack={() => {}} say={() => {}} />);
+    const facts = await screen.findByTestId('tv-detail-facts');
+    const meta = screen.getByTestId('tv-detail-meta');
+    expect([meta.style.fontSize, meta.style.fontWeight, meta.style.lineHeight]).toEqual(['17px', '500', '24px']);
+    for (const dt of facts.querySelectorAll('dt')) expect([(dt as HTMLElement).style.fontSize, (dt as HTMLElement).style.fontWeight]).toEqual(['14px', '500']);
+    for (const dd of facts.querySelectorAll('dd')) {
+      const s = (dd as HTMLElement).style;
+      expect([s.fontSize, s.fontWeight, s.lineHeight]).toEqual(['16px', '600', '22px']);
+      expect(dd.getAttribute('title')).toBe(dd.textContent);
+    }
+    const path = screen.getByTestId('tv-detail-fact-path');
+    expect(path.style.maxWidth).toBe(`${PATH_MAX_DESK}px`);
+    expect((path.querySelector('dd') as HTMLElement).style.textOverflow).toBe('ellipsis');
+    expect(BOTTOM_MAX_DESK).toBe(900);
+  });
+  it('phone: only the facts change (labels 14, values 16)', async () => {
+    render(<TvSeriesDetail seriesId={1} wide={false} onBack={() => {}} say={() => {}} />);
+    const facts = await screen.findByTestId('tv-detail-facts');
+    expect((facts.querySelector('dt') as HTMLElement).style.fontSize).toBe('14px');
+    expect((facts.querySelector('dd') as HTMLElement).style.fontSize).toBe('16px');
+    expect(screen.getByTestId('tv-detail-meta').style.fontSize).toBe('14px');
   });
 });

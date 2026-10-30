@@ -11,9 +11,12 @@ import { tvdbImg } from '@/utils/image';
 
 /** v5: a long path ends in an ellipsis */
 export const PATH_MAX = 260;
+/** TYPE-series (v325): the desktop path cap */
+export const PATH_MAX_DESK = 360;
 export const HERO_BG = '#111318';
 /** the fields stack's cap (v9) */
 export const BOTTOM_MAX = 760;
+export const BOTTOM_MAX_DESK = 900;
 /** the title's cap (v9) */
 export const TITLE_MAX = 900;
 /** Designer v10 spacing below the card: card to title, title to meta, meta to the fields, fields to the seasons */
@@ -21,6 +24,28 @@ export const GAP_TITLE = 20;
 export const GAP_META = 12;
 export const GAP_FIELDS = 16;
 export const GAP_SEASONS = 28;
+/** TYPE-series (Designer, v325, Taylor: "make all of the text larger"): the desktop (wide) type scale and spacing,
+ * shared by TvSeriesHero and TvSeriesDetail. Colors unchanged; phone keeps its sizes except the fact dt/dd. */
+export const TYPE_DESK = {
+  title: { fontSize: 40, fontWeight: 700, lineHeight: '44px', letterSpacing: -0.5 },
+  meta: { fontSize: 17, fontWeight: 500, lineHeight: '24px' },
+  label: { fontSize: 14, fontWeight: 500, lineHeight: '18px', marginBottom: 4 },
+  value: { fontSize: 16, fontWeight: 600, lineHeight: '22px' },
+  seasonName: { fontSize: 20, fontWeight: 700, lineHeight: '26px' },
+  seasonCount: { fontSize: 15, fontWeight: 500, lineHeight: '20px' },
+  seasonSize: { fontSize: 15, fontWeight: 400, lineHeight: '20px' },
+  epNumber: { fontSize: 16, fontWeight: 500, lineHeight: '22px' },
+  epTitle: { fontSize: 17, fontWeight: 600, lineHeight: '24px' },
+  epSub: { fontSize: 14, fontWeight: 400, lineHeight: '18px' },
+  air: { fontSize: 16, fontWeight: 400, lineHeight: '22px' },
+  status: { fontSize: 16, fontWeight: 600, lineHeight: '22px' },
+  empty: { fontSize: 16, fontWeight: 400, lineHeight: '22px' },
+  edit: { fontSize: 15, fontWeight: 600, padding: '10px 20px', minHeight: 40 },
+  gapTitle: 24, gapMeta: 14, gapFields: 20, factsGap: 48, seasonHeadH: 64, seasonBtnGap: 12, chevron: 18, rowH: 60,
+  rowColumns: '28px 40px minmax(0, 1fr) 210px 112px 36px 36px', subGap: 4,
+} as const;
+/** TYPE-series: the phone fact sizes (labels 14, values 16); the 2x2 grid's rowGap 14 */
+export const TYPE_PHONE_FACTS = { label: { fontSize: 14, lineHeight: '18px' }, value: { fontSize: 16, lineHeight: '22px' }, rowGap: 14 } as const;
 /** TvSeriesDetail's column gap (the hero adds the rest of GAP_SEASONS) */
 export const PAGE_GAP = 16;
 /** the visually-hidden (screen reader only) clip pattern; never display:none */
@@ -73,14 +98,15 @@ export function TvSeriesHero({ title, meta, facts, bannerUrl, phone, edit, flag,
     setShown(true);
   };
   const fade = animate ? 'opacity var(--motion-fade-dur, 240ms) var(--motion-fade-ease, cubic-bezier(0.2,0,0,1))' : 'none';
-  const lab = { color: '#aeb0b8', fontSize: 11.5, lineHeight: '14px', marginBottom: 3, whiteSpace: 'nowrap' as const };
-  const val = { color: '#fff', fontSize: 13, lineHeight: '16px', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' };
+  const D = TYPE_DESK;
+  const lab = { color: '#aeb0b8', marginBottom: phone ? 3 : 4, whiteSpace: 'nowrap' as const, ...(phone ? TYPE_PHONE_FACTS.label : D.label) };
+  const val = { color: '#fff', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis', ...(phone ? TYPE_PHONE_FACTS.value : D.value) };
   const fields = (
     <dl data-testid="tv-detail-facts" style={phone
-      ? { margin: 0, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', columnGap: 24, rowGap: 12, width: '100%' }
-      : { margin: 0, display: 'flex', justifyContent: 'center', gap: 40, textAlign: 'center', maxWidth: '100%' }}>
+      ? { margin: 0, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', columnGap: 24, rowGap: TYPE_PHONE_FACTS.rowGap, width: '100%' }
+      : { margin: 0, display: 'flex', justifyContent: 'center', gap: D.factsGap, textAlign: 'center', maxWidth: '100%' }}>
       {facts.map(([k, v, id]) => (
-        <div key={k} data-testid={`tv-detail-fact-${id}`} style={{ minWidth: 0, flex: 'none', textAlign: 'center', maxWidth: id === 'path' && !phone ? PATH_MAX : undefined }}>
+        <div key={k} data-testid={`tv-detail-fact-${id}`} style={{ minWidth: 0, flex: 'none', textAlign: 'center', maxWidth: id === 'path' && !phone ? PATH_MAX_DESK : undefined }}>
           <dt style={lab}>{k}</dt>
           <dd style={{ ...val, margin: 0, fontVariantNumeric: 'tabular-nums' }} title={v}>{v}</dd>
         </div>
@@ -120,15 +146,15 @@ export function TvSeriesHero({ title, meta, facts, bannerUrl, phone, edit, flag,
       {/* v321 (Taylor via PM, 12:09 AM): with a banner the typed title is visually hidden (the banner carries the name)
           but stays the page's h1 for screen readers; the meta takes its slot */}
       <h1 data-testid="tv-detail-title" className={useBanner ? 'sr-only' : undefined} data-hidden={useBanner || undefined}
-        style={useBanner ? SR_ONLY : { margin: `${src ? GAP_TITLE : 0}px auto 0`, width: 'fit-content', maxWidth: src ? `min(${TITLE_MAX}px, 100%)` : `min(${TITLE_MAX}px, calc(100% - ${phone ? 112 : 240}px))`, textAlign: 'center',
-        fontFamily: HERO_FONT, fontSize: phone ? 28 : 36, fontWeight: 700, lineHeight: 1.05, letterSpacing: -0.4, color: '#fff',
+        style={useBanner ? SR_ONLY : { margin: `${src ? (phone ? GAP_TITLE : D.gapTitle) : 0}px auto 0`, width: 'fit-content', maxWidth: src ? `min(${TITLE_MAX}px, 100%)` : `min(${TITLE_MAX}px, calc(100% - ${phone ? 112 : 240}px))`, textAlign: 'center',
+        fontFamily: HERO_FONT, ...(phone ? { fontSize: 28, fontWeight: 700, lineHeight: 1.05, letterSpacing: -0.4 } : D.title), color: '#fff',
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</h1>
       {meta.length > 0 && (
-        <div data-testid="tv-detail-meta" style={{ margin: `${useBanner ? GAP_TITLE : GAP_META}px auto 0`, color: '#c9cad2', fontSize: 14, lineHeight: '18px', textAlign: 'center',
+        <div data-testid="tv-detail-meta" style={{ margin: `${phone ? (useBanner ? GAP_TITLE : GAP_META) : (useBanner ? D.gapTitle : D.gapMeta)}px auto 0`, color: '#c9cad2', ...(phone ? { fontSize: 14, lineHeight: '18px' } : D.meta), textAlign: 'center',
           width: 'fit-content', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{meta.join(' \u00b7 ')}</div>
       )}
-      <div data-testid="tv-detail-text" style={{ margin: `${GAP_FIELDS}px auto 0`, display: 'flex', flexDirection: 'column', alignItems: 'center',
-        width: phone ? '100%' : undefined, maxWidth: `min(${BOTTOM_MAX}px, 100%)`, minWidth: 0 }}>
+      <div data-testid="tv-detail-text" style={{ margin: `${phone ? GAP_FIELDS : D.gapFields}px auto 0`, display: 'flex', flexDirection: 'column', alignItems: 'center',
+        width: phone ? '100%' : undefined, maxWidth: `min(${phone ? BOTTOM_MAX : BOTTOM_MAX_DESK}px, 100%)`, minWidth: 0 }}>
         {fields}
       </div>
     </div>

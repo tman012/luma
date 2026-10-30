@@ -8,7 +8,7 @@
  * has a file is still refused, and monitor switches never search. */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
-import { TvSeriesHero, heroEditBtn } from './TvSeriesHero';
+import { TYPE_DESK, TvSeriesHero, heroEditBtn } from './TvSeriesHero';
 import { EditSeriesModal, Modal, glassBtn, primaryBtn } from './TvEdit';
 import { MonitorFlag, monitorFlagCss } from './TvMonitorFlag';
 
@@ -187,7 +187,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
       )}
 
       <TvSeriesHero title={view.title} meta={meta} facts={facts} bannerUrl={view.banner_url} phone={!wide} onArt={setOnArt}
-        edit={<button type="button" className="lp-focus" data-testid="tv-detail-edit" onClick={() => setEditing(true)} style={heroEditBtn}>Edit</button>}
+        edit={<button type="button" className="lp-focus" data-testid="tv-detail-edit" onClick={() => setEditing(true)} style={wide ? { ...heroEditBtn, ...TYPE_DESK.edit } : heroEditBtn}>Edit</button>}
         flag={(
           <MonitorFlag on={view.monitored} title={view.title} testid="tv-detail-monitored" size={POSTER_FLAG} glyph={POSTER_GLYPH}
             onChange={on => void monitorShow(on)}
@@ -203,19 +203,19 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
         return (
           <section key={s.season} data-testid="tv-detail-season" data-season={s.season} data-open={isOpen || undefined}
             style={{ borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)', background: GLASS, overflow: 'hidden' }}>
-            <div className="tvd-season-head" style={{ display: 'flex', alignItems: 'center', gap: wide ? 12 : 8, minHeight: 56, padding: wide ? '0 12px 0 16px' : '0 8px 0 12px' }}>
+            <div className="tvd-season-head" style={{ display: 'flex', alignItems: 'center', gap: wide ? 12 : 8, minHeight: wide ? TYPE_DESK.seasonHeadH : 56, padding: wide ? '0 12px 0 16px' : '0 8px 0 12px' }}>
               <MonitorFlag on={s.monitored} title={label} testid="tv-detail-season-monitored" onChange={v => void monitorSeason(s.season, v)} />
               <button type="button" className="lp-focus" data-testid="tv-detail-season-toggle" aria-expanded={isOpen}
                 onClick={() => setOpen(o => { const n = new Set(o || opened || []); if (n.has(s.season)) n.delete(s.season); else n.add(s.season); return n; })}
-                style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, height: 44, padding: 0, border: 'none', background: 'none',
+                style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: wide ? TYPE_DESK.seasonBtnGap : 10, height: 44, padding: 0, border: 'none', background: 'none',
                   cursor: 'pointer', fontFamily: FONT, textAlign: 'left', color: W95 }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={W50} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+                <svg width={wide ? TYPE_DESK.chevron : 16} height={wide ? TYPE_DESK.chevron : 16} viewBox="0 0 24 24" fill="none" stroke={W50} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
                   style={{ flex: 'none', transform: isOpen ? 'rotate(90deg)' : undefined, transition: 'transform 150ms' }}><path d="M9 6l6 6-6 6" /></svg>
-                <span style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap' }}>{label}</span>
-                <span data-testid="tv-detail-season-count" style={{ fontSize: 13, color: s.total && s.have >= s.total ? W70 : W50, whiteSpace: 'nowrap' }}>
+                <span style={{ ...(wide ? TYPE_DESK.seasonName : { fontSize: 16, fontWeight: 600 }), whiteSpace: 'nowrap' }}>{label}</span>
+                <span data-testid="tv-detail-season-count" style={{ ...(wide ? TYPE_DESK.seasonCount : { fontSize: 13 }), color: s.total && s.have >= s.total ? W70 : W50, whiteSpace: 'nowrap' }}>
                   {`${s.have} of ${s.total}`}
                 </span>
-                {wide && s.size > 0 && <span style={{ fontSize: 12, color: W50, whiteSpace: 'nowrap' }}>{bytes(s.size)}</span>}
+                {wide && s.size > 0 && <span style={{ ...TYPE_DESK.seasonSize, color: W50, whiteSpace: 'nowrap' }}>{bytes(s.size)}</span>}
               </button>
               <IconBtn kind="search" label={`Search ${label}`} busy={busy.has(`s${s.season}`)} testid="tv-detail-season-search"
                 onClick={() => void search({ season: s.season }, label)} />
@@ -231,7 +231,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
                     onSearch={() => void search({ episode_id: e.id }, code(e.season, e.episode))}
                     onInteractive={() => setInteractive({ target: { episode_id: e.id }, label: `${view.title} \u00b7 ${code(e.season, e.episode)}` })} />
                 ))}
-                {!list.length && <div style={{ padding: '12px 16px', fontSize: 14, color: W50, borderTop: LINE }}>No episodes</div>}
+                {!list.length && <div style={{ padding: '12px 16px', ...(wide ? TYPE_DESK.empty : { fontSize: 14 }), color: W50, borderTop: LINE }}>No episodes</div>}
               </div>
             )}
           </section>
@@ -335,25 +335,25 @@ function EpisodeRow({ e, wide, phone = false, onMenu, focus, busy, onMonitor, on
   return (
     <div role="listitem" className="tvd-row" data-testid="tv-detail-episode" data-episode-id={e.id} data-state={e.state}
       data-monitored={e.monitored ? 'true' : 'false'} data-focus={focus || undefined}
-      style={{ position: 'relative', display: 'grid', alignItems: 'center', columnGap: wide ? 12 : 8, minHeight: wide ? 52 : 64, borderTop: LINE,
+      style={{ position: 'relative', display: 'grid', alignItems: 'center', columnGap: wide ? 12 : 8, minHeight: wide ? TYPE_DESK.rowH : 64, borderTop: LINE,
         padding: wide ? '0 12px 0 16px' : '8px 8px 8px 12px', boxSizing: 'border-box',
-        gridTemplateColumns: wide ? '28px 32px minmax(0, 1fr) 190px 100px 36px 36px' : '28px 24px minmax(0, 1fr) 36px 36px',
+        gridTemplateColumns: wide ? TYPE_DESK.rowColumns : '28px 24px minmax(0, 1fr) 36px 36px',
         background: focus ? 'rgba(255,255,255,0.05)' : undefined }}>
       <span data-testid="tv-detail-edge" aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: EDGE_W, background: color }} />
       <MonitorFlag on={e.monitored} title={tag} testid="tv-detail-episode-monitored" onChange={onMonitor} />
-      <span style={{ fontSize: 13, color: W50, fontVariantNumeric: 'tabular-nums', opacity: dim }}>{e.episode}</span>
-      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, opacity: dim }}>
-        <span data-testid="tv-detail-episode-title" style={{ fontSize: 14, fontWeight: 500, color: W95, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
+      <span style={{ ...(wide ? TYPE_DESK.epNumber : { fontSize: 13 }), color: W50, fontVariantNumeric: 'tabular-nums', opacity: dim }}>{e.episode}</span>
+      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: wide ? TYPE_DESK.subGap : 2, opacity: dim }}>
+        <span data-testid="tv-detail-episode-title" style={{ ...(wide ? TYPE_DESK.epTitle : { fontSize: 14, fontWeight: 500 }), color: W95, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
         {!wide && (
           <span style={{ fontSize: 12, color: W50, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             <span data-testid="tv-detail-status" style={{ color, fontWeight: 600 }}>{word}</span>
             {air && <span data-testid="tv-detail-air">{` \u00b7 ${air}`}</span>}
           </span>
         )}
-        {wide && e.quality && <span style={{ fontSize: 12, color: W50 }}>{e.quality}{e.size ? ` \u00b7 ${bytes(e.size)}` : ''}</span>}
+        {wide && e.quality && <span style={{ ...TYPE_DESK.epSub, color: W50 }}>{e.quality}{e.size ? ` \u00b7 ${bytes(e.size)}` : ''}</span>}
       </span>
-      {wide && <span data-testid="tv-detail-air" style={{ fontSize: 13, color: W70, opacity: dim, whiteSpace: 'nowrap' }}>{air}</span>}
-      {wide && <span data-testid="tv-detail-status" style={{ fontSize: 13, fontWeight: 600, color, opacity: dim, whiteSpace: 'nowrap' }}>{word}</span>}
+      {wide && <span data-testid="tv-detail-air" style={{ ...TYPE_DESK.air, color: W70, opacity: dim, whiteSpace: 'nowrap' }}>{air}</span>}
+      {wide && <span data-testid="tv-detail-status" style={{ ...TYPE_DESK.status, color, opacity: dim, whiteSpace: 'nowrap' }}>{word}</span>}
       <IconBtn kind="search" label={`Search ${tag}`} busy={busy} onClick={onSearch} testid="tv-detail-episode-search" />
       <IconBtn kind="interactive" label={`Interactive search ${tag}`} onClick={onInteractive} testid="tv-detail-episode-interactive" />
     </div>
