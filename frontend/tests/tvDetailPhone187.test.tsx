@@ -69,6 +69,6 @@ describe('v197 quality chip (Q2)', () => {
     rerender(<QualityChip e={{ downloaded: false, quality: null }} />);
     expect(screen.queryByTestId('tv-quality-chip')).toBeNull();
     rerender(<QualityChip e={{ downloaded: true, quality: null }} />);
-    expect(screen.getByTestId('tv-quality-chip').textContent).toBe('Downloaded');   // v211: unknown quality
+    expect(screen.getByTestId('tv-quality-chip').textContent).toBe('In Library');   // v211: unknown quality
   });
 });

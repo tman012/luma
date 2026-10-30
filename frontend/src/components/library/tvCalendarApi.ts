@@ -236,12 +236,12 @@ export function agendaLabel(d: Day, today: Day): string {
 /** "Oct 20" (a row's air date). */
 export const shortDate = (d: Day) => { const p = parts(d); return `${MON[p.m]} ${p.d}`; };
 
-/** Downloaded: a file is linked. Missing: aired before today, no file. Upcoming: today or later. */
+/** In Library (v325; was Downloaded): a file is linked. Missing: aired before today, no file. Upcoming: today or later. */
 export function episodeState(e: { downloaded: boolean; air_date: string | null }, today: Day): EpisodeState {
   if (e.downloaded) return 'downloaded';
   return e.air_date && e.air_date < today ? 'missing' : 'unaired';
 }
-export const STATE_WORD: Record<EpisodeState, string> = { downloaded: 'Downloaded', missing: 'Missing', unaired: 'Unaired' };
+export const STATE_WORD: Record<EpisodeState, string> = { downloaded: 'In Library', missing: 'Missing', unaired: 'Unaired' };
 /** The card edge colors, as CSS vars (Designer tunes them in one place; tvCalendarCss sets the defaults). */
 export const STATE_VAR: Record<EpisodeState, string> = {
   downloaded: '--tv-state-downloaded', missing: '--tv-state-missing', unaired: '--tv-state-unaired',

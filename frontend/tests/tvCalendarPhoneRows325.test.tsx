@@ -19,7 +19,7 @@ describe('v325 phone calendar rows', () => {
   it('no quality or Downloaded chip, no check mark', () => {
     const { container } = draw();
     expect(screen.queryAllByTestId('tv-quality-chip')).toHaveLength(0);
-    expect(container.textContent).not.toMatch(/1080p|Downloaded|\u2713|\u2714/);
+    expect(container.textContent).not.toMatch(/1080p|Downloaded|In Library|\u2713|\u2714/);
     expect(container.querySelector('[data-testid*="check"]')).toBeNull();
   });
   it('v322 (option C): each card has one status dot at its top right: green when got it, amber when missing; no left edge', () => {

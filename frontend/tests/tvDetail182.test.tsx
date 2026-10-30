@@ -112,7 +112,7 @@ describe('Series detail page', () => {
     const e21 = rows.find(r => r.getAttribute('data-episode-id') === '21')!;
     expect(within(e21).getByTestId('tv-detail-episode-title').textContent).toBe('Hello, Ms. Cobel');
     expect(within(e21).getByTestId('tv-detail-air').textContent).toBe('Jan 16, 2025, 9:00 PM');
-    expect(rows.map(r => within(r).getByTestId('tv-detail-status').textContent)).toEqual(['Unaired', 'Downloading', 'Downloaded']);
+    expect(rows.map(r => within(r).getByTestId('tv-detail-status').textContent)).toEqual(['Unaired', 'Downloading', 'In Library']);
     const edge = within(e21).getByTestId('tv-detail-edge');
     expect([edge.style.width, edge.style.background]).toEqual(['4px', 'var(--tv-state-downloaded, #22c55e)']);
     expect(within(rows[1]!).getByTestId('tv-detail-edge').style.background).toBe('var(--tv-state-downloading, #3b82f6)');
@@ -207,7 +207,7 @@ describe('Series detail page', () => {
   it('phone: the same page in one column (status and air date under the title)', async () => {
     page({ wide: false });
     const rows = await screen.findAllByTestId('tv-detail-episode');
-    expect(within(rows[2]!).getByTestId('tv-detail-status').textContent).toBe('Downloaded');
+    expect(within(rows[2]!).getByTestId('tv-detail-status').textContent).toBe('In Library');
     expect(within(rows[2]!).getByTestId('tv-detail-air').textContent).toBe(' \u00b7 Jan 16, 2025, 9:00 PM');
     expect(screen.getByTestId('tv-detail-edit')).toBeTruthy();
   });

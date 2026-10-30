@@ -101,7 +101,7 @@ describe('Designer D week cards (v321)', () => {
     expect(within(card).queryByTestId('tv-poster-initial')).toBeNull();
     expect(within(card).queryByTestId('tv-check')).toBeNull();
     expect(within(card).queryByTestId('tv-quality-chip')).toBeNull();
-    expect(card.textContent).not.toMatch(/Downloaded|1080p|WEB/);
+    expect(card.textContent).not.toMatch(/Downloaded|In Library|1080p|WEB/);
     const air = within(card).getByTestId('tv-air');
     expect(air.style.textAlign).toBe('center');
     expect(card.querySelector('[data-testid="tv-air"] ~ [data-testid="tv-card-body"]')).toBeTruthy();   // above the body
@@ -238,7 +238,7 @@ describe('Designer D WeekHero (v321)', () => {
     render(<WeekHero eps={eps} week={'2026-10-11' as Day} today={'2026-10-17' as Day} />);
     const strip = screen.getByTestId('tv-cal-this-week');
     expect(strip.textContent).toContain('This week');
-    expect(strip.textContent).not.toMatch(/Downloaded|Missing|Unaired|Upcoming/i);
+    expect(strip.textContent).not.toMatch(/Downloaded|In Library|Missing|Unaired|Upcoming/i);
     expect([...strip.querySelectorAll('[data-testid=tv-cal-count]')].map(c => c.textContent)).toEqual(['1', '1', '1']);
     expect(screen.getByTestId('tv-cal-today-pill').textContent).toBe('Sat 17 · Today');
     expect(weekCounts(eps, '2026-10-17' as Day)).toEqual({ downloaded: 1, missing: 1, unaired: 1 });
@@ -263,14 +263,14 @@ describe('Calendar', () => {
     expect(screen.getAllByTestId('tv-grid-day').map(d => d.firstElementChild!.textContent)).toEqual(
       ['Sun 11', 'Mon 12', 'Tue 13', 'Wed 14', 'Thu 15', 'Fri 16', 'Sat 17']);
     expect(rows.map(r => r.getAttribute('aria-label'))).toEqual([
-      'Downloaded: Severance S02E01', 'Missing: Severance S02E02', 'Unaired: Severance S02E03']);
+      'In Library: Severance S02E01', 'Missing: Severance S02E02', 'Unaired: Severance S02E03']);
     // v321 Designer D: 3px status stripe on every card
     expect(rows.every(r => within(r).queryByTestId('tv-stripe'))).toBe(true);
     expect(rows.every(r => within(r).queryByTestId('tv-check'))).toBe(false);  // fixtures have no airstamp
     // v325 (Taylor): no state words and no quality chip; the stripe is the only got-it indicator
     expect(rows.some(r => /Missing|Unaired/.test(r.textContent || ''))).toBe(false);
     expect(rows.map(r => within(r).queryByTestId('tv-quality-chip')?.textContent ?? null)).toEqual([null, null, null]);
-    expect(rows[0]!.textContent).not.toContain('Downloaded');
+    expect(rows[0]!.textContent).not.toContain('In Library');
     expect(rows[0]!.textContent).toContain('Episode 1');
     const name = within(rows[0]!).getByTestId('tv-card-show');                     // 13/600, one line
     expect([name.style.fontSize, name.style.fontWeight, name.style.whiteSpace]).toEqual(['13px', '600', 'nowrap']);
@@ -589,7 +589,7 @@ describe('tabs', () => {
       .map(f => readFileSync(resolve(__dirname, '../src/components/library/' + f), 'utf8')).join('\n');
     expect(src).not.toMatch(/hint=|note=|helper=/i);
     expect(src).not.toMatch(/colour|favourite|catalogue|cancelled/i);
-    for (const label of ['Search shows', 'No episodes this week', 'Unaired', 'Downloaded', 'Missing', 'In library', 'Add to',
+    for (const label of ['Search shows', 'No episodes this week', 'Unaired', 'In Library', 'Missing', 'In library', 'Add to',
       "Couldn't add show", 'No results', 'Wrong show?', 'No TV libraries', 'Choose libraries', 'Today', 'Tomorrow'])
       expect(src).toContain(label);
   });
