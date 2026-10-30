@@ -1,7 +1,7 @@
 /** Settings > Connectors (owner only). Settings premium pass: one grouped list of the real
- * connectors only — Media server (Plex, moved here from its own section), Downloads (qBittorrent),
+ * connectors only — Media server (Plex, moved here from its own section), Download Client (qBittorrent),
  * Home (Home Assistant), Metadata (TMDB, OMDb, TheTVDB, Trakt) — each with its vendor logo
- * (static/images/connectors, same origin) and Set up / Not set up (saved config, not a live check). A row opens its form in a modal.
+ * (static/images/connectors, same origin) and Connected / Not set up (saved config, not a live check). A row opens its form in a modal.
  * Keys stay on the server; the browser only learns whether one is saved and its last 4
  * (never any of the qBittorrent password). Web Push lives under Settings > Notifications. */
 import { useCallback, useEffect, useState } from 'react';
@@ -43,14 +43,14 @@ export type ConnectorId = 'plex' | 'qbittorrent' | 'homeassistant' | Id;
 /** The real connectors, in list order (Designer round 2). Nothing else is shown here. */
 export const CONNECTORS: { id: ConnectorId; title: string; group: string; logo?: string; tile: string; pad: number }[] = [
   { id: 'plex', title: 'Plex', group: 'Media server', logo: 'plex.svg', tile: '#1f1f1f', pad: 9 },
-  { id: 'qbittorrent', title: 'qBittorrent', group: 'Downloads', logo: 'qbittorrent.svg', tile: '#ffffff', pad: 5 },
-  { id: 'homeassistant', title: 'Home Assistant', group: 'Home', logo: 'homeassistant.svg', tile: '#18BCF2', pad: 8 },
+  { id: 'qbittorrent', title: 'qBittorrent', group: 'Download Client', logo: 'qbittorrent.svg', tile: '#ffffff', pad: 5 },
+  { id: 'homeassistant', title: 'Home Assistant', group: 'Smart Home', logo: 'homeassistant.svg', tile: '#18BCF2', pad: 8 },
   { id: 'tmdb', title: 'TMDB', group: 'Metadata', logo: 'tmdb.svg', tile: '#0d253f', pad: 7 },
   { id: 'omdb', title: 'OMDb', group: 'Metadata', tile: '#f5c518', pad: 0 },
   { id: 'tvdb', title: 'TheTVDB', group: 'Metadata', logo: 'tvdb.svg', tile: '#0b1b24', pad: 5 },
   { id: 'trakt', title: 'Trakt', group: 'Metadata', logo: 'trakt.svg', tile: '#ED1C24', pad: 8 },
 ];
-const CONNECTOR_GROUPS = ['Media server', 'Downloads', 'Home', 'Metadata'];
+const CONNECTOR_GROUPS = ['Media server', 'Download Client', 'Smart Home', 'Metadata'];
 
 type Status = { on: boolean; sub: string };
 const hostOf = (u: string) => { try { return new URL(u).hostname; } catch { return ''; } };
@@ -124,7 +124,7 @@ export function ConnectorsSettings({ initial, onInitialClosed }: { initial?: Con
                     {st.sub && <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{st.sub}</span>}
                   </span>
                   <span data-testid={`connector-status-${c.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'rgba(255,255,255,0.7)' }}>
-                    <span style={dot(st.on)} aria-hidden="true" />{st.on ? 'Set up' : 'Not set up'}
+                    <span style={dot(st.on)} aria-hidden="true" />{st.on ? 'Connected' : 'Not set up'}
                   </span>
                   <span aria-hidden="true" style={{ color: 'rgba(255,255,255,0.4)', fontSize: 18, marginLeft: 4 }}>›</span>
                 </button>
@@ -181,7 +181,7 @@ function ConnectorModal({ id, title, on, onClose, children }: { id: ConnectorId;
           <span style={{ fontSize: 15 }}>Status</span>
           <span data-testid="connector-modal-status" style={{ height: 28, padding: '0 12px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 600,
             background: on ? 'rgba(34,197,94,0.14)' : 'rgba(255,255,255,0.08)', color: on ? '#86efac' : 'rgba(255,255,255,0.6)' }}>
-            <span style={dot(on)} aria-hidden="true" />{on ? 'Set up' : 'Not set up'}
+            <span style={dot(on)} aria-hidden="true" />{on ? 'Connected' : 'Not set up'}
           </span>
         </div>
         {children}

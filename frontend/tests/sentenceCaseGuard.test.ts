@@ -92,6 +92,8 @@ const prodShelf = (h: string) => /^components\/search\/SearchShelf\.tsx:\d+: "TV
  * and only these strings ('Nothing Playing', 'Friends & Family', 'OK / Select', 'Play / Pause', the rocker labels' uppercase). */
 /** Premium pass: the Network debugging steps quote the TV's own menu names (Android TV Settings). */
 const tvMenuTerms = (h: string) => /^components\/rooms\/RoomsSettings\.tsx:\d+: "(?:Device Preferences|Turn on Network debugging)" \(\w+\)$/.test(h);
+/** v319 Taylor (11:00 PM): Connectors section headers are proper names. */
+const connectorGroups = (h: string) => /^components\/home\/ConnectorsSettings\.tsx:\d+: "(?:Download Client|Smart Home)" \(\w+\)$/.test(h);
 const prodRooms = (h: string) => /^components\/rooms\/(RoomsSheet|FullScreenRemote)\.tsx:\d+: (?:"(?:Nothing Playing|Friends & Family|OK \/ Select|Play \/ Pause)" \(\w+\)|.*text-\[9px\] font-semibold uppercase tracking-\[0\.15em\].*)$/.test(h);
 /** v269 PM: ActivityFeed is prod 1b4ea74 verbatim (section + origin + tracker uppercase). */
 const prodActivity = (h: string) => /^components\/activity\/ActivityFeed\.tsx:\d+: .*\buppercase\b/.test(h);
@@ -202,7 +204,7 @@ describe('neutral glass chips', () => {
   });
 
   it('v174: no Title Case labels anywhere in the app', () => {
-    expect(titleCaseHits().filter((h) => !prodShelf(h) && !prodRooms(h) && !tvMenuTerms(h))).toEqual([]);
+    expect(titleCaseHits().filter((h) => !prodShelf(h) && !prodRooms(h) && !tvMenuTerms(h) && !connectorGroups(h))).toEqual([]);
   });
 
   it('v174: the Title Case check catches new labels and keeps proper nouns and data', () => {
