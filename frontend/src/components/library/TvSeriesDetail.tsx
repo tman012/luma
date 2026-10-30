@@ -91,6 +91,8 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState(false);
   const phoneQ = usePhone();
+  // r2: Edit lives on the banner when one is shown; the narrow layouts keep their own Edit only without art
+  const [onArt, setOnArt] = useState(false);
   const [menu, setMenu] = useState<number | null>(null);
   const [interactive, setInteractive] = useState<{ target: SearchTarget; label: string; epTitle?: string } | null>(null);
   const live = useRef(true);
@@ -175,7 +177,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
             style={{ ...BACK, color: '#3b82f6' }}>
             <BackChevron />Series
           </button>
-          <button type="button" className="lp-focus tve-glass" data-testid="tv-detail-edit" onClick={() => setEditing(true)} style={{ ...glassBtn, height: 44 }}>Edit</button>
+          {!onArt && <button type="button" className="lp-focus tve-glass" data-testid="tv-detail-edit" onClick={() => setEditing(true)} style={{ ...glassBtn, height: 44 }}>Edit</button>}
         </div>
       ) : (
       <button type="button" className="lp-focus tvd-back" data-testid="tv-detail-back" onClick={onBack}
@@ -184,7 +186,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
         </button>
       )}
 
-      <TvSeriesHero title={view.title} meta={meta} facts={facts} bannerUrl={view.banner_url} phone={!wide}
+      <TvSeriesHero title={view.title} meta={meta} facts={facts} bannerUrl={view.banner_url} phone={!wide} onArt={setOnArt}
         edit={<button type="button" className="lp-focus" data-testid="tv-detail-edit" onClick={() => setEditing(true)} style={heroEditBtn}>Edit</button>}
         flag={(
           <MonitorFlag on={view.monitored} title={view.title} testid="tv-detail-monitored" size={POSTER_FLAG} glyph={POSTER_GLYPH}
@@ -192,7 +194,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
             style={{ borderRadius: 10, background: 'rgba(17,19,24,.72)', backdropFilter: 'blur(12px)',
               WebkitBackdropFilter: 'blur(12px)', color: view.monitored ? '#fff' : 'rgba(255,255,255,0.85)', boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }} />
         )} />
-      {!wide && !phone && <HeaderActions onEdit={() => setEditing(true)} />}
+      {!wide && !phone && !onArt && <HeaderActions onEdit={() => setEditing(true)} />}
 
       {view.seasons.map(s => {
         const list = eps.filter(e => e.season === s.season).sort((a, b) => b.episode - a.episode);
