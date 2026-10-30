@@ -539,6 +539,37 @@ def _no_import(h: str, name: Optional[str]) -> Optional[str]:
 
 
 
+NOTIFY_KEY = 'tvnotify:'
+NOTIFY_WINDOW = 7 * 86400
+_notify_lock = threading.Lock()
+
+
+def _first_notify(res: Dict[str, Any], now: Optional[float] = None) -> bool:
+    """RC-MOBLAND-DOUBLEGRAB: True (and mark it) the first time these episodes are announced for this
+    library file; False when every episode was already announced for the same file within NOTIFY_WINDOW,
+    so a second torrent of the same episode never sends a second 'added' push."""
+    now = time.time() if now is None else now
+    eids = [int(e) for e in (res.get('episode_ids') or [])]
+    if not eids:
+        return True
+    files = res.get('files') or []
+    dest = str((files[0] or {}).get('path') or '') if files and isinstance(files[0], dict) else ''
+    with _notify_lock:
+        seen = True
+        for e in eids:
+            try:
+                m = json.loads(tv_store.get_meta(f'{NOTIFY_KEY}{e}') or 'null')
+            except ValueError:
+                m = None
+            if not (isinstance(m, dict) and m.get('path') == dest and now - float(m.get('at') or 0) < NOTIFY_WINDOW):
+                seen = False
+        if seen:
+            return False
+        for e in eids:
+            tv_store.set_meta(f'{NOTIFY_KEY}{e}', json.dumps({'path': dest, 'at': now}))
+    return True
+
+
 def _notify_imported(res: Dict[str, Any]) -> None:
     """Notify once the file is in the library (import-complete). v302: pass episode
     detail for single-ep and small contiguous multi-ep; season packs stay show-level."""
@@ -662,6 +693,8 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                         files = res.get('files') or []
                         if files and all((f or {}).get('how') == 'exists' for f in files):
                             logger.info('TV import: %s added nothing new, no push', t.get('name'))
+                        elif not _first_notify(res):
+                            logger.info('TV import: %s already announced, no push', t.get('name'))
                         else:
                             _notify_imported(res)
                     except Exception:                          # noqa: BLE001 - notify never fails the import

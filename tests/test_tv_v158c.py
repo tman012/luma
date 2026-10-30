@@ -171,8 +171,8 @@ def qenv(scanned, monkeypatch):  # noqa: F811
 T2 = b'd8:announce3:url4:infod4:name5:file26:lengthi1eee'
 
 
-def _grab(q, sid, title='Severance.S02E03.1080p.WEB-DL-B', now=5000.0, payload=T):
-    e3 = eps(sid, 2)[3]
+def _grab(q, sid, title='Severance.S02E03.1080p.WEB-DL-B', now=5000.0, payload=T, ep=3):
+    e3 = eps(sid, 2)[ep]
     return tv_grab.grab(item(title), sid, 2, [e3], 'manual', now, session_factory=q.factory, fetch=lambda u: ('torrent', payload))
 
 
@@ -185,7 +185,7 @@ def test_first_grab_creates_the_missing_category_then_adds(qenv):
     assert create == {'category': 'luma-test-tv'}                             # no save path
     assert q.torrents[0]['category'] == q.torrents[0]['tags'] == 'luma-test-tv'
     q.calls.clear()                                                           # checked once per run
-    out = _grab(q, qenv, 'Severance.S02E04.1080p.WEB-DL-B', payload=T2)
+    out = _grab(q, qenv, 'Severance.S02E04.1080p.WEB-DL-B', payload=T2, ep=4)   # RC-MOBLAND: E03 is claimed now
     assert out['ok'] and not out.get('existing') and len(q.torrents) == 2
     assert 'torrents/categories' not in [c[1] for c in q.calls]
 

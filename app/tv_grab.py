@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -49,6 +50,50 @@ JOB_KEY = 'tvgrab:'
 _have_category: set = set()                # (qBittorrent URL, name) already checked this run
 _link_resolvers: List[Callable[[str], Any]] = []   # main's Sources links: url -> (is_link, real_url)
 ORIGINS = ('auto', 'manual', 'upgrade')
+
+# RC-MOBLAND-DOUBLEGRAB (Taylor 2026-10-29): one persistent, cross-caller episode claim. Every TV grab path
+# (feed, search_show, manual, Sources, grab_retry) goes through grab(), so the claim lives here. An episode
+# is claimed by (a) a grabs row in an active state covering it (written only after qBittorrent took the
+# add), (b) a recent real qBittorrent refusal (CLAIM_KEY meta, CLAIM_REFUSED_TTL), or (c) another grab
+# of it in flight in this process right now. Pre-qBittorrent failures never claim.
+ALREADY = 'Already grabbed'
+CLAIM_KEY = 'tvclaim:'
+CLAIM_REFUSED_TTL = 6 * 3600
+CLAIM_STATES = ('downloading', 'importing', 'imported')
+_claim_lock = threading.Lock()
+_inflight: Dict[int, str] = {}             # episode id -> hash being sent to qBittorrent now
+
+
+def _claimed_by(series_id: Any, episode_ids: List[int], own_hash: str, origin: str, now: float) -> Optional[str]:
+    """The hash that already claims any of *episode_ids*, else None. Call under _claim_lock."""
+    ids = {int(e) for e in episode_ids}
+    for e in ids:
+        if e in _inflight and _inflight[e] != own_hash:
+            return _inflight[e]
+    states = ('downloading', 'importing') if origin == 'manual' else CLAIM_STATES   # v185: manual goes by the file
+    with tv_store.connect() as conn:
+        for r in conn.execute(f"SELECT hash, episode_ids FROM grabs WHERE series_id = ? AND hash != ?"
+                              f" AND state IN ({','.join('?' * len(states))})", (series_id, own_hash, *states)):
+            try:
+                if ids & {int(x) for x in json.loads(r['episode_ids'] or '[]')}:
+                    return r['hash']
+            except (ValueError, TypeError):
+                continue
+    for e in ids:
+        try:
+            c = json.loads(tv_store.get_meta(f'{CLAIM_KEY}{e}') or 'null')
+        except ValueError:
+            c = None
+        if isinstance(c, dict) and c.get('hash') != own_hash and now - float(c.get('at') or 0) < CLAIM_REFUSED_TTL:
+            return c.get('hash')
+    return None
+
+
+def _release(episode_ids: List[int], h: str) -> None:
+    with _claim_lock:
+        for e in episode_ids:
+            if _inflight.get(int(e)) == h:
+                _inflight.pop(int(e), None)
 
 
 class GrabFailed(Exception):
@@ -266,6 +311,22 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         if conn.execute('SELECT 1 FROM blocklist WHERE info_hash = ? OR (release_title = ? AND series_id = ?)',
                         (h, item.get('title'), series_id)).fetchone():
             return {'ok': False, 'error': 'Blocklisted'}
+    eids = [int(e) for e in episode_ids]
+    with _claim_lock:
+        by = _claimed_by(series_id, eids, h, origin, now)
+        if by:
+            logger.info('TV grab: %s not sent (episodes %s already claimed by %s)', item.get('title'), sorted(eids), by[:8])
+            return {'ok': False, 'error': ALREADY, 'claimed': True, 'by': by}
+        for e in eids:
+            _inflight[e] = h
+    try:
+        return _send(item, series_id, season, episode_ids, origin, now, session_factory, kind, payload, h, reopen)
+    finally:
+        _release(eids, h)
+
+
+def _send(item, series_id, season, episode_ids, origin, now, session_factory, kind, payload, h, reopen):
+    from app import library_mover as mover
     name = tv_downloads.category()
     sess, url = mover._qbit_session(session_factory, now)
     if not sess:
@@ -306,6 +367,9 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         err = (f'qBittorrent returned HTTP {r.status_code}' if not ok_status(r.status_code)
                else 'qBittorrent refused the torrent')
         _job_failed(h, item, series_id, err, now)
+        if ok_status(r.status_code):                         # a real qBittorrent refusal: it reached the client
+            for e in episode_ids:
+                tv_store.set_meta(f'{CLAIM_KEY}{int(e)}', json.dumps({'hash': h, 'at': now, 'reason': 'refused'}))
         return {'ok': False, 'error': err}
     if reopen:
         with tv_store.write() as conn:
