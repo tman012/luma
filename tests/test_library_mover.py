@@ -376,7 +376,7 @@ def test_existing_file_is_skipped_and_recorded(env):
     env.tick()
     assert old.read_bytes() == b'keep me'
     assert job(H1)['state'] == 'exists'
-    assert job(H1)['files'] == [{'file': 'Heat (1995).mkv', 'result': 'exists'}]
+    assert job(H1)['files'] == [{'file': 'Heat (1995).mkv', 'result': 'exists', 'match': False}]   # r2: checked
 
 
 def test_existing_symlink_at_destination_is_not_written_through(env, tmp_path):

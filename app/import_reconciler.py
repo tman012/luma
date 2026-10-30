@@ -14,6 +14,8 @@ tracks. Each is matched against the library and the import jobs, and one INFO li
                                 waiting; a mover job lost from the store (dropped as an orphan while qBit was
                                 restarting, or pruned) is tracked again from the snapshot kept here; a movie
                                 grab nothing imports (movie import folder not set) is handed to the mover
+  library_present: <where>      no grab record, but the movie is already in the library (terminal no-op:
+                                never adopted or requeued)
   skipped: <why>                queued / in flight, permanent failure, backoff, requeue limit, no grab record
 
 and one summary line per pass.
@@ -54,6 +56,7 @@ STARTUP_DELAY_S = 120         # after the watchers' first passes
 BACKOFF_S = (60, 300, 1800, 7200)   # wait before requeue n+1 (1m, 5m, 30m, 2h; the last repeats)
 MAX_REQUEUES = 5              # then the key is 'import_failed' (push); a manual Retry is still always possible
 RETRY_AFTER_S = BACKOFF_S[0]  # a terminal job is retried no sooner than this after it ended
+MAX_RESEARCHES = 3            # re-searches per wanted target (episodes / movie) after lost grabs
 LOST_AFTER_S = 300            # a grab qBittorrent doesn't have this long after it was added is lost
 WINDOW_DAYS = 14              # completed torrents older than this are not looked at
 DB_NAME = 'import_reconcile.db'
@@ -89,6 +92,9 @@ CREATE TABLE IF NOT EXISTS reconcile_keys (
   decision TEXT NOT NULL DEFAULT '', snapshot TEXT, updated REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS reconcile_keys_hash ON reconcile_keys (hash);
+CREATE TABLE IF NOT EXISTS reconcile_researches (
+  target TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0, last REAL NOT NULL DEFAULT 0
+);
 """
 
 
@@ -126,7 +132,7 @@ def _touch(conn, key: str, h: str, file: str, kind: str, decision: str, now: flo
 
 
 # 'import_failed' and 'lost' stick (the push is sent once); 'seen'/'missing' never overwrite them
-_KEEP = "CASE WHEN decision IN ('import_failed', 'lost') THEN decision ELSE ? END"
+_KEEP = "CASE WHEN decision IN ('import_failed', 'lost', 'imported') THEN decision ELSE ? END"
 
 
 def claim(h: str, kind: str, now: float, files: Optional[List[str]] = None) -> Optional[str]:
@@ -179,6 +185,19 @@ def mark_import_failed(h: str, name: Any, why: str, now: float) -> bool:
         except Exception:                               # noqa: BLE001
             logger.warning('Import reconcile: push failed for %s', h[:8])
     return first
+
+
+IMPORTED = 'imported'
+
+
+def mark_imported(h: str, now: Optional[float] = None) -> None:
+    """The download is in the library (e.g. the mover found the same file already there): every key of
+    the hash becomes 'imported', so no further requeue, and no import_failed push, follows."""
+    now = time.time() if now is None else now
+    h = str(h or '').lower()
+    with _db() as conn:
+        conn.execute('INSERT OR IGNORE INTO reconcile_keys (key, hash, updated) VALUES (?, ?, ?)', (key_for(h), h, now))
+        conn.execute('UPDATE reconcile_keys SET decision = ?, updated = ? WHERE hash = ?', (IMPORTED, now, h))
 
 
 def unclaim(h: str) -> None:
@@ -388,6 +407,69 @@ def tv_downloads_category() -> str:
     return tv_downloads.category()
 
 
+def research_target(g: Dict[str, Any]) -> str:
+    """What a lost grab was for: the re-search counter key (a new hash for the same thing shares it)."""
+    if g['kind'] == 'tv':
+        return f"tv:{g.get('series_id')}:{','.join(str(i) for i in sorted(g.get('episode_ids') or []))}"
+    return f"{g['kind']}:{g.get('tmdb_id')}"
+
+
+def claim_research(g: Dict[str, Any], now: float) -> Optional[int]:
+    """Count one re-search for *g*'s target; the new count, or None once MAX_RESEARCHES were used."""
+    t = research_target(g)
+    with _db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        try:
+            conn.execute('INSERT OR IGNORE INTO reconcile_researches (target) VALUES (?)', (t,))
+            cur = conn.execute('UPDATE reconcile_researches SET n = n + 1, last = ? WHERE target = ? AND n < ?',
+                               (now, t, MAX_RESEARCHES))
+            n = conn.execute('SELECT n FROM reconcile_researches WHERE target = ?', (t,)).fetchone()['n']
+            conn.execute('COMMIT')
+        except Exception:
+            conn.execute('ROLLBACK')
+            raise
+    return int(n) if cur.rowcount == 1 else None
+
+
+def blocklist_lost(g: Dict[str, Any], now: float) -> bool:
+    """The lost release goes on the show's / movie's blocklist (hash and release name), so the re-search
+    can't pick it again. True when it is on the blocklist."""
+    h, title = g['hash'], str(g.get('name') or '')
+    try:
+        if g['kind'] == 'tv' and g.get('series_id'):
+            from app import tv_store
+            with tv_store.write() as conn:
+                if not conn.execute('SELECT 1 FROM blocklist WHERE info_hash = ? AND series_id = ?',
+                                    (h, g['series_id'])).fetchone():
+                    conn.execute('INSERT INTO blocklist (series_id, info_hash, release_title, reason, ts)'
+                                 ' VALUES (?, ?, ?, ?, ?)', (g['series_id'], h, title or None, 'lost', now))
+            return True
+        if g['kind'] in ('movie', 'gr') and g.get('tmdb_id'):
+            from app import movie_scanner, movie_settings as ms
+            with ms.connect() as conn:
+                movie_scanner.ensure(conn)
+                if not conn.execute('SELECT 1 FROM movie_blocklist WHERE info_hash = ? AND tmdb_id = ?',
+                                    (h, g['tmdb_id'])).fetchone():
+                    conn.execute('INSERT INTO movie_blocklist (tmdb_id, release_title, info_hash, added_at)'
+                                 ' VALUES (?, ?, ?, ?)', (g['tmdb_id'], title or None, h, now))
+            return True
+    except Exception as e:                              # noqa: BLE001
+        logger.warning('Import reconcile: could not blocklist lost %s (%s)', h[:8], type(e).__name__)
+    return False
+
+
+def research_lost(g: Dict[str, Any], now: float) -> str:
+    """Blocklist the lost release, then re-search (at most MAX_RESEARCHES per target)."""
+    if g['kind'] not in ('tv', 'movie'):
+        return research(g)                              # (GR lost grabs: the GR Failures tip)
+    if not blocklist_lost(g, now):
+        return 're-search skipped (the lost release could not be blocklisted)'
+    n = claim_research(g, now)
+    if n is None:
+        return f're-search skipped (limit of {MAX_RESEARCHES} reached)'
+    return f'{research(g)} (re-search {n}/{MAX_RESEARCHES})'
+
+
 def research(g: Dict[str, Any]) -> str:
     """Search again for what a lost grab was for. Returns a short outcome for the log."""
     try:
@@ -467,7 +549,7 @@ def lost_pass(grabs: List[Dict[str, Any]], present: Set[str], healthy: bool, now
             continue
         with _db() as conn:
             conn.execute("UPDATE reconcile_keys SET decision = 'lost' WHERE key = ?", (key_for(h),))
-        _log(out, 'lost', name, h, f'{reason}; {research(g)}')
+        _log(out, 'lost', name, h, f'{reason}; {research_lost(g, now)}')
 
 
 # ------------------------------------------------------------------ decisions
@@ -545,6 +627,10 @@ def _movie(t: Dict[str, Any], h: str, data: Dict[str, Any], now: float, out: Dic
         with _db() as conn:
             _touch(conn, key_for(h), h, '', 'movie', 'seen', now, json.dumps(snap))
     if j and j.get('state') in ('done', 'exists'):
+        if j['state'] == 'exists' and mover.exists_matches(j) and not (g and g.get('state') == 'imported'):
+            mover._settle_exists(h, j, j, now)          # Ops: same file already there = imported
+        elif j['state'] == 'exists' and mover.exists_matches(j):
+            mark_imported(h, now)
         return _log(out, 'already_imported', name, h, f"mover job {j['state']}")
     if g and g.get('state') == 'imported':
         return _log(out, 'already_imported', name, h, 'movie grab imported')
@@ -615,7 +701,23 @@ def _movie(t: Dict[str, Any], h: str, data: Dict[str, Any], now: float, out: Dic
             mover.track(h, {'tmdb_id': snap.get('tmdb_id'), 'media_type': 'movie', 'title': snap['title'],
                             'year': snap.get('year') or ''}, snap.get('name') or str(name or ''))
             return _log(out, 'requeued', name, h, 'lost: mover job no longer in the store (dropped or pruned)')
+    if not j and not g:
+        where = library_present(t)
+        if where:
+            return _log(out, 'library_present', name, h, f'no grab record; already in the library ({where})')
     return _log(out, 'skipped', name, h, 'no grab record')
+
+
+def library_present(t: Dict[str, Any]) -> Optional[str]:
+    """The library folder that already holds the movie this torrent is (parsed from its name), else None."""
+    try:
+        from app import movie_dupes, movie_scanner
+        title, year = movie_scanner.parse(str(t.get('name') or ''))
+        if not title or not year:
+            return None
+        return movie_dupes.on_disk(title, year)
+    except Exception:                                   # noqa: BLE001
+        return None
 
 
 def _video_files(listed: Optional[List[Dict[str, Any]]]) -> List[str]:
@@ -664,7 +766,7 @@ def _tv(t: Dict[str, Any], h: str, now: float, out: Dict[str, int], list_files) 
 
 def _counts() -> Dict[str, int]:
     return {'checked': 0, 'already_imported': 0, 'requeued': 0, 'readded': 0, 'lost': 0, IMPORT_FAILED: 0,
-            'skipped': 0}
+            'library_present': 0, 'skipped': 0}
 
 
 def reconcile(torrents: List[Dict[str, Any]], now: Optional[float] = None, list_files=None,
@@ -726,13 +828,20 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
             _last['reachable'] = False
             logger.info('Import reconcile: pass skipped (qBittorrent not reachable)')
             return empty
+        if not torrents:
+            # Reviewer: an empty list (qBittorrent restarting, nothing loaded yet) is not 'reachable': the
+            # loop keeps waiting for a real list and passes again once one arrives
+            _last['reachable'] = False
+            logger.info('Import reconcile: qBittorrent listed no torrents (restarting?)')
+            return reconcile(torrents, now, list_files)
         if not _last['reachable']:
             logger.info('Import reconcile: qBittorrent is reachable again')
         _last['reachable'] = True
         out = reconcile(torrents, now, list_files)
         logger.info('Import reconcile: pass done: %d checked, %d already imported, %d requeued, %d re-added,'
-                    ' %d lost, %d import failed, %d skipped', out['checked'], out['already_imported'], out['requeued'],
-                    out['readded'], out['lost'], out[IMPORT_FAILED], out['skipped'])
+                    ' %d lost, %d import failed, %d skipped, %d library present', out['checked'], out['already_imported'],
+                    out['requeued'], out['readded'], out['lost'], out[IMPORT_FAILED], out['skipped'],
+                    out['library_present'])
         return out
     finally:
         _lock.release()
@@ -764,7 +873,7 @@ def start() -> bool:
             _wake.clear()
             try:
                 out = tick()
-                ok = out.get('checked', 0) > 0 or _last['reachable']
+                ok = bool(_last['reachable'])          # an empty list is not reachable (Reviewer)
                 if ok and not reachable:                # qBittorrent is back (restart/reboot): once more soon
                     _wake.set()
                 reachable = ok

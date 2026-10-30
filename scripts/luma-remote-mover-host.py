@@ -48,6 +48,26 @@ def _under(path: str, root: str) -> bool:
     return path == root or path.startswith(root + '/')
 
 
+SSH_TARGET = os.environ.get('LUMA_HOST_MOVER_SSH', '').strip()          # user@host: run the remote CLI over SSH
+REMOTE_CLI = os.environ.get('LUMA_HOST_MOVER_REMOTE_CLI', 'bin/luma-remote-mover.sh')   # relative: the remote home
+
+
+def remote_command(argv) -> str:
+    """The ONE string ssh hands the remote shell: every token shell-quoted (shlex.join), so spaces,
+    parentheses and quotes in a path ('Smile 2 (2024)') reach the remote CLI as one argument each.
+    (OpenSSH joins its argv with spaces and the remote shell parses it again: never pass paths unquoted.)"""
+    return shlex.join([str(a) for a in argv])
+
+
+def build_cmd(mode: str, src: str, dest: str, tmp: str = '') -> list:
+    """argv for subprocess (never a shell): the local CLI, or ssh with one quoted remote command."""
+    args = [mode, src, dest] + ([tmp] if tmp else [])
+    if SSH_TARGET:
+        return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', SSH_TARGET, '--',
+                remote_command([REMOTE_CLI, *args])]
+    return [CLI, *args]
+
+
 def run_move(mode: str, src: str, dest: str, tmp: str = '') -> tuple[int, str]:
     if mode not in ('cp', 'mv'):
         return 2, f'mode must be cp|mv, got {mode!r}'
@@ -55,11 +75,9 @@ def run_move(mode: str, src: str, dest: str, tmp: str = '') -> tuple[int, str]:
         return 2, f'src must be under {DOWNLOADS_ROOT}'
     if not _under(dest, MEDIA_ROOT):
         return 2, f'dest must be under {MEDIA_ROOT}'
-    cmd = [CLI, mode, src, dest]
-    if tmp:
-        if os.path.dirname(tmp) != os.path.dirname(dest) or not TMP_RE.match(os.path.basename(tmp)):
-            return 2, 'tmp must be <dest dir>/.luma-<hex16>.luma-partial'
-        cmd.append(tmp)
+    if tmp and (os.path.dirname(tmp) != os.path.dirname(dest) or not TMP_RE.match(os.path.basename(tmp))):
+        return 2, 'tmp must be <dest dir>/.luma-<hex16>.luma-partial'
+    cmd = build_cmd(mode, src, dest, tmp)
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_S, check=False)
     except FileNotFoundError:

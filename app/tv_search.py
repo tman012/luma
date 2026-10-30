@@ -746,8 +746,7 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
             sent = bool(g.get('ok')) and not g.get('existing')
             row['grabbed'], row['error'] = sent, g.get('error')
             if not sent:
-                row['reason'] = ('existing' if g.get('existing') else 'duplicate' if g.get('claimed') or g.get('duplicate')
-                                 else 'send_failed')
+                row['reason'] = why_not_grabbed(g)
                 if not row['error']:
                     row['error'] = tv_grab.ALREADY
         out['picks'].append(row)
@@ -1283,8 +1282,19 @@ def grab_release(sid: int, item: Dict[str, Any], now: Optional[float] = None) ->
                              [(now, i) for i in ids])
     out = {**g, 'episodes': ids, 'grabbed': bool(g.get('ok')) and not g.get('existing')}
     if not out['grabbed']:
-        out['reason'] = 'existing' if g.get('existing') else 'duplicate' if g.get('claimed') else 'send_failed'
+        out['reason'] = why_not_grabbed(g)
     return out
+
+
+def why_not_grabbed(g: Dict[str, Any]) -> str:
+    """The reason a grab answer sent nothing: disabled (grabs off), existing, duplicate or send_failed."""
+    if g.get('reason') == tv_grab.DISABLED or (g.get('blocked') and g.get('error') == tv_grab.OFF):
+        return tv_grab.DISABLED
+    if g.get('existing'):
+        return 'existing'
+    if g.get('claimed') or g.get('duplicate'):
+        return 'duplicate'
+    return 'send_failed'
 
 
 # ------------------------------------------------------------------ automatic

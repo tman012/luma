@@ -57,6 +57,7 @@ ORIGINS = ('auto', 'manual', 'upgrade')
 # add), (b) a recent real qBittorrent refusal (CLAIM_KEY meta, CLAIM_REFUSED_TTL), or (c) another grab
 # of it in flight in this process right now. Pre-qBittorrent failures never claim.
 ALREADY = 'Already grabbed'
+DISABLED = 'disabled'          # grabbed: false because grabs are off (Tester)
 CLAIM_KEY = 'tvclaim:'
 CLAIM_REFUSED_TTL = 6 * 3600
 CLAIM_STATES = ('downloading', 'importing', 'imported')
@@ -285,7 +286,7 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         raise ValueError('origin')
     if not allowed():
         logger.info('TV grab: %s not sent (%s)', item.get('title'), OFF)
-        return {'ok': False, 'error': OFF, 'blocked': True}
+        return {'ok': False, 'error': OFF, 'blocked': True, 'grabbed': False, 'reason': DISABLED}
     # v177 (Taylor): the one central safety check, before any link is fetched or anything is sent
     from app import tv_safety
     why = tv_safety.check(series_id, episode_ids, origin, now, title=item.get('title'))
@@ -300,9 +301,6 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
             return {'ok': False, 'error': str(e), 'link': True, 'status': 429, 'pending': True}
         return {'ok': False, 'error': str(e), 'link': True, 'status': getattr(e, 'status', 502)}
     h = info_hash(kind, payload)
-    if h:
-        from app import grab_cache       # import_reconciler re-adds a grab qBittorrent lost
-        grab_cache.save(h, kind, payload, now)
     if not h:
         # v171 (Tester FF-1): a magnet with no (or a short) btih is a bad link: 400 at the route, no fallback
         return {'ok': False, 'error': NO_HASH, 'link': True, 'status': 400}
@@ -324,6 +322,8 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         if conn.execute('SELECT 1 FROM blocklist WHERE info_hash = ? OR (release_title = ? AND series_id = ?)',
                         (h, item.get('title'), series_id)).fetchone():
             return {'ok': False, 'error': 'Blocklisted'}
+    from app import grab_cache           # import_reconciler re-adds a grab qBittorrent lost (after the dedupe
+    grab_cache.save(h, kind, payload, now)   # and blocklist checks, so a refused grab is not cached)
     eids = [int(e) for e in episode_ids]
     with _claim_lock:
         by = _claimed_by(series_id, eids, h, origin, now)

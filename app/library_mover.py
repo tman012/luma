@@ -1170,7 +1170,10 @@ def process(job: Dict[str, Any], torrent: Dict[str, Any], data: Dict[str, Any], 
                                   seen.get(src) if isinstance(seen.get(src), Found) else None)
                 if result != 'exists':
                     made.append(name)
-                results.append({'file': name, 'result': result})
+                row = {'file': name, 'result': result}
+                if result == 'exists':
+                    row['match'] = _same_file(src, dfd, name, seen.get(src))
+                results.append(row)
         except BaseException:
             # A failed pass leaves nothing half-filed: the parts it put in place
             # go, and so does the folder when this pass created it.
@@ -1189,6 +1192,44 @@ def process(job: Dict[str, Any], torrent: Dict[str, Any], data: Dict[str, Any], 
     state = 'done' if any(r['result'] != 'exists' for r in results) else 'exists'
     return {'state': state, 'path_id': dest['id'], 'dest': folder, 'files': results, 'finished': now,
             'release_date': job.get('release_date', ''), 'error': '', 'status': '', 'pending_since': None}
+
+
+SHA_MAX_BYTES = 64 * 1024 * 1024   # 'exists' is also checked by sha256 when both files are this small
+
+
+def _same_file(src: str, dfd: int, name: str, expect: Any = None) -> Optional[bool]:
+    """An 'exists' destination is the same file as the download: same size (and sha256 when that is cheap).
+    None when either side can't be read here (a remote mount that doesn't show it)."""
+    try:
+        d = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+        s = os.stat(src)
+    except OSError:
+        return None
+    if not _stat.S_ISREG(d.st_mode):
+        return False
+    size = expect.size if isinstance(expect, Found) else s.st_size
+    if d.st_size != size or s.st_size != size:
+        return False
+    if (d.st_dev, d.st_ino) == (s.st_dev, s.st_ino) or size > SHA_MAX_BYTES:
+        return True
+    try:
+        import hashlib
+        fd = os.open(name, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0), dir_fd=dfd)
+        with os.fdopen(fd, 'rb') as a, open(src, 'rb') as b:
+            ha, hb = hashlib.sha256(), hashlib.sha256()
+            for chunk in iter(lambda: a.read(1 << 20), b''):
+                ha.update(chunk)
+            for chunk in iter(lambda: b.read(1 << 20), b''):
+                hb.update(chunk)
+        return ha.digest() == hb.digest()
+    except OSError:
+        return None
+
+
+def exists_matches(fields: Dict[str, Any]) -> bool:
+    """Every file of an 'exists' result was checked and matches the download."""
+    files = fields.get('files') or []
+    return bool(files) and all(f.get('result') != 'exists' or f.get('match') is True for f in files)
 
 
 def _files_of(sess, url: str) -> Callable[[str], Optional[List[Dict[str, Any]]]]:
@@ -1305,6 +1346,9 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
     summary['filed'] += 1
     logger.info('Library mover: %s -> %s (%s)', job.get('title'), fields['dest'],
                 ', '.join(r['result'] for r in fields['files']))
+    if fields.get('state') == 'exists':
+        _settle_exists(h, job, fields, now)
+        return
     # Import-complete only (state 'done' = newly filed). 'exists' means already in the library.
     if fields.get('state') == 'done' and _claim_movie_grab(h, job, str(fields.get('dest') or ''), now):
         try:
@@ -1319,6 +1363,35 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
             )
         except Exception:
             logger.exception('Library mover: notify failed for %s', job.get('title'))
+
+
+def _settle_exists(h: str, job: Dict[str, Any], fields: Dict[str, Any], now: float) -> None:
+    """Ops (Smile 2 requeue): the mover found the file already in place. When it is the same file (size,
+    sha256 when cheap), the grab and the reconcile ledger are marked imported (no push: nothing new was
+    filed). A different or unreadable file keeps the old behavior (job 'exists' only) and is logged."""
+    if not exists_matches(fields):
+        logger.warning('Library mover: %s already exists at %s but does not match the download (%s); grab not'
+                       ' marked imported', job.get('title'), fields.get('dest'),
+                       ', '.join(f"{f.get('file')}: {f.get('match')}" for f in fields.get('files') or []))
+        return
+    try:
+        from app import movie_grabs
+        g = movie_grabs.by_hash(h)
+        if g:
+            dest = str(fields.get('dest') or '')
+            first = next((f['file'] for f in fields.get('files') or []), '')
+            movie_grabs.mark_imported(h, path=os.path.join(dest, first) if dest and first else dest or None, now=now)
+            from app import movie_settings as ms
+            with ms.connect() as conn:
+                conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (g['tmdb_id'],))
+    except Exception:                                # noqa: BLE001
+        logger.exception('Library mover: movie_grabs mark failed for %s', job.get('title'))
+    try:
+        from app import import_reconciler
+        import_reconciler.mark_imported(h, now)
+    except Exception:                                # noqa: BLE001
+        logger.exception('Library mover: reconcile ledger mark failed for %s', job.get('title'))
+    logger.info('Library mover: %s already in the library (same file), marked imported', job.get('title'))
 
 
 def _claim_movie_grab(h: str, job: Dict[str, Any], dest: str, now: float) -> bool:
