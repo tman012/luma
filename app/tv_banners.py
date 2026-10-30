@@ -11,7 +11,9 @@ saved in Connectors:
   SWEEP_EVERY_S, and soon after poke() (a show added or scanned in);
 - a show TheTVDB has no banner for is stamped banner_checked_at and asked
   again only after RECHECK_S;
-- a failed call stops the pass and backs off (1, 2, 4 ... 60 min);
+- a failed call (any exception, incl. TheTVDB non-200 or auth errors) stops the pass and
+  backs off (1, 2, 4 ... 60 min), logged as one line without a traceback; it never stamps
+  'none found';
 - a write lands only if the row still holds the tmdb_id and tvdb_id it was
   read with (a rematch mid-pass can't get another show's banner).
 """
@@ -21,8 +23,6 @@ import logging
 import threading
 import time
 from typing import Callable, Dict, Optional
-
-import requests
 
 from app import tv_store
 
@@ -90,7 +90,7 @@ def run_pass(now: Optional[float] = None) -> Dict[str, int]:
             try:
                 _pace()
                 url = tv_tvdb.banner(r['tvdb_id'], creds)
-            except (requests.RequestException, ValueError, tv_tvdb.TvdbError) as e:
+            except Exception as e:      # noqa: BLE001 - any failure (expected or not) backs off, one line, no traceback
                 _fail['n'] += 1
                 wait = min(BACKOFF_S * 2 ** (_fail['n'] - 1), BACKOFF_MAX_S)
                 _fail['until'] = now + wait
@@ -122,8 +122,8 @@ def _loop() -> None:
     while not _stop.is_set():
         try:
             run_pass()
-        except Exception:               # noqa: BLE001 - the next pass tries again
-            logger.exception('Series banner pass failed')
+        except Exception as e:          # noqa: BLE001 - the next pass tries again
+            logger.warning('Series banner pass failed (%s)', type(e).__name__)
         _wake.clear()
         if _wake.wait(SWEEP_EVERY_S):
             if _stop.wait(POKE_DELAY_S):  # a burst of adds runs as one pass

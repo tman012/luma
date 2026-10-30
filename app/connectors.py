@@ -384,10 +384,14 @@ def connectors_tvdb_save():
 
 
 def _forget_air_times() -> None:
+    """Each reset has its own try: a failing air-times reset must not skip the banner reset."""
     try:
         from app import tv_airtimes
         tv_airtimes.forget()
+    except Exception as e:             # noqa: BLE001 - no tv.db yet: nothing to ask again
+        logger.debug('Air times not reset: %s', type(e).__name__)
+    try:
         from app import tv_banners
         tv_banners.forget()
     except Exception as e:             # noqa: BLE001 - no tv.db yet: nothing to ask again
-        logger.debug('Air times not reset: %s', type(e).__name__)
+        logger.debug('Banners not reset: %s', type(e).__name__)
