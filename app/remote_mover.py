@@ -63,6 +63,8 @@ DEFAULT_TIMEOUT_S = 3600
 # Explicit script failures (usage / bounds / src missing / copy-verify-rename
 # failed): real failures, reported immediately.
 _SCRIPT_FAIL_RCS = frozenset({2, 3, 4, 5, 6})
+# The only rc that sends a transfer-address copy back to the main address (mount/layout failed, nothing copied).
+TRANSFER_FALLBACK_RC = 2
 # Wait-out policy when the helper gives up before the copy does (.62 helper
 # timeout=600 → HTTP 500 rc=124 while cp keeps running on .72).
 POLL_INTERVAL_S = 15.0
@@ -436,9 +438,9 @@ def transfer(src_container: str, dest_container: str, mode: str = 'cp',
             except RemoteTransient:
                 raise   # cut off, not refused: the copy may still be running, retried with backoff as before
             except RemoteMoverError as e:
-                # fall back ONLY on an explicit script failure (rc 2-6: the script refused or cleaned up its
-                # temp). No rc, or any other rc, means the first copy may still be running: final refusal.
-                if getattr(e, 'script_rc', None) not in _SCRIPT_FAIL_RCS:
+                # fall back ONLY on rc 2 (the .72 mover's transfer-host mount/layout failure: nothing was
+                # copied). No rc, or any other rc (3-7, 17, 28 may fire after a partial copy): final refusal.
+                if getattr(e, 'script_rc', None) != TRANSFER_FALLBACK_RC:
                     raise
                 _note_transfer_fallback(host, e)
         tmp_container = remote_temp_for(dest_container)   # fresh temp: never shares the first call's partial

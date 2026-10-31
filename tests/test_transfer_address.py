@@ -83,7 +83,7 @@ def fresh_state(monkeypatch):
     return clock
 
 
-FAIL = (500, json.dumps({'ok': False, 'rc': 5, 'output': 'copy failed'}))
+FAIL = (500, json.dumps({'ok': False, 'rc': 2, 'output': 'transfer host mount failed'}))
 OK = (200, json.dumps({'ok': True, 'rc': 0, 'output': ''}))
 
 
@@ -366,22 +366,25 @@ def test_unusual_500_unwatchable_with_transfer_address_is_one_request_final(remo
     (500, json.dumps({'ok': False, 'output': 'boom'})),            # no rc at all (used to read as rc 0)
     (500, json.dumps({'ok': False, 'rc': None, 'output': 'x'})),
     (500, ''),                                                      # empty body
-    (500, json.dumps({'ok': False, 'rc': 7, 'output': 'x'})),      # rc outside 2-6
-])
-def test_transfer_address_no_script_rc_makes_exactly_one_request(remote_env, monkeypatch, reply):
+] + [(500, json.dumps({'ok': False, 'rc': rc, 'output': 'x'})) for rc in (1, 3, 4, 5, 6, 7, 17, 28)])
+def test_transfer_address_non_rc2_makes_exactly_one_request(remote_env, monkeypatch, reply):
+    """Only rc 2 falls back. rc 17 is the existing 'dest exists' answer (returned, not retried)."""
     _set_address('10.10.10.25')
     monkeypatch.setattr(rm, '_dest_observable', lambda d: False)
     calls = _capture(monkeypatch, replies=[reply, OK])
-    with pytest.raises(rm.RemoteMoverError) as ei:
-        rm.transfer(str(remote_env), '/media/Movies/a.mkv')
-    assert not isinstance(ei.value, rm.RemoteTransient)
+    if '"rc": 17' in reply[1]:
+        assert rm.transfer(str(remote_env), '/media/Movies/a.mkv') == 'exists'
+    else:
+        with pytest.raises(rm.RemoteMoverError) as ei:
+            rm.transfer(str(remote_env), '/media/Movies/a.mkv')
+        assert not isinstance(ei.value, rm.RemoteTransient)
     assert len(calls) == 1 and calls[0]['transfer_host'] == '10.10.10.25'
+    assert rm._transfer_cooldown_until == {}
 
 
-@pytest.mark.parametrize('rc', [2, 3, 4, 5, 6])
-def test_script_rc_falls_back_with_a_fresh_temp(remote_env, monkeypatch, rc):
+def test_rc2_falls_back_with_a_fresh_temp(remote_env, monkeypatch):
     _set_address('10.10.10.25')
-    calls = _capture(monkeypatch, replies=[(500, json.dumps({'ok': False, 'rc': rc, 'output': 'x'})), OK])
+    calls = _capture(monkeypatch, replies=[(500, json.dumps({'ok': False, 'rc': 2, 'output': 'x'})), OK])
     assert rm.transfer(str(remote_env), '/media/Movies/a.mkv') == 'copied'
     assert len(calls) == 2
     assert [c.get('transfer_host') for c in calls] == ['10.10.10.25', None]
