@@ -24,7 +24,7 @@ describe('v326 one close per sheet (Back + close button within 300 ms)', () => {
       expect(s).toContain("if (closeOnce()) setPhase('exiting');");
     });
   it('DISMISS_EXIT_MS is the motion token; the enter has a fallback; the page paint is a scoped selector', () => {
-    expect(MOTION.dur.dismissExit).toBe(300);
+    expect(MOTION.dur.dismissExit).toBe(340);
     expect(readFileSync('src/contexts/AppModalHost.tsx', 'utf8')).toContain('const DISMISS_EXIT_MS = MOTION.dur.dismissExit;');
     expect(ENTER_FALLBACK_SLACK_MS).toBe(200);
     const sf = readFileSync('src/components/layout/SheetFrame.tsx', 'utf8');

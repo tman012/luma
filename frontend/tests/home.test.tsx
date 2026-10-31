@@ -43,7 +43,7 @@ describe('Home', () => {
     const fetchMock = vi.fn(() => d.promise);
     vi.stubGlobal('fetch', fetchMock);
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
-    expect(screen.getByTestId('home-reserved')).toBeTruthy();
+    expect(screen.getByTestId('home-skeleton')).toBeTruthy();
     expect(screen.queryByTestId('home-rails')).toBeNull();
     // v260: the Home row's Storage pill reads /api/storage/downloads too; Home itself asks once.
     const homeCalls = () => fetchMock.mock.calls.filter(c => String((c as unknown[])[0]).includes('/api/home'));
@@ -51,7 +51,7 @@ describe('Home', () => {
     expect(fetchMock.mock.calls.every(c => /\/api\/(home|storage\/downloads)/.test(String((c as unknown[])[0])))).toBe(true);
     await act(async () => { d.resolve(json(HOME)); });
     await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
-    expect(screen.queryByTestId('home-reserved')).toBeNull();
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
     const titles = screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent);
     expect(titles).toEqual(['Continue Watching', 'Movies', 'TV Shows']);
     expect((screen.getByTestId('progress') as HTMLElement).style.width).toBe('25%');
@@ -141,7 +141,7 @@ describe('Home', () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
-    expect(screen.getByTestId('home-reserved')).toBeTruthy();
+    expect(screen.getByTestId('home-skeleton')).toBeTruthy();
     await act(async () => { vi.advanceTimersByTime(6900); });
     expect(screen.queryByTestId('home-down')).toBeNull();
     await act(async () => { vi.advanceTimersByTime(200); });
@@ -154,7 +154,7 @@ describe('Home', () => {
     vi.stubGlobal('fetch', vi.fn(() => d.promise));
     const seen: string[] = [];
     const obs = new MutationObserver(() => {
-      const s = screen.queryByTestId('home-reserved') ? 'skeleton' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
+      const s = screen.queryByTestId('home-skeleton') ? 'skeleton' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
       if (seen[seen.length - 1] !== s) seen.push(s);
     });
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
@@ -164,7 +164,7 @@ describe('Home', () => {
     await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
     obs.disconnect();
     expect(seen.filter(x => x !== 'skeleton')).toEqual(['rails:3']);       // never a partial set of rails
-    expect(screen.queryByTestId('home-reserved')).toBeNull();
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
   });
 
   it('v251: a failed rail is left out and the rest render (no skeleton for it)', async () => {
@@ -173,7 +173,7 @@ describe('Home', () => {
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('home-rails'));
     expect(screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent)).toEqual(['Continue Watching', 'Movies']);
-    expect(screen.queryByTestId('home-reserved')).toBeNull();
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
     expect(screen.queryByTestId('rail-2')).toBeNull();
   });
 
@@ -206,7 +206,7 @@ describe('Home', () => {
       render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
       await waitFor(() => expect(made.length).toBeGreaterThan(0));
       await act(async () => { await new Promise(r => setTimeout(r, 50)); });
-      expect(screen.getByTestId('home-reserved')).toBeTruthy();
+      expect(screen.getByTestId('home-skeleton')).toBeTruthy();
       expect(screen.queryByTestId('home-rails')).toBeNull();
       const srcs = made.map(m => m.src);
       expect(srcs).toContain('/api/img/plex?url=art10');          // Continue watching decodes its art (what WideCard shows)
@@ -226,10 +226,10 @@ describe('Home', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(10); });
       expect(made.length).toBeGreaterThan(0);
       await act(async () => { await vi.advanceTimersByTimeAsync(1480); });
-      expect(screen.getByTestId('home-reserved')).toBeTruthy();
+      expect(screen.getByTestId('home-skeleton')).toBeTruthy();
       await act(async () => { await vi.advanceTimersByTimeAsync(30); });
       expect(screen.getByTestId('home-rails')).toBeTruthy();
-      expect(screen.queryByTestId('home-reserved')).toBeNull();
+      expect(screen.queryByTestId('home-skeleton')).toBeNull();
       vi.useRealTimers();
     });
 
@@ -246,7 +246,7 @@ describe('Home', () => {
       vi.stubGlobal('fetch', vi.fn(async () => json(POSTERS)));
       const seen: string[] = [];
       const obs = new MutationObserver(() => {
-        const st = screen.queryByTestId('home-reserved') ? 'skeleton' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
+        const st = screen.queryByTestId('home-skeleton') ? 'skeleton' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
         if (seen[seen.length - 1] !== st) seen.push(st);
       });
       render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
@@ -271,7 +271,7 @@ describe('Home', () => {
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     await act(async () => { vi.advanceTimersByTime(7100); });
     expect(screen.getByTestId('home-down')).toBeTruthy();
-    expect(screen.queryByTestId('home-reserved')).toBeNull();
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
     await act(async () => { d.resolve(json(HOME)); });
     await act(async () => { vi.advanceTimersByTime(100); });
     expect(screen.queryByTestId('home-rails')).toBeNull();

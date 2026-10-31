@@ -234,14 +234,14 @@ function PosterCard({ item, onClick, onLongPress }: {
 }
 
 // ---------------------------------------------------------------------------
-// v325: reserved card box (no skeleton): the final size, empty until the rail loads
+// Skeleton card
 // ---------------------------------------------------------------------------
 
-function ReservedCard() {
+function SkeletonCard() {
   return (
     <div style={{ flexShrink: 0 }}>
-      <div style={{ width: POSTER_W, height: POSTER_H }} />
-      <div style={{ width: 80, height: 10, marginTop: 6 }} />
+      <div className="skeleton-shimmer" style={{ width: POSTER_W, height: POSTER_H, borderRadius: 10 }} />
+      <div className="skeleton-shimmer" style={{ width: 80, height: 10, borderRadius: 5, marginTop: 6 }} />
     </div>
   );
 }
@@ -270,7 +270,7 @@ function Rail({ rail, railId, onItemClick, onItemLongPress, trailing }: {
       </div>
       <div ref={scrollRef} style={{ display: 'flex', gap: 12, paddingLeft: 12, paddingRight: 12, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
         {rail.isLoading
-          ? Array.from({ length: 7 }).map((_, i) => <ReservedCard key={i} />)
+          ? Array.from({ length: 7 }).map((_, i) => <SkeletonCard key={i} />)
           : rail.items.map((item) => (
               <PosterCard
                 key={item.id}

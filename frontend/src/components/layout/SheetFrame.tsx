@@ -1,10 +1,11 @@
 /** The phone bottom sheet frame (MOTION.md §1): scrim + card portaled at --z-sheet.
  *
  * - Enter: the card mounts at its final layout, translateY(100%), opaque, and slides to 0 over
- *   --m-dur-sheet-enter / --m-ease-decel; the scrim ramps 0 -> --m-sheet-scrim over --m-dur-standard,
- *   both from the first frame (WAAPI, no transition-less mount, no opacity gate).
+ *   MOTION.dur.sheetEnter / MOTION.ease.sheet; the scrim ramps 0 -> MOTION.scrim over MOTION.dur.sheetScrimEnter /
+ *   MOTION.ease.sheetScrimEnter, both from the same first frame (WAAPI, no transition-less mount, no opacity gate).
  * - Exit: from wherever the card is now (mid-enter or mid-drag) to translateY(100%) over
- *   --m-dur-sheet-exit / --m-ease-accel; the scrim fades over 200ms. Re-entering cancels the exit.
+ *   MOTION.dur.sheetExit / MOTION.ease.sheetExit; the scrim with MOTION.dur.sheetScrimExit / ease.sheetScrimExit.
+ *   All of these are SHEET_MOTION in theme/motion.ts (the one place to change them). Re-entering cancels the exit.
  * - Reduced motion: opacity only, --m-dur-fast.
  * - Body scroll lock and the <html> background (#111318) from enter start to unmount.
  * `data-composed` stays on the root for the composed_ms hooks; it no longer gates visibility.
@@ -119,7 +120,8 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
     const scrim = scrimRef.current;
     if (!card || !scrim || typeof card.animate !== 'function') { setEntering(false); return; }
     // Held off-screen until it can show composed: no frame is drawn before the slide.
-    if (!go && !entered.current) {
+    // Closed during the hold and the details landed later: it never entered, so there is no exit to play.
+    if ((!go || phase === 'exiting') && !entered.current) {
       // The scrim stays hit-testable (opacity 0): a tap on it closes the sheet during the hold (Reviewer).
       card.style.visibility = 'hidden'; scrim.style.opacity = '0';
       prevPhase.current = phase;
@@ -143,7 +145,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
           : card.animate([{ transform: `translate3d(0, ${y}px, 0)` }, { transform: 'translate3d(0, 100%, 0)' }],
             { duration: exitMs, easing: MOTION.ease.sheetExit, fill: 'forwards' }),
         scrim.animate([{ opacity: getComputedStyle(scrim).opacity }, { opacity: 0 }],
-          { duration: exitMs, easing: MOTION.ease.sheetExit, fill: 'forwards' }),
+          { duration: rm ? exitMs : Math.round(exitMs * MOTION.dur.sheetScrimExit / MOTION.dur.sheetExit), easing: MOTION.ease.sheetScrimExit, fill: 'forwards' }),
       ];
       return;
     }
@@ -169,7 +171,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
       : card.animate([{ transform: 'translate3d(0, 100%, 0)' }, { transform: 'translate3d(0, 0, 0)' }],
         { duration: MOTION.dur.sheetEnter, easing: MOTION.ease.sheet });
     const fade = scrim.animate([{ opacity: 0 }, { opacity: MOTION.scrim }],
-      { duration: rm ? MOTION.dur.fast : MOTION.dur.standard, easing: MOTION.ease.standard });
+      { duration: rm ? MOTION.dur.fast : MOTION.dur.sheetScrimEnter, easing: rm ? MOTION.ease.standard : MOTION.ease.sheetScrimEnter });
     anims.current = [enter, fade];
     // No primed frame (the 150 ms tap-to-motion budget, Designer 10:16 PM): the enter plays from the first painted frame.
     const start = () => {
@@ -339,7 +341,7 @@ export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElem
       const d = rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetExit : MODAL_EXIT_MS;
       if (ok(card)) anims.current.push(card.animate(rm ? [{ opacity: curO }, { opacity: 0 }]
         : [{ transform: curT, opacity: curO }, { transform: out, opacity: o0 }], { duration: d, easing: bottom ? MOTION.ease.sheetExit : MOTION.ease.accel, fill: 'forwards' }));
-      if (ok(scrim) && scrim !== card) anims.current.push(scrim.animate([{ opacity: so }, { opacity: 0 }], { duration: d, easing: bottom ? MOTION.ease.sheetExit : MOTION.ease.accel, fill: 'forwards' }));
+      if (ok(scrim) && scrim !== card) anims.current.push(scrim.animate([{ opacity: so }, { opacity: 0 }], { duration: rm || !bottom ? d : MOTION.dur.sheetScrimExit, easing: bottom ? MOTION.ease.sheetScrimExit : MOTION.ease.accel, fill: 'forwards' }));
       return;
     }
     if (entered.current) {
@@ -348,7 +350,7 @@ export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElem
     }
     entered.current = true;
     if (ok(scrim) && scrim !== card) anims.current.push(scrim.animate([{ opacity: 0 }, { opacity: 1 }],
-      { duration: rm ? MOTION.dur.fast : MOTION.dur.standard, easing: MOTION.ease.standard }));
+      { duration: rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetScrimEnter : MOTION.dur.standard, easing: bottom && !rm ? MOTION.ease.sheetScrimEnter : MOTION.ease.standard }));
     if (ok(card)) anims.current.push(card.animate(rm ? [{ opacity: 0 }, { opacity: 1 }]
       : [{ transform: from, opacity: o0 }, { transform: 'none', opacity: 1 }],
       { duration: rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetEnter : MODAL_ENTER_MS, easing: bottom ? MOTION.ease.sheet : MOTION.ease.decel }));

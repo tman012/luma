@@ -21,7 +21,7 @@ vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => ({ openMovie: vi.fn(), openTv: vi.fn() }) }));
 
 import { MinimalHomePage } from '@/pages/MinimalHomePage';
-import { ReservedRails } from '@/components/home/Rails';
+import { SkeletonRails } from '@/components/home/Rails';
 
 const HOME = {
   plex: true,
@@ -38,7 +38,7 @@ describe('v289 phone Home pills load slot (no top→under-CW jump)', () => {
   it('keeps pills under the first skeleton rail while /api/home is pending', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
-    const skeleton = screen.getByTestId('home-reserved');
+    const skeleton = screen.getByTestId('home-skeleton');
     const pills = screen.getByTestId('home-pills');
     const firstSection = skeleton.querySelector('section');
     expect(firstSection).toBeTruthy();
@@ -67,20 +67,20 @@ describe('v289 phone Home pills load slot (no top→under-CW jump)', () => {
     expect(cw.compareDocumentPosition(pills) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('ReservedRails places afterFirst after the first section only', () => {
+  it('SkeletonRails places afterFirst after the first section only', () => {
     render(
-      <ReservedRails afterFirst={<div data-testid="slot" />} />,
+      <SkeletonRails afterFirst={<div data-testid="slot" />} />,
     );
-    const sk = screen.getByTestId('home-reserved');
+    const sk = screen.getByTestId('home-skeleton');
     const kids = Array.from(sk.children);
     expect(kids[0]!.tagName).toBe('SECTION');
     expect(kids[1]!.getAttribute('data-testid')).toBe('slot');
     expect(kids.filter(k => k.tagName === 'SECTION')).toHaveLength(3);
   });
 
-  it('source: loading path no longer paints HomePills above ReservedRails', () => {
+  it('source: loading path no longer paints HomePills above SkeletonRails', () => {
     const home = readFileSync(resolve(__dirname, '../src/pages/MinimalHomePage.tsx'), 'utf8');
-    expect(home).toContain('ReservedRails afterFirst={<HomePills after />}');
-    expect(home).not.toMatch(/<>\s*<HomePills\s*\/>\s*<ReservedRails\s*\/>\s*<\/>/);
+    expect(home).toContain('SkeletonRails afterFirst={<HomePills after />}');
+    expect(home).not.toMatch(/<>\s*<HomePills\s*\/>\s*<SkeletonRails\s*\/>\s*<\/>/);
   });
 });

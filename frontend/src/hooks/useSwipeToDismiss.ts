@@ -186,7 +186,7 @@ export function useSwipeToDismiss({
       s.isDragging = false;
       // Continue from where the finger left it: max(sheetDragMin, exit x remaining / height), the sheet exit curve.
       const outMs = Math.round(Math.max(MOTION.dur.sheetDragMin, MOTION.dur.sheetExit * Math.max(0, containerH - s.translateY) / containerH));
-      applyTransform(el, containerH, 0, `transform ${outMs}ms ${MOTION.ease.sheetExit}`);
+      applyTransform(el, containerH, 0, `transform ${outMs}ms ${MOTION.ease.sheetExit}`, `opacity ${outMs}ms ${MOTION.ease.sheetScrimExit}`);
       timersRef.current.push(setTimeout(() => onDismiss(), outMs));
     } else {
       s.isDragging = false;
@@ -194,7 +194,7 @@ export function useSwipeToDismiss({
       const backMs = Math.round(Math.max(MOTION.dur.sheetDragMin, MOTION.dur.sheetEnter * Math.min(1, s.translateY / containerH)));
       s.translateY = 0;
       s.backdropOpacity = 1;
-      applyTransform(el, 0, 1, `transform ${backMs}ms ${MOTION.ease.sheet}`);
+      applyTransform(el, 0, 1, `transform ${backMs}ms ${MOTION.ease.sheet}`, `opacity ${backMs}ms ${MOTION.ease.sheetScrimEnter}`);
 
       timersRef.current.push(setTimeout(() => {
         if (el) applyTransform(el, 0, 1, '');
@@ -231,6 +231,7 @@ function applyTransform(
   translateY: number,
   backdropOpacity: number,
   transition: string,
+  scrimTransition = '',
 ) {
   const card = scrollEl.parentElement;
   if (card) {
@@ -241,7 +242,7 @@ function applyTransform(
 
   const overlay = scrollEl.closest('[data-modal]') as HTMLElement | null;
   const scrim = overlay?.querySelector<HTMLElement>('[data-sheet-scrim]');
-  if (scrim) scrim.style.opacity = String(MOTION.scrim * backdropOpacity);
+  if (scrim) { scrim.style.transition = scrimTransition; scrim.style.opacity = String(MOTION.scrim * backdropOpacity); }
   else if (overlay) {
     overlay.style.backgroundColor = `rgba(0,0,0,${MOTION.scrim * backdropOpacity})`;
   }

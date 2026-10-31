@@ -662,14 +662,19 @@ describe('v325 desktop week navigator (Taylor)', () => {
   });
 });
 
-describe('v325 MOTION.md §4: skeletons retired app-wide', () => {
-  it('no skeleton or shimmer source is left (SkeletonRails, .skeleton-shimmer, .luma-shimmer, @keyframes shimmer)', () => {
-    const files = ['index.css', 'components/home/Rails.tsx', 'pages/MinimalHomePage.tsx', 'pages/MobileHomePage.tsx', 'pages/AuthenticatedHomePage.tsx',
-      'pages/LibrariesPage.tsx', 'components/home/PlexSettings.tsx', 'components/settings/SectionTrackersList.tsx', 'components/library/TvCalendar.tsx'];
-    for (const f of files) {
-      const s = readFileSync(resolve(__dirname, '../src/' + f), 'utf8');
-      expect(s, f).not.toMatch(/SkeletonRails|skeleton-shimmer|luma-shimmer|@keyframes shimmer|lumaShimmer/);
+describe('v325 MOTION.md §4: skeletons retired everywhere except Home (exception 2026-10-30 11:32 PM ET)', () => {
+  it('only the Home pages, the Home rails and the shared CSS carry skeleton or shimmer source', async () => {
+    const fs = await import('node:fs');
+    const home = new Set(['index.css', 'components/home/Rails.tsx', 'pages/MinimalHomePage.tsx', 'pages/MobileHomePage.tsx', 'pages/AuthenticatedHomePage.tsx']);
+    const root = resolve(__dirname, '../src');
+    const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap(e =>
+      e.isDirectory() ? walk(d + '/' + e.name) : /\.(tsx?|css)$/.test(e.name) ? [d + '/' + e.name] : []);
+    for (const f of walk(root)) {
+      const rel = f.slice(root.length + 1);
+      if (home.has(rel)) continue;
+      expect(fs.readFileSync(f, 'utf8'), rel).not.toMatch(/SkeletonRails|skeleton-shimmer|luma-shimmer|@keyframes shimmer|lumaShimmer/);
     }
+    expect(fs.readFileSync(root + '/components/home/Rails.tsx', 'utf8')).toContain('export function SkeletonRails');
   });
 });
 

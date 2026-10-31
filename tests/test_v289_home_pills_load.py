@@ -13,11 +13,11 @@ def test_sw_v289_or_newer():
 
 
 def test_minimal_home_skeleton_hosts_pills_after_first_rail():
-    """Loading path must not paint HomePills above ReservedRails (top→jump)."""
+    """Loading path must not paint HomePills above SkeletonRails (top→jump)."""
     root = os.path.join(os.path.dirname(__file__), '..')
     home = open(os.path.join(root, 'frontend', 'src', 'pages', 'MinimalHomePage.tsx')).read()
     rails = open(os.path.join(root, 'frontend', 'src', 'components', 'home', 'Rails.tsx')).read()
-    assert 'ReservedRails afterFirst={<HomePills after />}' in home
-    assert '<>\n        <HomePills />\n        <ReservedRails />' not in home
+    assert 'SkeletonRails afterFirst={<HomePills after />}' in home
+    assert '<>\n        <HomePills />\n        <SkeletonRails />' not in home
     assert 'afterFirst' in rails
-    assert 'r === 0 && afterFirst' in rails
+    assert 'r === 0 && (afterH != null ? <div style={{ height: afterH }} /> : afterFirst)' in rails   # Home crossfade ghost keeps the slot's height

@@ -32,7 +32,7 @@ describe('Home with an empty or partial /api/home answer', () => {
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId('home-empty')).toBeTruthy());
     expect(screen.getByText('Nothing here yet')).toBeTruthy();
-    expect(screen.queryByTestId('home-reserved')).toBeNull();
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
   });
 
   it('keeps the good rails when another is malformed', async () => {

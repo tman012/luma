@@ -21,12 +21,12 @@ describe('v325 motion P1 SheetFrame', () => {
     expect(card.style.opacity === '' || card.style.opacity === '1').toBe(true);
   });
 
-  it('tokens: overlay under sheet, exit 260 ms, background #111318', () => {
+  it('tokens: overlay under sheet, exit from the tokens, background #111318', () => {
     expect(MOTION.z.overlay).toBeLessThan(MOTION.z.sheet);
-    expect(SHEET_EXIT_MS).toBe(260);
+    expect(SHEET_EXIT_MS).toBe(340);
     expect(APP_BG).toBe('#111318');
     const css = readFileSync(resolve(__dirname, '../src/index.css'), 'utf8');
-    for (const v of ['--m-dur-sheet-enter', '--m-ease-decel', '--z-overlay', '--z-sheet']) expect(css).toContain(v);
+    for (const v of ['--m-ease-decel', '--z-overlay', '--z-sheet']) expect(css).toContain(v);
   });
 
   it('the seed shell shows the tapped title and poster at once', async () => {

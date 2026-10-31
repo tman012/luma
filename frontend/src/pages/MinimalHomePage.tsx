@@ -6,7 +6,7 @@ import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { FONT, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
-import { HomeRails, ReservedRails, WYM_RAIL_ID, cardIds, railCss } from '@/components/home/Rails';
+import { HomeRails, SkeletonCrossfade, SkeletonRails, WYM_RAIL_ID, cardIds, railCss } from '@/components/home/Rails';
 import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
 import { useModalHost } from '@/contexts/ModalHostContext';
@@ -182,7 +182,9 @@ export function MinimalHomePage() {
             {/* v280: prod MobilePushBanner — permission + push subscribe on MINIMAL phone Home. */}
             <MobilePushBanner />
             <main data-phone-rails>
-              {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
+              <SkeletonCrossfade loading={!(data || failed || slow)}>
+                {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
+              </SkeletonCrossfade>
             </main>
             {/* v259 Tester LOW: prod's last rail keeps its 28 px bottom margin (Rail <section style={{ marginBottom: 28 }}>,
                 AuthenticatedHomePage.tsx:272) above the 48 px spacer; test's rails have top margins only. */}
@@ -326,7 +328,7 @@ function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpe
     );
   }
   // v289: match prod — pills under the first (CW) skeleton rail, not above it (avoids top→under-CW jump).
-  return <ReservedRails afterFirst={<HomePills after />} />;
+  return <SkeletonRails afterFirst={<HomePills after />} />;
 }
 
 // Centered in the space under the header: one muted line, optional Retry pill.
@@ -347,7 +349,7 @@ export const homePage: React.CSSProperties = {
 /** v213 (Designer): the home page behind the rails is prod 1b4ea74's flat navy, no glow (settings keep homePage's). */
 const page: React.CSSProperties = { ...homePage, background: 'var(--color-kiosk-black)', backgroundAttachment: undefined };
 /** v259: prod 1b4ea74's first phone rail starts at the content offset (no top margin). */
-const phoneFirstRailCss = '[data-phone-rails] > section:first-child, [data-phone-rails] > * > section:first-child { margin-top: 0 !important; }';
+const phoneFirstRailCss = '[data-phone-rails] > section:first-child, [data-phone-rails] > * > section:first-child, [data-phone-rails] > * > * > section:first-child, [data-phone-rails] .luma-skel-out > * > section:first-child { margin-top: 0 !important; }';
 export const homeBar: React.CSSProperties = {
   position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
   padding: 'calc(env(safe-area-inset-top) + 12px) 20px 12px',

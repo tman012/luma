@@ -81,7 +81,7 @@ describe('web kiosk home (>=1024px)', () => {
     renderHome();
     await waitFor(() => screen.getByText('Movie 0'));
     expect(screen.queryByTestId('home-rails')).toBeNull();
-    expect(screen.queryByTestId('home-reserved')).toBeNull();
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
     expect(document.documentElement.style.overflow).toBe('');   // global lock stays on: no page scroll
     const stage = screen.getByTestId('kiosk-home');
     expect(stage.style.position).toBe('fixed');

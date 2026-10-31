@@ -29,19 +29,19 @@ const RAIL_MODAL_SOURCE: Record<HomeRailId, ModalSource> = {
 // Rails whose items are owned (don't show watchlist orb)
 const OWNED_RAILS = new Set<HomeRailId>(['continue_watching', 'recent_movies', 'recent_tv', 'recently_watched']);
 
-// v325: reserved (empty) box for a rail that hasn't loaded yet
-const ReservedRail = memo(function ReservedRail() {
+// Skeleton placeholder for a rail that hasn't loaded yet
+const SkeletonRail = memo(function SkeletonRail() {
   return (
     <div className="mb-6">
-      <div className="h-5 w-32 mb-2" style={{ marginLeft: 12 }} />
+      <div className="skeleton-shimmer h-5 w-32 rounded bg-white/5 mb-2" style={{ marginLeft: 12 }} />
       <div
         className="flex items-start gap-3 overflow-hidden pb-2"
         style={{ paddingLeft: 12 }}
       >
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="w-[115px] shrink-0">
-            <div className="aspect-[2/3]" />
-            <div className="mt-1.5 h-3 w-3/4" />
+            <div className="skeleton-shimmer aspect-[2/3] rounded-lg bg-white/5" />
+            <div className="skeleton-shimmer mt-1.5 h-3 w-3/4 rounded bg-white/5" />
           </div>
         ))}
       </div>
@@ -167,7 +167,7 @@ export function MobileHomePage() {
     if (!rail) return null;
 
     // Still loading: show skeleton for non-conditional rails
-    if (rail.isLoading) return <ReservedRail key={id} />;
+    if (rail.isLoading) return <SkeletonRail key={id} />;
 
     // Loaded but empty
     if (rail.items.length === 0) return null;

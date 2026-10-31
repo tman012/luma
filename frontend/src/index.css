@@ -52,6 +52,14 @@ html.layout-compact .settings-tab-header {
   }
 }
 
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
 
 @utility glass-panel {
   background: rgb(255 255 255 / 0.08);
@@ -80,13 +88,12 @@ html.layout-compact .settings-tab-header {
 /* Motion tokens (MOTION.md §0); TS twin: src/theme/motion.ts */
 :root {
   --m-dur-instant: 0ms; --m-dur-fast: 120ms; --m-dur-standard: 240ms;
-  --m-dur-emphasized: 360ms; --m-dur-sheet-enter: 380ms; --m-dur-sheet-exit: 260ms;
+  --m-dur-emphasized: 360ms;
+  /* Phone sheet enter/exit/scrim/drag: SHEET_MOTION in src/theme/motion.ts only (one place). */
   --m-dur-press: 100ms; --m-dur-image: 240ms; --m-dur-crossfade: 200ms;
   --m-dur-dismiss-exit: 300ms; /* back (popstate) waits this long for the longest sheet/modal exit */
   --m-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --m-ease-decel: cubic-bezier(0.05, 0.7, 0.1, 1);
-  --m-sheet-enter: 380ms; --m-ease-sheet: cubic-bezier(0.3, 0.6, 0.2, 1); --m-ease-sheet-exit: cubic-bezier(0.32, 0, 0.67, 0);
-  --m-dur-sheet-drag-min: 180ms;
   --m-ease-accel: cubic-bezier(0.3, 0, 0.8, 0.15);
   --m-ease-spring: linear(0, 0.25 7%, 0.6 16%, 0.86 27%, 0.97 38%, 1.005 50%, 1.002 65%, 1);
   --m-rise: 6px; --m-route-shift: 8px; --m-stagger: 30ms; --m-stagger-max: 240ms;
@@ -99,7 +106,7 @@ html.layout-compact .settings-tab-header {
 @media (prefers-reduced-motion: reduce) {
   :root {
     --m-rise: 0px; --m-route-shift: 0px; --m-press-scale: 1;
-    --m-dur-sheet-enter: 120ms; --m-dur-sheet-exit: 120ms; --m-dur-emphasized: 120ms; --m-dur-standard: 120ms;
+    --m-dur-emphasized: 120ms; --m-dur-standard: 120ms;
     --m-dur-image: 0ms; --m-dur-crossfade: 0ms; --m-stagger: 0ms; --m-stagger-max: 0ms;
   }
 }
@@ -150,7 +157,7 @@ body,
   min-height: 100%;
   background: var(--color-kiosk-black);
 }
-/* MOTION.md: skeletons retired; loading keeps an empty reserved box, then the content fades and rises in. */
+/* Search palette/R3 and the Libraries/Upgrades sheets: an empty reserved box, then the content fades and rises in (Home keeps its skeletons, Taylor 10/30 11:31 PM). */
 .luma-fade-in{animation:lumaFadeIn var(--m-dur-standard) var(--m-ease-standard) both}
 @keyframes lumaFadeIn{from{opacity:0;transform:translateY(var(--m-rise))}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion: reduce){.luma-fade-in{animation:none}}
@@ -326,6 +333,9 @@ input[type="search"]::-webkit-search-cancel-button {
   .mobile-poster-card:active {
     transform: none;
   }
+  .skeleton-shimmer {
+    animation: none;
+  }
   .mobile-card-enter {
     animation: none !important;
     opacity: 1 !important;
@@ -483,6 +493,20 @@ input[type="search"]::-webkit-search-cancel-button {
   }
 }
 
+/* --------------------------------------------------------------------------
+   Skeleton shimmer — directional sweep replacing animate-pulse
+   -------------------------------------------------------------------------- */
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
 
 
 @import "./styles/kiosk-tv.css";

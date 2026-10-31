@@ -61,7 +61,15 @@ def test_compact_watchlist_buttons_and_confirm_are_prods():
     p_in = block(prod, "borderRadius: '50px',\n                          background: 'rgba(74,222,128,0.12)'", 'In Watchlist')
     assert _norm(p_in) in test
     p_add = block(prod, "width: 'calc(100% - 32px)',\n                        margin: '20px 16px 0',\n                        padding: '14px 20px',\n                        background: '#ffffff',\n                        color: '#000000',", '}}')
-    assert test.count(p_add) >= 2            # Watch and Add to watchlist are prod's same white pill
+    # Watch and Add to watchlist are prod's same white pill. Since the motion tip the pill's layout lives in
+    # sheetRows.PILL (shared with the seed's reserved rows): resolve `...PILL` + overrides and compare the styles.
+    kv = lambda t: dict(re.findall(r"(\w+): ('[^']*'|\d+)", t))
+    want = kv(p_add + '}}')
+    rows = (ROOT / 'frontend/src/components/media/sheetRows.tsx').read_text()
+    pill = kv(block(rows, 'export const PILL: CSSProperties = {', '};'))
+    styles = [kv(m) for m in re.findall(r'style=\{\{\s*\.\.\.PILL,(.*?)\}\}', test, flags=re.S)]
+    resolved = [{**pill, **o} for o in styles]
+    assert sum(1 for r in resolved if r == want) + test.count(p_add) >= 2, (want, resolved)
     p_conf = block(prod, '{showRemoveConfirm && (', "'Remove from Watchlist'}")
     # v264: the confirm dialog carries luma-bleed (full-bleed on phone); strip it for the prod match
     assert strip(_norm(p_conf)) in strip(test)
