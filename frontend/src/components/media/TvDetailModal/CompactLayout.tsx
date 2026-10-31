@@ -1,7 +1,7 @@
 import { sheetBase } from '@/utils/posterColors';
 import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows, ratingsExpectedAtTap } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
-import { SheetFrame, SheetCard, SeedLayer, useSheetGo, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { SheetFrame, SheetCard, SeedLayer, useSeededHero, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT, tapShell } from '@/services/modalPrefetch';
 import { isMinimal } from '@/minimal';
@@ -165,7 +165,7 @@ export function CompactLayout(props: TvModalViewProps) {
     sonarrStatus,
     loading,
     error,
-    ultraBlurColors,
+    ultraBlurColors: detailColors,
     selectedSeason,
     setSelectedSeason,
     phase,
@@ -206,6 +206,11 @@ export function CompactLayout(props: TvModalViewProps) {
   // Phone: the sheet stays off-screen until it can show fully composed
   // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
   const composed = !!error || (!loading && !!show && titleState !== 'hold');
+  // Past the open budget the sheet starts on the tapped card's own art, colors and title (useSeededHero).
+  const hero = useSeededHero(composed, detailColors);
+  const heroHold = hero.seeded ? false : titleState === 'hold';
+  const heroTitleState = hero.seeded ? 'text' : titleState;
+  const ultraBlurColors = hero.colors;
   const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
@@ -430,9 +435,79 @@ export function CompactLayout(props: TvModalViewProps) {
 
   // The seed shell (and the details' crossfade over it) only if the sheet had to start before it was composed
   // (open cap): a composed start draws the final hero from frame 0 with nothing fading (Designer F1).
-  const go = useSheetGo(composed);
+  const go = hero.go;
   const shellShown = useRef(false);
   if (loading && go) shellShown.current = true;
+  const detailsIn = !loading && !error && !!show;
+  const washEl = (
+<>{/* UltraBlur — scrolls with content, slides up over backdrop */}
+                {ultraBlurColors && (
+                  <div data-hero-keep=""
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      zIndex: 0,
+                      pointerEvents: 'none',
+                      opacity: 0.7,
+                      WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 80px)',
+                      maskImage: 'linear-gradient(to bottom, transparent 0%, black 80px)',
+                      ...(hero.seeded ? SEEDED_WASH : {}),
+                    }}
+                  >
+                    <UltraBlurOverlay hold={heroHold} instant colors={ultraBlurColors} variant="mobile" animationDelay={300} />
+                  </div>
+                )}</>
+  );
+  const titleEl = (<>
+{/* Clearlogo / Title */}
+                <div data-hero-keep=""
+                  style={{
+                    margin: '0 auto 24px',
+                    maxWidth: '700px',
+                    width: '95%',
+                    height: '140px',
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    justifyContent: 'center',
+                    overflow: 'visible',
+                  }}
+                >
+                  {heroTitleState === 'logo' && show?.clearLogoUrl ? (
+                    <img
+                      src={show?.clearLogoUrl ? withBase(show.clearLogoUrl) : undefined}
+                      alt={show?.title}
+                      style={{
+                        maxWidth: 'calc(100% - 32px)',
+                        maxHeight: '200px',
+                        objectFit: 'contain',
+                        filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))',
+                      }}
+                      onError={(e) => {
+                        const img = e.target as HTMLImageElement;
+                        img.style.display = 'none';
+                        const fallback = img.nextElementSibling as HTMLElement | null;
+                        if (fallback) fallback.style.display = 'block';
+                      }}
+                    />
+                  ) : null}
+                  <h1
+                    style={{
+                      ...titleTextStyle(heroTitleState),
+                      fontSize: '28px',
+                      fontWeight: 700,
+                      color: '#fff',
+                      lineHeight: 1.2,
+                      margin: 0,
+                      textShadow: '0 2px 8px rgba(0,0,0,0.5)',
+                    }}
+                  >
+                    {hero.seeded ? hero.title : show?.title}
+                  </h1>
+                </div>
+  </>);
   // Enter/exit motion, scrim, scroll lock and the app background live in SheetFrame (MOTION.md §1).
   if (phase === 'gone') return null;
 
@@ -461,7 +536,9 @@ export function CompactLayout(props: TvModalViewProps) {
           }}
         >
           {/* Loading */}
-          <SeedLayer show={shellShown.current} ready={composed} overlap={220} rows={
+          <SeedLayer show={shellShown.current} ready={hero.seeded ? detailsIn : composed} overlap={220} hero={hero.seeded ? {
+            art: <BackdropHero backdropUrl={hero.art} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
+            wash: washEl, title: titleEl } : undefined} rows={
             <ReservedRows pillKept={seedOwned !== false} ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
               <div data-modal-actions="" style={{ display: 'flex', justifyContent: 'center', gap: '18px', padding: '20px 16px' }}>
                 <span data-modal-keep="" style={{ display: 'contents' }}><ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} /></span>
@@ -501,92 +578,30 @@ export function CompactLayout(props: TvModalViewProps) {
           )}
 
           {/* Content */}
-          {!loading && !error && show && (
+          {detailsIn && (
             <>
               {/* Backdrop — Plex-like cover-cropped header via BackdropHero */}
               <BackdropHero
-                backdropUrl={show.backdropUrl}
-                posterUrl={show.posterUrl}
+                backdropUrl={hero.seeded ? hero.art : show.backdropUrl}
+                posterUrl={hero.seeded ? null : show.posterUrl}
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
-                hold={titleState === 'hold'} instant
+                hold={heroHold} instant
               />
 
               {/* === CENTERED CONTENT AREA === */}
-              <div data-reveal={titleState !== 'hold' ? 'shown' : 'hold'} style={{
+              <div data-reveal={titleState !== 'hold' ? 'shown' : 'hold'} data-details-fade={hero.seeded ? '' : undefined} style={{
                 position: 'relative',
                 zIndex: 3,
                 textAlign: 'center',
                 marginTop: '-220px',
                 // The sheet is opaque from its first frame; only the title waits for the logo (titleTextStyle).
                 // Details that replace the seed shell crossfade in.
-                animation: shellShown.current ? SHELL_CROSSFADE : 'none',
+                animation: hero.seeded || !shellShown.current ? 'none' : SHELL_CROSSFADE,
               }}>
-                {/* UltraBlur — scrolls with content, slides up over backdrop */}
-                {ultraBlurColors && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      zIndex: 0,
-                      pointerEvents: 'none',
-                      opacity: 0.7,
-                      WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 80px)',
-                      maskImage: 'linear-gradient(to bottom, transparent 0%, black 80px)',
-                    }}
-                  >
-                    <UltraBlurOverlay hold={titleState === 'hold'} instant colors={ultraBlurColors} variant="mobile" animationDelay={300} />
-                  </div>
-                )}
-                {/* Clearlogo / Title */}
-                <div
-                  style={{
-                    margin: '0 auto 24px',
-                    maxWidth: '700px',
-                    width: '95%',
-                    height: '140px',
-                    display: 'flex',
-                    alignItems: 'flex-end',
-                    justifyContent: 'center',
-                    overflow: 'visible',
-                  }}
-                >
-                  {titleState === 'logo' && show.clearLogoUrl ? (
-                    <img
-                      src={show.clearLogoUrl ? withBase(show.clearLogoUrl) : undefined}
-                      alt={show.title}
-                      style={{
-                        maxWidth: 'calc(100% - 32px)',
-                        maxHeight: '200px',
-                        objectFit: 'contain',
-                        filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))',
-                      }}
-                      onError={(e) => {
-                        const img = e.target as HTMLImageElement;
-                        img.style.display = 'none';
-                        const fallback = img.nextElementSibling as HTMLElement | null;
-                        if (fallback) fallback.style.display = 'block';
-                      }}
-                    />
-                  ) : null}
-                  <h1
-                    style={{
-                      ...titleTextStyle(titleState),
-                      fontSize: '28px',
-                      fontWeight: 700,
-                      color: '#fff',
-                      lineHeight: 1.2,
-                      margin: 0,
-                      textShadow: '0 2px 8px rgba(0,0,0,0.5)',
-                    }}
-                  >
-                    {show.title}
-                  </h1>
-                </div>
+                {washEl}
+                {titleEl}
 
                 {/* Season detail: season name (back handled by top-left chevron).
                     Hidden in episode mode so opening Episodes sheet (which sets

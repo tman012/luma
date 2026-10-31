@@ -233,6 +233,40 @@ export function watchSheet(onClosed: () => void): void {
 
 /** MOTION.md §1.3: the tap waits at most this long for warm details, then opens with the seed shell. */
 export const OPEN_BUDGET_MS = 150;
+/** How long a tap waits for warm details before it opens the sheet anyway (on the seeded hero). With the
+ *  mount and one primed frame this keeps tap-to-motion under OPEN_BUDGET_MS, also at 4x CPU (captap.py). */
+export const OPEN_WAIT_MS = 0;   // one macrotask: details already warm (prefetched on hover/press) still win
+/** How long a mounted sheet may still hold for its details: none after a tap (it already waited OPEN_WAIT_MS);
+ *  OPEN_BUDGET_MS for a sheet opened any other way. */
+export function budgetLeft(): number {
+  if (tapAt && now() - tapAt < 5000) return 0;
+  return OPEN_BUDGET_MS;
+}
+/** Fired by SheetFrame on the frame the phone sheet starts moving. */
+export const SHEET_MOVING_EVENT = 'luma:sheet-moving';
+/** Press feedback (Designer 10:16 PM): a .luma-pressable (Home card, search row) scales to 0.98 on pointerdown,
+ *  on that frame, and stays pressed until its sheet starts moving; released on cancel, or soon after a release
+ *  that opens nothing. Reduced motion: opacity only (index.css). */
+let pressed: HTMLElement | null = null;
+let pressTimer = 0;
+function release(el: HTMLElement | null = pressed) {
+  window.clearTimeout(pressTimer);
+  el?.removeAttribute('data-pressed');
+  if (el === pressed) pressed = null;
+}
+function holdFor(el: HTMLElement, ms: number) { window.clearTimeout(pressTimer); pressTimer = window.setTimeout(() => release(el), ms); }
+if (typeof window !== 'undefined' && !(window as { __lumaPress?: boolean }).__lumaPress) {
+  (window as { __lumaPress?: boolean }).__lumaPress = true;
+  window.addEventListener('pointerdown', (e) => {
+    const el = (e.target as Element | null)?.closest?.('.luma-pressable') as HTMLElement | null;
+    if (!el) return;
+    release(); pressed = el; el.setAttribute('data-pressed', 'true');
+    holdFor(el, 1200);
+  }, { capture: true, passive: true });
+  window.addEventListener('pointerup', () => { if (pressed && !pending) holdFor(pressed, 250); }, { capture: true, passive: true });
+  window.addEventListener('pointercancel', () => release(), { capture: true, passive: true });
+  window.addEventListener(SHEET_MOVING_EVENT, () => release());
+}
 
 /** Home card and search result taps (one path): pressed state on the tapped element, warm details for up
  *  to OPEN_BUDGET_MS, then `open()`; the press releases as the sheet starts entering (next frame).
@@ -250,12 +284,12 @@ export async function openWhenReady(
   const seed = colorsFromImage(img);
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);
   shell = card ? { title: tapTitle(card), poster: img?.currentSrc || img?.src || null, at: now(), owned: tapOwned(card, ratingKey), plex: !!ratingKey } : null;
-  card?.setAttribute('data-pressed', 'true');
+  if (card) { if (pressed && pressed !== card) release(); pressed = card; card.setAttribute('data-pressed', 'true'); holdFor(card, SHEET_MOUNT_WAIT_MS); }
   let timer = 0;
   try {
     await Promise.race([
       warmDetail(kind, ratingKey, tmdbId).catch(() => {}),
-      new Promise<void>((res) => { timer = window.setTimeout(res, OPEN_BUDGET_MS); }),
+      new Promise<void>((res) => { timer = window.setTimeout(res, OPEN_WAIT_MS); }),
     ]);
   } finally {
     window.clearTimeout(timer);
@@ -264,10 +298,10 @@ export async function openWhenReady(
     open();
   } catch (e) {
     pending = false;
-    card?.removeAttribute('data-pressed');
+    release(card);
     throw e;
   }
-  requestAnimationFrame(() => card?.removeAttribute('data-pressed'));
+  // The press is released by the sheet's first moving frame (SHEET_MOVING_EVENT); holdFor is the fallback.
   watchSheet(() => { pending = false; onClosed?.(); });
 }
 

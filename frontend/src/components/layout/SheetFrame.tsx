@@ -13,7 +13,8 @@ import { createContext, useCallback, useContext, useLayoutEffect, useRef, useSta
 import { createPortal } from 'react-dom';
 import { APP_BG, MOTION, reducedMotion } from '@/theme/motion';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
-import { OPEN_CAP_MS, remainingCap, tapShell } from '@/services/modalPrefetch';
+import { budgetLeft, SHEET_MOVING_EVENT, tapShell } from '@/services/modalPrefetch';
+import type { UltraBlurColors } from '@/utils/modalParsers';
 
 export type SheetPhase = 'entering' | 'visible' | 'exiting' | 'gone';
 
@@ -48,33 +49,56 @@ function currentY(el: HTMLElement): number {
   return m[1] ? v[13]! : v[5]!;
 }
 
-/** When the phone sheet may start its slide (Designer F1, 10/30): once the details are composed (hero art, wash,
- *  title in their final style) or the open cap runs out. Until then nothing is drawn, so the hero never restyles
- *  after the slide. State, not derived: the render that flips it already holds the composed children. */
+/** When the phone sheet may start its slide: once the details are composed, or when the tap's open budget
+ *  (OPEN_BUDGET_MS = 150 ms from the tap, MOTION.md §1.1) is spent, whichever is first. Past the budget the sheet
+ *  opens on the seeded hero (useSeededHero). State, not derived: the render that flips it holds those children. */
 export function useSheetGo(composed: boolean): boolean {
-  const [go, setGo] = useState(composed);
+  const [go, setGo] = useState(() => composed || budgetLeft() === 0);
   useLayoutEffect(() => {
     if (go) return;
     if (composed) { setGo(true); return; }
-    const t = window.setTimeout(() => setGo(true), remainingCap(OPEN_CAP_MS));
+    const t = window.setTimeout(() => setGo(true), budgetLeft());
     return () => window.clearTimeout(t);
   }, [composed, go]);
   return go;
 }
 
-export function SheetFrame({ name, variant = 'mobile', phase, composed, go: goProp, onScrimClick, children }: {
-  name: string; variant?: string; phase: SheetPhase; composed: boolean; go?: boolean;
+/** The phone hero when the sheet has to start before the details are composed (Designer 10:16 PM): built once,
+ *  at the slide's start, from what the tapped card already had (its poster art, its poster-seeded colors, its
+ *  title) and kept for the sheet's life, so the art, wash, body tint and title never restyle; only the detail
+ *  boxes fade in when the data lands. `seeded` false: the composed details drive the hero as before. */
+export function useSeededHero(composed: boolean, colors: UltraBlurColors | null) {
+  const go = useSheetGo(composed);
+  const tap = useRef(tapShell()).current;
+  const seeded = useRef<boolean | null>(null);
+  if (go && seeded.current === null) seeded.current = !composed && !!tap;
+  const frozen = useRef<{ colors: UltraBlurColors | null } | null>(null);
+  if (seeded.current && !frozen.current) frozen.current = { colors };
+  const on = seeded.current === true;
+  return { go, seeded: on, art: on ? tap!.poster : null, title: on ? tap!.title : '', colors: on ? frozen.current!.colors : colors };
+}
+
+/** Seeded hero: the wash box has one fixed height in the seed and in the details (its blobs scale with the box),
+ *  so both draw the same pixels; it fades out at the bottom instead of ending at the content's edge. */
+export const SEEDED_WASH: CSSProperties = {
+  bottom: 'auto', height: '100vh',
+  WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 80px, black calc(100% - 160px), transparent 100%)',
+  maskImage: 'linear-gradient(to bottom, transparent 0%, black 80px, black calc(100% - 160px), transparent 100%)',
+};
+
+export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onScrimClick, children }: {
+  name: string; variant?: string; phase: SheetPhase; composed: boolean; go: boolean;
   onScrimClick?: () => void; children: ReactNode;
 }) {
-  const goOwn = useSheetGo(composed);
-  const go = goProp ?? goOwn;
   const cardRef = useRef<HTMLDivElement>(null);
   const scrimRef = useRef<HTMLDivElement>(null);
   const anims = useRef<Animation[]>([]);
   const entered = useRef(false);
   const prevPhase = useRef<SheetPhase>(phase);
   const [entering, setEntering] = useState(true);
-  const primed = useRef<(() => void) | null>(null);
+  // Unmount: nothing left running on a detached card (Reviewer: the prime's rAF; the prime is gone, the enter is
+  // started synchronously, so cancel whatever animations are still live).
+  useLayoutEffect(() => () => { anims.current.forEach((a) => a.cancel()); anims.current = []; }, []);
 
   // Scroll lock + app background paint, from enter start until unmount.
   useLayoutEffect(() => {
@@ -96,15 +120,15 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go: goPr
     if (!card || !scrim || typeof card.animate !== 'function') { setEntering(false); return; }
     // Held off-screen until it can show composed: no frame is drawn before the slide.
     if (!go && !entered.current) {
-      card.style.visibility = 'hidden'; scrim.style.visibility = 'hidden';
+      // The scrim stays hit-testable (opacity 0): a tap on it closes the sheet during the hold (Reviewer).
+      card.style.visibility = 'hidden'; scrim.style.opacity = '0';
       prevPhase.current = phase;
       return;
     }
-    card.style.visibility = ''; scrim.style.visibility = '';
+    card.style.visibility = '';
     const rm = reducedMotion();
     const stop = () => { anims.current.forEach((a) => a.cancel()); anims.current = []; };
     if (phase === 'exiting') {
-      primed.current?.(); primed.current = null;   // closed during the primed frames: start the enter so the exit has a start point
       prevPhase.current = phase;
       const y = currentY(card);
       const h = card.offsetHeight || window.innerHeight;
@@ -139,19 +163,17 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go: goPr
     }
     entered.current = true;
     card.style.willChange = 'transform';
-    // The composed card's first paint (hero art, wash, blur layers) happens off-screen on a primed frame, so the
-    // slide's first frames don't carry that raster (a 72 ms stall at 4x CPU, sheetmeasure tv-owned).
-    if (rm) card.style.opacity = '0'; else card.style.transform = 'translate3d(0, 100%, 0)';
-    scrim.style.opacity = '0';
-    let raf = requestAnimationFrame(() => { raf = requestAnimationFrame(() => { raf = 0; start(); }); });
-    const start = () => {
-    card.style.transform = 'translate3d(0, 0, 0)'; card.style.opacity = ''; scrim.style.opacity = '';
+    // WAAPI from the first frame (a re-render can't reset it the way it resets inline styles).
     const enter = rm
       ? card.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.dur.fast, easing: MOTION.ease.standard })
       : card.animate([{ transform: 'translate3d(0, 100%, 0)' }, { transform: 'translate3d(0, 0, 0)' }],
         { duration: MOTION.dur.sheetEnter, easing: MOTION.ease.sheet });
     const fade = scrim.animate([{ opacity: 0 }, { opacity: MOTION.scrim }],
       { duration: rm ? MOTION.dur.fast : MOTION.dur.standard, easing: MOTION.ease.standard });
+    anims.current = [enter, fade];
+    // No primed frame (the 150 ms tap-to-motion budget, Designer 10:16 PM): the enter plays from the first painted frame.
+    const start = () => {
+    window.dispatchEvent(new Event(SHEET_MOVING_EVENT));   // releases the tapped card's press
     anims.current = [enter, fade];
     // The held details commit when the slide ends, then fade in place (Designer 7:30 PM: the fade must not drop
     // slide frames; a commit at 60% of the slide dropped 5-9 frames at 1x/4x, sheetmeasure.py).
@@ -168,7 +190,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go: goPr
     const fallback = window.setTimeout(finish, (rm ? MOTION.dur.fast : MOTION.dur.sheetEnter) + ENTER_FALLBACK_SLACK_MS);
     enter.finished.then(finish, () => { window.clearTimeout(fallback); setEntering(false); });
     };
-    primed.current = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; start(); } };
+    start();
   }, [phase, go]);
 
   if (phase === 'gone') return null;
@@ -213,8 +235,21 @@ export function SheetCard({ background, children }: { background: string; childr
 
 /** The sheet's first frame while details load (MOTION.md §1.2-1.3): the final layout's top (backdrop box,
  *  title block, reserved rows) filled from what the tapped card showed; the details crossfade in over it. */
-export function SeedShell({ overlap, rows }: { overlap: number; rows?: ReactNode }) {
+export interface SeedHero { art: ReactNode; wash: ReactNode; title: ReactNode }
+export function SeedShell({ overlap, rows, hero }: { overlap: number; rows?: ReactNode; hero?: SeedHero }) {
   const seed = tapShell();
+  // Seeded hero: the layout's own BackdropHero, wash and title block with the frozen seed inputs (same pixels
+  // as the details' hero underneath); only the reserved rows differ (invisible here).
+  if (hero) return (
+    <div data-seed-shell="" data-seed-hero="" aria-busy="true">
+      {hero.art}
+      <div style={{ position: 'relative', zIndex: 3, marginTop: -overlap, textAlign: 'center' }}>
+        {hero.wash}{hero.title}
+        {/* ReservedRows' 24px top margin collapses with the title block's 24px bottom margin, as in the details. */}
+        <div style={{ padding: '0 16px' }}>{rows}</div>
+      </div>
+    </div>
+  );
   return (
     <div data-seed-shell="" aria-busy="true">
       <div style={{ position: 'relative', height: BACKDROP_HEIGHT, overflow: 'hidden', background: APP_BG }}>
@@ -239,7 +274,7 @@ export function SeedShell({ overlap, rows }: { overlap: number; rows?: ReactNode
  *  revealed, hero image ready), then fades out (CSS animation, so it starts on the frame the details
  *  actually commit, also when SheetCard held them during the slide) while the details fade in at their
  *  final boxes underneath (SHELL_CROSSFADE): no placeholder bars, never a blank hero. Removed on animationend. */
-export function SeedLayer({ show, ready, overlap, rows }: { show: boolean; ready: boolean; overlap: number; rows?: ReactNode }) {
+export function SeedLayer({ show, ready, overlap, rows, hero }: { show: boolean; ready: boolean; overlap: number; rows?: ReactNode; hero?: SeedHero }) {
   const [done, setDone] = useState(false);
   useLayoutEffect(() => { if (!ready) setDone(false); }, [ready]);
   // animationend can be skipped (animations off, hidden tab): drop the seed after the fade's length + slack anyway.
@@ -248,13 +283,14 @@ export function SeedLayer({ show, ready, overlap, rows }: { show: boolean; ready
     const t = window.setTimeout(() => setDone(true), MOTION.dur.crossfade + SEED_FALLBACK_SLACK_MS);
     return () => window.clearTimeout(t);
   }, [show, ready, done]);
-  if (!show || done) return null;
+  // A seeded hero leaves at once: the details' hero underneath is pixel-identical; their boxes fade in themselves.
+  if (!show || done || (hero && ready)) return null;
   return (
     <div data-seed-layer={ready ? 'fading' : 'on'} aria-hidden="true"
       onAnimationEnd={(e) => { if (e.target === e.currentTarget && ready) setDone(true); }}
       style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, pointerEvents: 'none',
         animation: ready ? SEED_FADE_OUT : 'none' }}>
-      <SeedShell overlap={overlap} rows={rows} />
+      <SeedShell overlap={overlap} rows={rows} hero={hero} />
     </div>
   );
 }

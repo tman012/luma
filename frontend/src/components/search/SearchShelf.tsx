@@ -329,6 +329,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
               key={`result-${i}`}
               type="button"
               data-testid="search-result"
+              className={isPerson ? undefined : 'luma-pressable'}
               onPointerDown={media ? () => { void warmResult(media); } : undefined}
               onTouchStart={media ? () => { void warmResult(media); } : undefined}
               onClick={(e) => {

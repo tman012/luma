@@ -14,7 +14,8 @@ describe('v276 movie phone colorblur (prod match)', () => {
     const t = readFileSync(join(SRC, 'components/media/MovieDetailModal/CompactLayout.tsx'), 'utf8');
     expect(t).not.toMatch(/isMinimal\(\)\s*\?\s*null/);
     expect(t).not.toMatch(/import \{ isMinimal \} from '@\/minimal'/);
-    expect(t).toMatch(/const ultraBlurColors = paletteColors/);
+    expect(t).toMatch(/useSeededHero\(composed, paletteColors\)/);
+    expect(t).toMatch(/const ultraBlurColors = hero\.colors/);
     expect(t).toMatch(/sheetBase\(ultraBlurColors\)/);
     expect(t).toMatch(/<UltraBlurOverlay[^>]*colors=\{ultraBlurColors\}/);
   });

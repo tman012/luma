@@ -8,7 +8,7 @@ vi.mock('@/utils/posterColors', async (orig) => ({
   colorsFromImage: vi.fn(() => ({ topLeft: 'rgb(200, 40, 40)', topRight: 'rgb(180, 60, 20)', bottomLeft: 'rgb(90, 20, 20)', bottomRight: 'rgb(120, 30, 10)' })),
 }));
 
-import { openWhenReady, scheduleWarm, OPEN_CAP_MS, OPEN_BUDGET_MS, WARM_CONCURRENCY, _resetModalPrefetch } from '@/services/modalPrefetch';
+import { openWhenReady, scheduleWarm, OPEN_CAP_MS, OPEN_WAIT_MS, SHEET_MOVING_EVENT, WARM_CONCURRENCY, _resetModalPrefetch } from '@/services/modalPrefetch';
 import { getSeedColors, _resetModalColors } from '@/services/modalColors';
 import { useModalColors } from '@/hooks/useModalColors';
 import { sheetBase } from '@/utils/posterColors';
@@ -20,18 +20,19 @@ describe('phone popup opens only when composed', () => {
   beforeEach(() => { _resetModalPrefetch(); _resetModalColors(); vi.useFakeTimers(); vi.stubGlobal('fetch', vi.fn(never)); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-  it('v325 motion P1: waits at most the 150 ms budget for a cold title, pressed meanwhile; the press lifts on open', async () => {
+  it('v325 motion P1: waits at most OPEN_WAIT_MS (40 ms, inside the 150 ms tap-to-motion budget) for a cold title, pressed meanwhile; the press lifts when the sheet moves', async () => {
     const card = document.createElement('button');
     card.appendChild(document.createElement('img'));
     const open = vi.fn();
     void openWhenReady('movie', 21, undefined, card, open);
     expect(open).not.toHaveBeenCalled();
     expect(card.getAttribute('data-pressed')).toBe('true');
-    await act(async () => { await vi.advanceTimersByTimeAsync(OPEN_BUDGET_MS - 20); });
-    expect(open).not.toHaveBeenCalled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(40); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(OPEN_WAIT_MS + 10); });
     expect(open).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    // Held until the sheet's first moving frame (Designer 10:16 PM), not released on open.
+    expect(card.getAttribute('data-pressed')).toBe('true');
+    window.dispatchEvent(new Event(SHEET_MOVING_EVENT));
     expect(card.hasAttribute('data-pressed')).toBe(false);
   });
 
@@ -82,11 +83,12 @@ describe('phone sheet markup', () => {
       const s = read(f);
       expect(s).toContain('<SheetFrame');
       expect(s).toContain('composed={composed}');
-      expect(s).toContain('<SeedLayer show={shellShown.current} ready={composed}');
+      expect(s).toContain('<SeedLayer show={shellShown.current} ready={hero.seeded ? detailsIn : composed}');
       // No invisible-until-composed sheet; only the title holds for the logo.
       expect(s).not.toContain('cardOpacity');
       expect(s).not.toContain("opacity: titleState === 'hold' ? 0 : 1");
-      expect(s).toContain("hold={titleState === 'hold'} instant");
+      expect(s).toContain('hold={heroHold} instant');
+      expect(s).toContain("const heroHold = hero.seeded ? false : titleState === 'hold';");
       expect(s).toContain('ready={composed}');
       expect(s).toContain('const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG');
       expect(s).not.toContain('#15102a');
