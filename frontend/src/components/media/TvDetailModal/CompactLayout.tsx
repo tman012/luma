@@ -229,7 +229,7 @@ export function CompactLayout(props: TvModalViewProps) {
   const ratingsState = useImdbRatingsState(show?.title, show?.year);
   const ratingsLoading = ratingsState.loading;
   // The row settles once and fades in together (useRatingsSettle); a later answer is dropped for this open.
-  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey);
+  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey, !!show);
   const hasRatings = !!ratingsSettle.ratings;
     // Known at tap time: outside minimal builds the ratings row has a source (OMDb/RT); the seed reserves it and the
   // row keeps that box, so a late ratings fetch never moves the rows below.

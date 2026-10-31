@@ -1197,7 +1197,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // Effective ratings — IMDb via OMDb (never TMDb vote_average)
   const ratingsState = useImdbRatingsState(show?.title, show?.year);
   // ONE settled row, faded in once (useRatingsSettle); a later answer is dropped for this open.
-  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey);
+  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey, !!show);
   const ratingsRow = useRef(ratingsExpectedAtTap(false)).current || !!ratingsSettle.ratings;
 
   // Trigger reviews fetch when detail loads
