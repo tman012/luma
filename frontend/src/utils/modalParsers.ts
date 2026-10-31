@@ -63,6 +63,8 @@ export interface TvShowDetail {
   contentRating: string | null;
   rating: number | null;
   backdropUrl: string | null;
+  /** A text-free backdrop to crossfade over art already on screen (Plex art kept, title has a logo). */
+  backdropSwapUrl?: string | null;
   posterUrl: string | null;
   clearLogoUrl: string | null;
   /** True once the logo lookup has finished (a null clearLogoUrl then means

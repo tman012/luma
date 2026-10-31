@@ -42,3 +42,46 @@ describe('Rooms sheet bounded wait', () => {
 
   it('the bound is 4s', () => { expect(ROOMS_WAIT_MS).toBe(4000); });
 });
+
+import { RoomsSheet } from '@/components/rooms/RoomsSheet';
+import { RoomsSessionsProvider } from '@/contexts/NotificationsContext';
+
+describe('Rooms sheet reopen', () => {
+  const Sheet = ({ open }: { open: boolean }) => (
+    <MemoryRouter><RoomsSessionsProvider active={open}><RoomsSheet open={open} onClose={() => {}} /></RoomsSessionsProvider></MemoryRouter>
+  );
+  it('reopened mid-load: no stale content, a fresh bounded reveal with its fade', async () => {
+    vi.useFakeTimers();
+    const fades: unknown[] = [];
+    (Element.prototype as unknown as { animate: unknown }).animate = function (...a: unknown[]) { fades.push(a); return { onfinish: null, cancel() {} } as unknown as Animation; };
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));        // everything hangs
+    const r = render(<Sheet open />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(ROOMS_WAIT_MS + 100); }); // first open waits out
+    expect(screen.getByTestId('rooms-reveal').textContent).toContain('No rooms configured');
+    r.rerender(<Sheet open={false} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    const before = fades.length;
+    r.rerender(<Sheet open />);                                                     // reopen, still loading
+    const box = screen.getByTestId('rooms-reveal');
+    expect(box.dataset.reveal).toBe('hidden');                                     // frame 0: not the old content
+    expect(box.textContent).toBe('');
+    await act(async () => { await vi.advanceTimersByTimeAsync(ROOMS_WAIT_MS - 200); });
+    expect(screen.getByTestId('rooms-reveal').dataset.reveal).toBe('hidden');
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(screen.getByTestId('rooms-reveal').dataset.reveal).not.toBe('hidden');
+    expect(fades.length).toBe(before + 1);                                         // the reopen gets its own fade
+  });
+
+  it('reopened after data loaded: cached content on frame 0, no fade', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ rooms: [], unmatched: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const r = render(<Sheet open />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    r.rerender(<Sheet open={false} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    r.rerender(<Sheet open />);
+    const box = screen.getByTestId('rooms-reveal');
+    expect(box.dataset.reveal).toBe('shown');
+    expect(box.dataset.revealCached).toBe('true');
+  });
+});

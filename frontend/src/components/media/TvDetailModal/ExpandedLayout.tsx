@@ -1,4 +1,5 @@
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
+import { BackdropSwap } from '@/components/media/BackdropSwap';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -1396,6 +1397,10 @@ export function ExpandedLayout(props: TvModalViewProps) {
                 />
               ) : show.posterUrl ? (
                 <img key={show.posterUrl} src={show.posterUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: titleState === 'hold' ? 0 : 0.6, transition: 'opacity 0.45s ease-out' }} />
+              ) : null}
+              {show.backdropUrl && show.backdropSwapUrl && titleState !== 'hold' ? (
+                <BackdropSwap url={show.backdropSwapUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top',
+                  ...(t.backdrop.imgFilter ? { filter: t.backdrop.imgFilter } : {}) }} />
               ) : null}
               {show.backdropUrl && (
                 <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 30%, transparent 40%, rgba(0,0,0,0.2) 100%)', pointerEvents: 'none' }} />

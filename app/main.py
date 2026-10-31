@@ -1279,6 +1279,36 @@ def _tmdb_needs_spelling_correction(results, query_str):
     return False
 
 # TMDB API functions
+def _rank_image(img: Dict) -> tuple:
+    return (img.get('vote_average') or 0, img.get('vote_count') or 0, img.get('width') or 0)
+
+
+def choose_backdrop(details: Optional[Dict]) -> Optional[Dict]:
+    """Pick the detail backdrop to go with the title's clearlogo.
+
+    TMDb's default backdrop_path is often a language backdrop with the title text baked in; with a clearlogo on top
+    the title then shows twice. When the title has a logo (en or no-language, the pool /api/clearlogo picks from),
+    use the best no-language (iso_639_1 null) backdrop; keep a language backdrop only when there is no logo or no
+    text-free backdrop. Adds backdrop_textless / has_logo and, when swapped, backdrop_path_language. The raw image
+    lists are dropped so the payload stays small.
+    """
+    if not isinstance(details, dict):
+        return details
+    images = details.pop('images', None) or {}
+    logos = [l for l in images.get('logos') or [] if l.get('iso_639_1') in ('en', None) and l.get('file_path')]
+    textless = sorted((b for b in images.get('backdrops') or [] if b.get('iso_639_1') is None and b.get('file_path')),
+                      key=_rank_image, reverse=True)
+    current = details.get('backdrop_path')
+    is_textless = bool(current) and any(b['file_path'] == current for b in textless)
+    if logos and textless and not is_textless:
+        details['backdrop_path_language'] = current
+        details['backdrop_path'] = textless[0]['file_path']
+        is_textless = True
+    details['backdrop_textless'] = is_textless
+    details['has_logo'] = bool(logos)
+    return details
+
+
 class TMDBClient:
     """Client for interacting with TMDB API."""
 
@@ -1475,11 +1505,12 @@ class TMDBClient:
         try:
             response = requests.get(
                 f"{self.BASE_URL}/movie/{tmdb_id}",
-                params={'api_key': self.api_key, 'append_to_response': 'credits,videos,release_dates'},
+                params={'api_key': self.api_key, 'append_to_response': 'credits,videos,release_dates,images',
+                        'include_image_language': 'en,null'},
                 timeout=10
             )
             response.raise_for_status()
-            return response.json()
+            return choose_backdrop(response.json())
         except Exception as e:
             logger.error(f"TMDB movie details error: {_redact_secrets(e)}")
             return None
@@ -1530,11 +1561,12 @@ class TMDBClient:
         try:
             response = requests.get(
                 f"{self.BASE_URL}/tv/{tmdb_id}",
-                params={'api_key': self.api_key, 'append_to_response': 'credits,external_ids,content_ratings,videos'},
+                params={'api_key': self.api_key, 'append_to_response': 'credits,external_ids,content_ratings,videos,images',
+                        'include_image_language': 'en,null'},
                 timeout=10
             )
             response.raise_for_status()
-            return response.json()
+            return choose_backdrop(response.json())
         except Exception as e:
             logger.error(f"TMDB TV details error: {_redact_secrets(e)}")
             return None

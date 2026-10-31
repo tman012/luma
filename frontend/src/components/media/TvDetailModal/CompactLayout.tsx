@@ -30,7 +30,7 @@ import { EpisodeHeader } from './EpisodeHeader';
 import { MobilePlaybackSheet } from '../MovieDetailModal/MobilePlaybackSheet';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { PlexSeason } from '@/services/playbackApi';
-import { posterUrl, backdropUpgrade } from '@/utils/image';
+import { posterUrl, backdropUpgrade, backdropHiRes } from '@/utils/image';
 import { SeededLogo, seededTitleStyle, useLogoSwap } from '@/components/media/SeededLogo';
 import { RatingsBar, RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
 import { useImdbRatingsState } from '@/hooks/useImdbRatings';
@@ -590,7 +590,7 @@ export function CompactLayout(props: TvModalViewProps) {
               {/* Backdrop — Plex-like cover-cropped header via BackdropHero */}
               <BackdropHero
                 backdropUrl={hero.seeded ? hero.art : show.backdropUrl}
-                upgradeUrl={backdropUpgrade(hero.seeded, show.backdropUrl)}
+                upgradeUrl={show.backdropSwapUrl ? (backdropHiRes(show.backdropSwapUrl) ?? show.backdropSwapUrl) : backdropUpgrade(hero.seeded, show.backdropUrl)}
                 posterUrl={hero.seeded ? null : show.posterUrl}
                 effects={backdropEffects}
                 phase={phase}

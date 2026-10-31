@@ -251,7 +251,11 @@ export function useTvDetail(
                 parsed.tmdbId = plexTmdbId;
                 parsed.isOwned = true;
                 // Never swap a backdrop that's already on screen.
-                setShow((prev) => (plexBackdropShown && prev?.backdropUrl ? { ...parsed, backdropUrl: prev.backdropUrl } : parsed));
+                // Plex art can't be checked for baked-in title text: with a logo, bring in TMDb's text-free backdrop over it.
+                const swap = tmdbData.has_logo && tmdbData.backdrop_textless ? parsed.backdropUrl : null;
+                setShow((prev) => (plexBackdropShown && prev?.backdropUrl
+                  ? { ...parsed, backdropUrl: prev.backdropUrl, backdropSwapUrl: swap && swap !== prev.backdropUrl ? swap : null }
+                  : parsed));
                 setLoading(false);
                 if (parsed.tvdbId) setTvdbId(parsed.tvdbId);
                 extractTrailerAndEnrich(tmdbData);

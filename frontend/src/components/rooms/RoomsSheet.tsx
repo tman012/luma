@@ -391,13 +391,20 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
   const [deviceMap, setDeviceMap] = useState<Record<string, DeviceData[]>>(() => deviceCache?.map ?? {});
   const [hubMap, setHubMap] = useState<Record<string, string>>(() => deviceCache?.hubs ?? {});
   const [devicesLoaded, setDevicesLoaded] = useState(() => !!deviceCache);
-  const [waitedOut, setWaitedOut] = useState(false);
+  // Each open is its own reveal: a new sequence number on every open remounts the reveal and restarts the bound,
+  // so a reopen mid-load never reuses the last open's state.
+  const openSeq = useRef(0);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) openSeq.current += 1;
+  wasOpen.current = open;
+  const seq = openSeq.current;
+  const [waitedSeq, setWaitedSeq] = useState(0);
+  const waitedOut = waitedSeq === seq;
   useEffect(() => {
     if (!open) return;
-    setWaitedOut(false);
-    const t = window.setTimeout(() => setWaitedOut(true), ROOMS_WAIT_MS);
+    const t = window.setTimeout(() => setWaitedSeq(seq), ROOMS_WAIT_MS);
     return () => window.clearTimeout(t);
-  }, [open]);
+  }, [open, seq]);
   const [deviceNotice, setDeviceNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -571,7 +578,7 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
             style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
           >
             {/* One reveal once rooms and their devices are ready (no skeletons, no per-list pop-in). */}
-            <ContentReveal id="rooms-sheet" landMs={ENTER_DURATION} ready={(!roomsLoading && devicesLoaded) || waitedOut} testId="rooms-reveal">
+            <ContentReveal key={seq} id="rooms-sheet" landMs={ENTER_DURATION} ready={(!roomsLoading && devicesLoaded) || waitedOut} testId="rooms-reveal">
             {rooms.length === 0 ? (
               <p className="text-center text-[15px] text-white/40 py-12">
                 No rooms configured
