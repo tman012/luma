@@ -43,7 +43,7 @@ describe('shared TV ratings hook', () => {
 describe('both TV layouts use it; the phone sheet renders the bar', () => {
   it('ExpandedLayout imports the shared hook (no private copy)', () => {
     const s = read('components/media/TvDetailModal/ExpandedLayout.tsx');
-    expect(s).toContain("import { useImdbRatings, useImdbRatingsState, ratingsDone } from '@/hooks/useImdbRatings';");
+    expect(s).toContain("import { useImdbRatingsState, ratingsDone } from '@/hooks/useImdbRatings';");
     expect(s).not.toMatch(/function useImdbRatings\(/);
   });
   it('CompactLayout: RatingsBar sm in the reserved slot, after the meta line and before the actions (as the movie sheet)', () => {

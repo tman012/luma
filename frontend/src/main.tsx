@@ -5,6 +5,7 @@ import './index.css';
 import { installConnectServiceFetchHook } from '@/components/connect/connectService';
 import { getUrlBase } from './urlHelpers';
 import { watchBuild } from '@/utils/buildWatch';
+import { preloadRatingIcons } from '@/utils/ratingIcons';
 
 // TODO: Migrate all apiFetch('/api/...') calls in service files to use apiFetch from apiClient.ts
 // This ensures URL base is correctly applied. For now, services use native fetch which works
@@ -183,3 +184,6 @@ function showUpdateToast(waitingSW: ServiceWorker) {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) requestAnimationFrame(() => window.scrollTo(window.scrollX, window.scrollY));
 });
+
+// The sheet ratings row waits for its badge icons; decode them once, ahead of the first open.
+void preloadRatingIcons();

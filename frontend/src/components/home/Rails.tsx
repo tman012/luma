@@ -104,7 +104,7 @@ export function WatchlistPosterCard({ card, onOpen }: { card: Card; onOpen?: OnO
   return (
     <CardShell card={card} onOpen={onOpen} style={wlCard}>
       <div style={wlPoster}>
-        {src && <img src={src} srcSet={cardSrcSet(src, 'poster')} sizes={CARD_SIZES.watchlist} alt="" loading="lazy" style={fill} draggable={false} />}
+        {src && <img src={src} srcSet={cardSrcSet(src, 'watchlist')} sizes={CARD_SIZES.watchlist} alt="" loading="lazy" style={fill} draggable={false} />}
       </div>
       <div style={wlText}>
         {card.label && <p style={wlLabel} data-testid="card-label">{card.label}</p>}
@@ -181,6 +181,23 @@ export function SkeletonRails({ afterFirst, afterH, ghost, layout }: { rails?: n
   );
 }
 
+/** The longest the Home reveal waits for the first viewport's posters to decode. */
+export const HOME_DECODE_CAP_MS = 800;
+
+/** The card images inside the first viewport. They load now, at high priority; the rest stay lazy. */
+function firstViewportImages(root: HTMLElement | null): HTMLImageElement[] {
+  if (!root) return [];
+  const vw = window.innerWidth, vh = window.innerHeight;
+  return Array.from(root.querySelectorAll<HTMLImageElement>('img')).filter(i => {
+    if (i.closest('[data-testid="home-skeleton-out"]')) return false;
+    const r = i.getBoundingClientRect();
+    if (!(r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw)) return false;
+    i.loading = 'eager';
+    i.setAttribute('fetchpriority', 'high');
+    return true;
+  });
+}
+
 /** Home only (MOTION.md exception 11:32 PM ET): the skeleton crossfades to the content in the same box over
  *  MOTION.dur.crossfade. The outgoing skeleton stays on top, absolutely placed (no layout), and fades out while the
  *  content fades in under it; the pills slot keeps its measured height so the lower skeleton rails don't move. */
@@ -201,13 +218,29 @@ export function SkeletonCrossfade({ loading, children }: { loading: boolean; chi
     was.current = loading;
     if (!left || reducedMotion()) return;
     setGhost(true);
-    // A tap is pending (card pressed, sheet not moving yet): hold both fades at their first frame (ghost opaque,
-    // content transparent under it) until the sheet moves, so the crossfade never competes with the sheet start.
+    // Both fades hold at their first frame (ghost opaque, content transparent under it) until the posters in the
+    // first viewport have decoded (at most HOME_DECODE_CAP_MS), so they appear together, and while a tap is pending
+    // (card pressed, sheet not moving yet), so the crossfade never competes with the sheet start.
+    const first = firstViewportImages(box.current);
+    let waitImgs = first.length > 0;
+    let waitTap = tapPending();
+    let live = true;
     let t = 0;
-    const run = () => { setHold(false); window.clearTimeout(t); t = window.setTimeout(() => setGhost(false), MOTION.dur.crossfade); };
-    if (tapPending()) { setHold(true); window.addEventListener(PRESS_RELEASED_EVENT, run, { once: true }); }
-    else t = window.setTimeout(() => setGhost(false), MOTION.dur.crossfade);
-    return () => { window.clearTimeout(t); window.removeEventListener(PRESS_RELEASED_EVENT, run); };
+    let cap = 0;
+    const run = () => {
+      if (!live || waitImgs || waitTap) return;
+      setHold(false); window.clearTimeout(t); t = window.setTimeout(() => setGhost(false), MOTION.dur.crossfade);
+    };
+    const released = () => { waitTap = false; run(); };
+    const decoded = () => { waitImgs = false; window.clearTimeout(cap); run(); };
+    if (waitTap) window.addEventListener(PRESS_RELEASED_EVENT, released, { once: true });
+    if (waitImgs) {
+      cap = window.setTimeout(decoded, HOME_DECODE_CAP_MS);
+      Promise.all(first.map(i => (typeof i.decode === 'function' ? i.decode() : Promise.resolve()).catch(() => {}))).then(decoded);
+    }
+    if (waitImgs || waitTap) setHold(true);
+    else run();
+    return () => { live = false; window.clearTimeout(t); window.clearTimeout(cap); window.removeEventListener(PRESS_RELEASED_EVENT, released); };
   }, [loading]);
   return (
     <div ref={box} data-xf-hold={hold ? '' : undefined} style={{ position: 'relative' }}>

@@ -15,6 +15,29 @@ export const RATING_ICONS = {
   tmdb: assetUrl(`/static/images/tmdb-logo-short.svg${V}`),
 } as const;
 
+const decoded = new Map<string, { img: HTMLImageElement; ready: Promise<void>; done: boolean }>();
+
+/** Decodes one rating icon once per session and keeps the decoded image alive, so every bar paints it from memory. */
+export function decodeRatingIcon(url: string): Promise<void> {
+  let e = decoded.get(url);
+  if (!e) {
+    const img = new Image(); img.src = url;
+    const entry: { img: HTMLImageElement; ready: Promise<void>; done: boolean } = { img, ready: Promise.resolve(), done: false };
+    entry.ready = (typeof img.decode === 'function' ? img.decode() : Promise.resolve()).catch(() => {}).then(() => { entry.done = true; });
+    decoded.set(url, entry); e = entry;
+  }
+  return e.ready;
+}
+
+export function ratingIconDecoded(url: string): boolean {
+  return !!decoded.get(url)?.done;
+}
+
+/** Boot: decode every rating icon ahead of the first sheet. */
+export function preloadRatingIcons(): Promise<void> {
+  return Promise.all(Object.values(RATING_ICONS).map(decodeRatingIcon)).then(() => {});
+}
+
 /** Width / height of each icon file, so the bar can size every icon before it
  *  loads (no layout shift when the files arrive). */
 export const RATING_ICON_ASPECT: Record<string, number> = {

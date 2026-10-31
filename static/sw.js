@@ -5,6 +5,7 @@
 //   /assets/* (hashed)      → CacheFirst (immutable, hash-busted by Vite)
 //   /api/img/* (Plex proxy) → Network only (per-account; only the browser's own
 //                             HTTP cache keeps them, private + Vary: Cookie)
+//   /static/images/*?v=     → CacheFirst (versioned icons)
 //   /static/images/*        → NetworkFirst (icons change without hash)
 //   /static/* (other)       → NetworkFirst (JS/CSS may change without hash)
 //   /api/* (data)           → Network only (never cached)
@@ -22,7 +23,7 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v336';
+const CACHE_VERSION = 'media-kiosk-v337';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
@@ -217,6 +218,21 @@ self.addEventListener('fetch', event => {
   // Rating icons, logos etc. change without filename hash.
   // MUST go to network first so deploys are picked up immediately.
   // Cache is offline fallback only.
+  // A versioned image (?v=, e.g. the rating icons) only changes with its version: CacheFirst, so a sheet
+  // never waits on the network for it. The version cache is purged on every SW bump.
+  if (path.startsWith('/static/images/') && url.searchParams.has('v')) {
+    event.respondWith(
+      caches.match(event.request).then(cached => cached || fetch(event.request).then(resp => {
+        if (cacheable(resp)) {
+          const clone = resp.clone();
+          caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
+        }
+        return resp;
+      }))
+    );
+    return;
+  }
+
   if (path.startsWith('/static/images/')) {
     event.respondWith(
       fetch(event.request).then(resp => {

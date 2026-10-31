@@ -16,8 +16,8 @@ import {
   autoSearchSeason,
 } from '@/services/sonarrApi';
 import { UltraBlurOverlay } from '@/components/media/UltraBlurOverlay';
-import { RatingsBar, RATINGS_SLOT_LG } from '@/components/media/RatingsBar';
-import { useImdbRatings, useImdbRatingsState, ratingsDone } from '@/hooks/useImdbRatings';
+import { RATINGS_SLOT_LG } from '@/components/media/RatingsBar';
+import { useImdbRatingsState, ratingsDone } from '@/hooks/useImdbRatings';
 import { ratingsExpectedAtTap } from '@/components/media/sheetRows';
 import { useRatingsSettle } from '@/hooks/useRatingsSettle';
 import { RatingsSettle } from '@/components/media/RatingsSettle';
@@ -796,7 +796,9 @@ function SeasonDetailModal({
   if (show.contentRating) metaItems.push(show.contentRating);
 
   // Season rating — IMDb via OMDb (never TMDb vote_average)
-  const effectiveRatings = useImdbRatings(show.title, show.year);
+  const seasonRatingsState = useImdbRatingsState(show.title, show.year);
+  const seasonRatings = useRatingsSettle(seasonRatingsState.ratings, ratingsDone(seasonRatingsState, show.title),
+    `${show.title}:${season.season_number}`);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -966,7 +968,7 @@ function SeasonDetailModal({
                     gap: t.meta.gap, flexWrap: 'wrap',
                     fontSize: t.meta.fontSize, fontWeight: 500,
                     color: 'rgba(255,255,255,0.85)',
-                    marginBottom: effectiveRatings ? '12px' : '20px',
+                    marginBottom: seasonRatings.ratings ? '12px' : '20px',
                     textShadow: '0 1px 4px rgba(0,0,0,0.5)',
                   }}>
                     {metaItems.map((item, i) => (
@@ -987,11 +989,8 @@ function SeasonDetailModal({
                 </div>
 
                 {/* Ratings */}
-                {effectiveRatings && (
-                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '18px' }}>
-                    <RatingsBar ratings={effectiveRatings} size="lg" />
-                  </div>
-                )}
+                <RatingsSettle settle={seasonRatings} size="lg" reserve={0}
+                  style={{ display: 'flex', justifyContent: 'center', marginBottom: seasonRatings.ratings ? '18px' : 0 }} />
 
                 {/* Season plot */}
                 {season.overview && (
