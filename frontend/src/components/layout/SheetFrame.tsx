@@ -179,7 +179,7 @@ export function SheetCard({ background, children }: { background: string; childr
 
 /** The sheet's first frame while details load (MOTION.md §1.2-1.3): the final layout's top (backdrop box,
  *  title block, reserved rows) filled from what the tapped card showed; the details crossfade in over it. */
-export function SeedShell({ overlap }: { overlap: number }) {
+export function SeedShell({ overlap, rows }: { overlap: number; rows?: ReactNode }) {
   const seed = tapShell();
   return (
     <div data-seed-shell="" aria-busy="true">
@@ -195,6 +195,7 @@ export function SeedShell({ overlap }: { overlap: number }) {
             {seed?.title ?? ''}
           </h1>
         </div>
+        {rows}
       </div>
     </div>
   );
@@ -204,7 +205,7 @@ export function SeedShell({ overlap }: { overlap: number }) {
  *  revealed, hero image ready), then fades out (CSS animation, so it starts on the frame the details
  *  actually commit, also when SheetCard held them during the slide) while the details fade in at their
  *  final boxes underneath (SHELL_CROSSFADE): no placeholder bars, never a blank hero. Removed on animationend. */
-export function SeedLayer({ show, ready, overlap }: { show: boolean; ready: boolean; overlap: number }) {
+export function SeedLayer({ show, ready, overlap, rows }: { show: boolean; ready: boolean; overlap: number; rows?: ReactNode }) {
   const [done, setDone] = useState(false);
   useLayoutEffect(() => { if (!ready) setDone(false); }, [ready]);
   if (!show || done) return null;
@@ -213,7 +214,7 @@ export function SeedLayer({ show, ready, overlap }: { show: boolean; ready: bool
       onAnimationEnd={(e) => { if (e.target === e.currentTarget && ready) setDone(true); }}
       style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, pointerEvents: 'none',
         animation: ready ? SEED_FADE_OUT : 'none' }}>
-      <SeedShell overlap={overlap} />
+      <SeedShell overlap={overlap} rows={rows} />
     </div>
   );
 }

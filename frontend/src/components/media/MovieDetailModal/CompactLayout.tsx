@@ -1,4 +1,5 @@
 import { sheetBase } from '@/utils/posterColors';
+import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
@@ -370,7 +371,11 @@ export function CompactLayout(props: MovieModalViewProps) {
         >
           {/* Loading — the sheet now slides up before the data lands, so this
               placeholder is what the user sees for the first few hundred ms. */}
-          <SeedLayer show={shellShown.current} ready={composed} overlap={100} />
+          <SeedLayer show={shellShown.current} ready={composed} overlap={100} rows={
+            <ReservedRows actions={
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', padding: '20px 16px', maxWidth: `${76 + 32}px`, margin: '0 auto', boxSizing: 'border-box' }}>
+                <ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} />
+              </div>} />} />
 
           {/* Error */}
           {!loading && error && (
@@ -511,13 +516,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   {metaItems.length > 0 && (
                     <div data-box="meta"
                       style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '10px',
-                        marginTop: '8px',
-                        flexWrap: 'nowrap',
-                        fontSize: '14px',
+                        ...META_ROW,
                         color: 'rgba(255, 255, 255, 0.9)',
                       }}
                     >
@@ -623,20 +622,10 @@ export function CompactLayout(props: MovieModalViewProps) {
                       type="button"
                       onClick={handleUpgradeToggle}
                       style={{
-                        width: 'calc(100% - 32px)',
-                        margin: '20px 16px 0',
-                        padding: '14px 20px',
+                        ...PILL,
                         background: '#ffffff',
                         color: '#000000',
-                        borderRadius: '50px',
-                        border: 'none',
-                        fontSize: '16px',
-                        fontWeight: 600,
                         cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '10px',
                       }}
                     >
                       <svg
@@ -821,29 +810,14 @@ export function CompactLayout(props: MovieModalViewProps) {
 
                 {/* Plot summary */}
                 {detail.summary && (
-                  <div
-                    style={{
-                      padding: '0 16px',
-                      marginBottom: '24px',
-                      textAlign: 'left',
-                    }}
-                  >
+                  <div style={OVERVIEW_WRAP}>
                     <p data-box="overview"
                       onClick={() => setPlotExpanded((v) => !v)}
                       style={{
-                        fontSize: '16px',
-                        lineHeight: 1.6,
+                        ...OVERVIEW_TEXT,
                         color: 'rgba(255, 255, 255, 0.9)',
-                        margin: 0,
                         cursor: 'pointer',
-                        ...(!plotExpanded
-                          ? {
-                              display: '-webkit-box',
-                              WebkitLineClamp: 3,
-                              WebkitBoxOrient: 'vertical' as const,
-                              overflow: 'hidden',
-                            }
-                          : {}),
+                        ...(!plotExpanded ? OVERVIEW_CLAMP : {}),
                       }}
                     >
                       {detail.summary}
