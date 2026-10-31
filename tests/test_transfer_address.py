@@ -122,7 +122,7 @@ def test_failed_copy_falls_back_once_and_logs(remote_env, monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger='app.remote_mover'):
         assert rm.transfer(str(remote_env), '/media/Movies/a.mkv') == 'copied'
     assert [c.get('transfer_host') for c in calls] == ['nas-10g', None]
-    assert calls[0]['tmp'] == calls[1]['tmp']
+    assert calls[0]['tmp'] != calls[1]['tmp']   # B3: fresh temp for the fallback
     assert len(_fallback_logs(caplog, 'nas-10g')) == 1
 
 
@@ -246,7 +246,9 @@ BAD_HOSTS = ['-Jx', '-oProxyCommand', 'a b', 'a;b', 'u@h', '[::1]', '-Jevil.com'
              # hex-number labels inet_aton reads as an IP
              '0x7f000001', '0x7f.1', '0X0A0A0A19', 'nas.0x1', '0x.lan',
              # non-canonical IPv4
-             '010.10.10.25', '10.1', '2130706433', 'nas\n']
+             '010.10.10.25', '10.1', '2130706433', 'nas\n',
+             # reserved 240/4 and 0/8 (parity with the shell)
+             '255.255.255.255', '240.0.0.1', '250.1.2.3', '0.1.2.3']
 GOOD_HOSTS = ['10.10.10.25', '192.168.1.5', '172.16.0.9', 'nas', 'nas.lan', 'ffserver.lan', '0xford.lan', 'x0.lan', 'nas-10g']
 
 
@@ -349,11 +351,40 @@ def test_unusual_500_unwatchable_is_a_final_refusal(remote_env, monkeypatch):
     assert len(calls) == 1   # no re-send, no second copy
 
 
-def test_unusual_500_unwatchable_with_transfer_address_is_one_fallback_then_final(remote_env, monkeypatch):
+def test_unusual_500_unwatchable_with_transfer_address_is_one_request_final(remote_env, monkeypatch):
+    """B3: no script rc (the first copy may still be running) -> no fallback, final refusal."""
     _set_address('10.10.10.25')
     monkeypatch.setattr(rm, '_dest_observable', lambda d: False)
     calls = _capture(monkeypatch, replies=[(500, json.dumps({'ok': False, 'rc': 1, 'output': 'boom'}))] * 2)
     with pytest.raises(rm.RemoteMoverError) as ei:
         rm.transfer(str(remote_env), '/media/Movies/a.mkv')
     assert not isinstance(ei.value, rm.RemoteTransient)
+    assert len(calls) == 1 and rm._transfer_cooldown_until == {}
+
+
+@pytest.mark.parametrize('reply', [
+    (500, json.dumps({'ok': False, 'output': 'boom'})),            # no rc at all (used to read as rc 0)
+    (500, json.dumps({'ok': False, 'rc': None, 'output': 'x'})),
+    (500, ''),                                                      # empty body
+    (500, json.dumps({'ok': False, 'rc': 7, 'output': 'x'})),      # rc outside 2-6
+])
+def test_transfer_address_no_script_rc_makes_exactly_one_request(remote_env, monkeypatch, reply):
+    _set_address('10.10.10.25')
+    monkeypatch.setattr(rm, '_dest_observable', lambda d: False)
+    calls = _capture(monkeypatch, replies=[reply, OK])
+    with pytest.raises(rm.RemoteMoverError) as ei:
+        rm.transfer(str(remote_env), '/media/Movies/a.mkv')
+    assert not isinstance(ei.value, rm.RemoteTransient)
+    assert len(calls) == 1 and calls[0]['transfer_host'] == '10.10.10.25'
+
+
+@pytest.mark.parametrize('rc', [2, 3, 4, 5, 6])
+def test_script_rc_falls_back_with_a_fresh_temp(remote_env, monkeypatch, rc):
+    _set_address('10.10.10.25')
+    calls = _capture(monkeypatch, replies=[(500, json.dumps({'ok': False, 'rc': rc, 'output': 'x'})), OK])
+    assert rm.transfer(str(remote_env), '/media/Movies/a.mkv') == 'copied'
+    assert len(calls) == 2
     assert [c.get('transfer_host') for c in calls] == ['10.10.10.25', None]
+    assert calls[0]['tmp'] != calls[1]['tmp']
+    for c in calls:
+        assert re.fullmatch(r'/media/Movies/\.luma-[0-9a-f]{16}\.luma-partial', c['tmp'])

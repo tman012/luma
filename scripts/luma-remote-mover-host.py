@@ -80,7 +80,8 @@ def valid_transfer_host(host: str) -> bool:
             ip = ipaddress.IPv4Address(host)
         except ValueError:
             return False   # a broken or non-canonical IPv4 (leading zeros, too few octets)
-        return not (ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified)
+        return not (ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified
+                    or ip.is_reserved or ip.packed[0] == 0)   # 240/4 incl. 255.255.255.255 and 0/8, as the shell
     # IPv4 or DNS only (parity with the Ops mover): no IPv6, no ':' at all. A label that is a hex
     # number ('0x7f000001', '0x7f.1') is refused: inet_aton would read it as an IP.
     if not _DNS_RE.fullmatch(host):

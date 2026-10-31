@@ -76,7 +76,14 @@ _DOWNLOADS_ALIASES = ('/storage/downloads', '/downloads')
 
 
 class RemoteMoverError(RuntimeError):
-    """Remote copy cannot run (misconfigured) or the host helper failed."""
+    """Remote copy cannot run (misconfigured) or the host helper failed.
+
+    *script_rc*: the remote script's explicit exit code when the helper reported one (None when the
+    response carried no "rc")."""
+
+    def __init__(self, *args, script_rc: Optional[int] = None):
+        super().__init__(*args)
+        self.script_rc = script_rc
 
 
 class RemoteTransient(RemoteMoverError):
@@ -421,17 +428,22 @@ def transfer(src_container: str, dest_container: str, mode: str = 'cp',
     tmp_container = tmp_container or remote_temp_for(dest_container)
     from app import partial_cleanup
     host = transfer_host()
-    with partial_cleanup.tracking(tmp_container):   # the sweep never touches a partial this call is waiting on
-        if host:
+    if host:
+        with partial_cleanup.tracking(tmp_container):   # the sweep never touches a partial this call is waiting on
             try:
                 return _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_container,
                                          transfer_host=host)
             except RemoteTransient:
                 raise   # cut off, not refused: the copy may still be running, retried with backoff as before
             except RemoteMoverError as e:
+                # fall back ONLY on an explicit script failure (rc 2-6: the script refused or cleaned up its
+                # temp). No rc, or any other rc, means the first copy may still be running: final refusal.
+                if getattr(e, 'script_rc', None) not in _SCRIPT_FAIL_RCS:
+                    raise
                 _note_transfer_fallback(host, e)
+        tmp_container = remote_temp_for(dest_container)   # fresh temp: never shares the first call's partial
+    with partial_cleanup.tracking(tmp_container):
         return _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_container)
-
 
 # Transfer-address fallback state, in memory per address (a restart resets it).
 TRANSFER_COOLDOWN_S = 15 * 60       # after a fallback: copies go to the main address this long
@@ -524,7 +536,8 @@ def _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_c
                 f'({op} {rsrc} -> {rdest})')
         raise RemoteMoverError(
             f'host mover failed HTTP {status} rc={rc_i}: {err} '
-            f'({op} {rsrc} -> {rdest})')
+            f'({op} {rsrc} -> {rdest})',
+            script_rc=rc_i if ('rc' in data and data.get('rc') is not None) else None)
     if ok is True or (status == 200 and rc_i == 0):
         if op == 'cp':
             _verify_final(src_container, dest_container, tmp_container)
