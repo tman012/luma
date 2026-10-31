@@ -75,3 +75,5 @@ export function RatingsBar({ ratings, size = 'md', style }: RatingsBarProps) {
 /** Height the sm bar takes (margin + icon row), reserved on the phone sheet
  *  while ratings are still loading so their arrival doesn't push content. */
 export const RATINGS_SLOT_SM = 12 + sizePresets.sm.iconHeight;
+/** Same for the lg bar (desktop sheets). */
+export const RATINGS_SLOT_LG = 14 + sizePresets.lg.iconHeight;

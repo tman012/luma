@@ -21,9 +21,10 @@ import { MobileUpgradeSheet } from './MobileUpgradeSheet';
 import { UltraBlurOverlay } from '@/components/media/UltraBlurOverlay';
 import { SimilarPanel } from './SimilarPanel';
 import { CollectionsSheet } from '@/components/collections/CollectionsSheet';
-import { useEffectiveRatings } from './effectiveRatings';
-import { RatingsBar, RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
-import { buildRatingItems } from '@/utils/ratingIcons';
+import { useEffectiveRatingsState } from './effectiveRatings';
+import { RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
+import { useRatingsSettle } from '@/hooks/useRatingsSettle';
+import { RatingsSettle } from '@/components/media/RatingsSettle';
 import { BackdropHero } from '@/components/media/BackdropHero';
 import { useBackdropEffects } from '@/hooks/useBackdropEffects';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
@@ -161,8 +162,11 @@ export function CompactLayout(props: MovieModalViewProps) {
   // Ratings arrive after the details: if the sheet shows before them, keep
   // their row reserved (and never collapse it) so nothing below moves.
   // Phone parity with web: RT from the reviews endpoint when the ratings lack it (mergeRatings).
-  const shownRatings = useEffectiveRatings(ratings, detail?.title, detail?.year);
-  const hasRatings = !!shownRatings && buildRatingItems(shownRatings).length > 0;
+  // All sources (Plex/OMDb, the RT fill, the reviews endpoint) settle into ONE row that fades in once (useRatingsSettle).
+  const effRatings = useEffectiveRatingsState(ratings, detail?.title, detail?.year);
+  const ratingsSettle = useRatingsSettle(effRatings.ratings,
+    !!detail && !ratingsLoading && props.ratingsSettled !== false && effRatings.settled, props.openKey);
+  const hasRatings = !!ratingsSettle.ratings;
     // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed
   // reserves the ratings row from it and the row keeps that box, so a late ratings fetch never moves the rows below.
   const ratingsExpected = useRef(ratingsExpectedAtTap(true)).current;
@@ -560,9 +564,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   )}
 
                   {/* Ratings bar — centered icons */}
-                  <div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>
-                    {shownRatings && <RatingsBar ratings={shownRatings} size="sm" />}
-                  </div>
+                  <RatingsSettle settle={ratingsSettle} size="sm" reserve={reserveRatings ? RATINGS_SLOT_SM : 0} />
 
                   {/* Primary action area */}
                   <div data-modal-actions>

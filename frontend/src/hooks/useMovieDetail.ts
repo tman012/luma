@@ -26,6 +26,8 @@ interface UseMovieDetailResult {
   ratings: Ratings | null;
   loading: boolean;
   ratingsLoading: boolean;
+  /** Every ratings source for this title has answered (or failed), the RT fill included. */
+  ratingsSettled: boolean;
   error: boolean;
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
@@ -46,6 +48,7 @@ export function useMovieDetail(
   const [ratings, setRatings] = useState<Ratings | null>(null);
   const [loading, setLoading] = useState(true);
   const [ratingsLoading, setRatingsLoading] = useState(true);
+  const [ratingsSettled, setRatingsSettled] = useState(false);
   const [error, setError] = useState(false);
   const [trailerKey, setTrailerKey] = useState<string | null | undefined>(undefined);
 
@@ -179,6 +182,7 @@ export function useMovieDetail(
         if (e?.name !== 'AbortError' && !cancelled) {
           setError(true);
           setRatingsLoading(false); // Don't block modal visibility on error
+          setRatingsSettled(true);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -236,6 +240,7 @@ export function useMovieDetail(
 
     const controller = new AbortController();
     let cancelled = false;
+    setRatingsSettled(false);
 
     async function fetchAllRatings() {
       // Fire Plex + OMDb in parallel
@@ -308,7 +313,10 @@ export function useMovieDetail(
               return updated;
             });
           })
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => { if (!cancelled) setRatingsSettled(true); });
+      } else {
+        setRatingsSettled(true);
       }
     }
 
@@ -422,6 +430,7 @@ export function useMovieDetail(
     ratings,
     loading: loading || (!colorsSettled && !error),
     ratingsLoading,
+    ratingsSettled,
     error,
     trailerKey,
     ultraBlurColors,

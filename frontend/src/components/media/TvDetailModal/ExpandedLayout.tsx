@@ -16,8 +16,11 @@ import {
   autoSearchSeason,
 } from '@/services/sonarrApi';
 import { UltraBlurOverlay } from '@/components/media/UltraBlurOverlay';
-import { RatingsBar } from '@/components/media/RatingsBar';
-import { useImdbRatings } from '@/hooks/useImdbRatings';
+import { RatingsBar, RATINGS_SLOT_LG } from '@/components/media/RatingsBar';
+import { useImdbRatings, useImdbRatingsState, ratingsDone } from '@/hooks/useImdbRatings';
+import { ratingsExpectedAtTap } from '@/components/media/sheetRows';
+import { useRatingsSettle } from '@/hooks/useRatingsSettle';
+import { RatingsSettle } from '@/components/media/RatingsSettle';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { TOKENS } from './expandedLayoutTokens';
 import { useTabletPerf } from '@/hooks/useTabletPerf';
@@ -1192,7 +1195,10 @@ export function ExpandedLayout(props: TvModalViewProps) {
   const logoRef = useRef<HTMLDivElement>(null);
 
   // Effective ratings — IMDb via OMDb (never TMDb vote_average)
-  const effectiveRatings = useImdbRatings(show?.title, show?.year);
+  const ratingsState = useImdbRatingsState(show?.title, show?.year);
+  // ONE settled row, faded in once (useRatingsSettle); a later answer is dropped for this open.
+  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey);
+  const ratingsRow = useRef(ratingsExpectedAtTap(false)).current || !!ratingsSettle.ratings;
 
   // Trigger reviews fetch when detail loads
   useEffect(() => {
@@ -1588,7 +1594,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                               fontSize: t.meta.fontSize,
                               fontWeight: 500,
                               color: 'rgba(255,255,255,0.85)',
-                              marginBottom: effectiveRatings ? '12px' : '20px',
+                              marginBottom: ratingsRow ? '12px' : '20px',
                               textShadow: '0 1px 4px rgba(0,0,0,0.5)',
                             }}>
                               {metaItems.map((item, i) => (
@@ -1604,10 +1610,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
                           </div>
 
                           {/* Ratings */}
-                          {effectiveRatings && (
-                            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '18px' }}>
-                              <RatingsBar ratings={effectiveRatings} size="lg" />
-                            </div>
+                          {ratingsRow && (
+                            <RatingsSettle settle={ratingsSettle} size="lg" reserve={RATINGS_SLOT_LG}
+                              style={{ display: 'flex', justifyContent: 'center', marginBottom: '18px' }} />
                           )}
 
                           {/* Plot */}

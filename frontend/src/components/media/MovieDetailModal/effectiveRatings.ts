@@ -18,9 +18,15 @@ export function mergeRatings(ratings: Ratings | null | undefined,
   return { imdb, rotten_tomatoes_critic: rtCritic, rotten_tomatoes_audience: rtAudience, metacritic, tmdb } as Ratings;
 }
 
-export function useEffectiveRatings(ratings: Ratings | null | undefined, title: string | null | undefined, year: number | null | undefined): Ratings | null {
+export function useEffectiveRatingsState(ratings: Ratings | null | undefined, title: string | null | undefined, year: number | null | undefined): { ratings: Ratings | null; settled: boolean } {
   // Only ask the reviews endpoint when the ratings are missing an RT score (no extra request otherwise).
   const needRt = ratings?.rotten_tomatoes_critic?.score == null || ratings?.rotten_tomatoes_audience?.score == null;
-  const reviews = useReviews(needRt ? (title ?? '') : '', year ?? null).data;
-  return useMemo(() => mergeRatings(ratings, reviews), [ratings, reviews]);
+  const q = useReviews(needRt ? (title ?? '') : '', year ?? null);
+  const merged = useMemo(() => mergeRatings(ratings, q.data), [ratings, q.data]);
+  // Settled: no RT fill needed, or the reviews request has answered (a failure counts).
+  return { ratings: merged, settled: !needRt || (!!title && !q.loading) };
+}
+
+export function useEffectiveRatings(ratings: Ratings | null | undefined, title: string | null | undefined, year: number | null | undefined): Ratings | null {
+  return useEffectiveRatingsState(ratings, title, year).ratings;
 }

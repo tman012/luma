@@ -10,6 +10,7 @@ export interface MovieModalViewProps {
   ratings: Ratings | null;
   /** Ratings still loading (the phone sheet reserves their row meanwhile). */
   ratingsLoading?: boolean;
+  ratingsSettled?: boolean;
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
