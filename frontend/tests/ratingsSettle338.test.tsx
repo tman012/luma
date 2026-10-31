@@ -157,4 +157,22 @@ describe('ratings settle into one row', () => {
     const empty = render(<RatingsSettle settle={{ shown: true, ratings: null }} size="lg" reserve={RATINGS_SLOT_LG} />);
     expect((empty.container.firstChild as HTMLElement).style.minHeight).toBe('50px');
   });
+
+  it('phone: the bar margin stays inside the slot (flow-root), so the slot box is the same before and after', () => {
+    const r = render(<RatingsSettle settle={{ shown: false, ratings: null }} size="sm" reserve={32} />);
+    const el = r.container.firstChild as HTMLElement;
+    expect(el.style.display).toBe('flow-root');
+    r.rerender(<RatingsSettle settle={{ shown: true, ratings: all }} size="sm" reserve={32} />);
+    expect(el.style.display).toBe('flow-root');
+    const bar = el.firstChild as HTMLElement;
+    expect(parseInt(bar.style.marginTop) + parseInt(bar.style.minHeight)).toBe(32);
+    const d = render(<RatingsSettle settle={{ shown: true, ratings: all }} size="lg" reserve={50} style={{ display: 'flex' }} />);
+    expect((d.container.firstChild as HTMLElement).style.display).toBe('flex');
+  });
+
+  it('movie: Plex ratings are in hand before a slow OMDb answers', () => {
+    const s = src('hooks/useMovieDetail.ts');
+    expect(s.indexOf('plexPromise.then((p) =>')).toBeGreaterThan(0);
+    expect(s.indexOf('plexPromise.then((p) =>')).toBeLessThan(s.indexOf('await Promise.all([plexPromise, omdbPromise])'));
+  });
 });
