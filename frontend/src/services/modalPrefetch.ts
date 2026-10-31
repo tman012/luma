@@ -252,8 +252,13 @@ let pressTimer = 0;
 function release(el: HTMLElement | null = pressed) {
   window.clearTimeout(pressTimer);
   el?.removeAttribute('data-pressed');
-  if (el === pressed) pressed = null;
+  if (el === pressed) { pressed = null; if (el) window.dispatchEvent(new Event(PRESS_RELEASED_EVENT)); }
 }
+/** A tap is pending: a card is pressed and its sheet hasn't started moving (or the press hasn't timed out).
+ *  Work that can wait (Home's skeleton crossfade) holds until PRESS_RELEASED_EVENT so it never competes with
+ *  the sheet's first frames. */
+export const PRESS_RELEASED_EVENT = 'luma:press-released';
+export function tapPending(): boolean { return pressed !== null; }
 function holdFor(el: HTMLElement, ms: number) { window.clearTimeout(pressTimer); pressTimer = window.setTimeout(() => release(el), ms); }
 if (typeof window !== 'undefined' && !(window as { __lumaPress?: boolean }).__lumaPress) {
   (window as { __lumaPress?: boolean }).__lumaPress = true;

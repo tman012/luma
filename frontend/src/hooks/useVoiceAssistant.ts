@@ -108,7 +108,12 @@ export function primeVoiceAudio(): void {
 
 // One-time listener — fires on first user interaction, then removes itself
 if (typeof window !== 'undefined') {
-  const unlock = () => {
+  // Not on a card/row tap that opens a sheet (.luma-pressable): creating the AudioContext there ran inside the
+  // tap's click handler (tens of ms, and a stall of 0.3-0.6 s when the audio service is slow) before the sheet could
+  // start: the first tap after load was a dead tap. Those taps leave the listener armed for the next gesture; the
+  // voice UI also primes on its own button (primeVoiceAudio in VoiceContext / CompactVoiceSheet).
+  const unlock = (e: Event) => {
+    if ((e.target as Element | null)?.closest?.('.luma-pressable')) return;
     _unlockAudio();
     window.removeEventListener('touchstart', unlock, true);
     window.removeEventListener('click', unlock, true);

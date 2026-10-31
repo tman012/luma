@@ -3,7 +3,7 @@ import { img, type Card, type Rail } from './homeApi';
 import { FONT } from '@/components/start/StartUI';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MOTION, reducedMotion } from '@/theme/motion';
-import { scheduleWarm, warmDetail } from '@/services/modalPrefetch';
+import { PRESS_RELEASED_EVENT, scheduleWarm, tapPending, warmDetail } from '@/services/modalPrefetch';
 import { OwnedOrb, plexOwned, useRailOwnership, type CardOwnership } from './railOwnership';
 import { LONG_PRESS_STYLE, useLongPress } from './useLongPress';
 
@@ -140,11 +140,11 @@ export function SkeletonRails({ rails = 3, afterFirst, afterH, ghost }: { rails?
       {Array.from({ length: rails }, (_, r) => (
         <Fragment key={r}>
           <section style={railWrap}>
-            <div className="luma-shimmer" style={{ ...skel, width: 140, height: 18, borderRadius: 6, marginLeft: 20 }} />
+            <div className={ghost ? undefined : 'luma-shimmer'} style={{ ...skel, ...(ghost ? GHOST_FILL : null), width: 140, height: 18, borderRadius: 6, marginLeft: 20 }} />
             <div style={scroller}>
               {Array.from({ length: 6 }, (_, i) => (
                 <div key={i} style={r === 0 ? wideCard : posterCard}>
-                  <div className="luma-shimmer" style={{ ...skel, ...(r === 0 ? wideImg : posterImg) }} />
+                  <div className={ghost ? undefined : 'luma-shimmer'} style={{ ...skel, ...(ghost ? GHOST_FILL : null), ...(r === 0 ? wideImg : posterImg) }} />
                 </div>
               ))}
             </div>
@@ -164,6 +164,7 @@ export function SkeletonCrossfade({ loading, children }: { loading: boolean; chi
   const afterH = useRef<number | undefined>(undefined);
   const was = useRef(loading);
   const [ghost, setGhost] = useState(false);
+  const [hold, setHold] = useState(false);
   useLayoutEffect(() => {
     if (loading) {
       const a = box.current?.querySelector<HTMLElement>('[data-testid="home-skeleton"] > section + :not(section)');
@@ -173,11 +174,16 @@ export function SkeletonCrossfade({ loading, children }: { loading: boolean; chi
     was.current = loading;
     if (!left || reducedMotion()) return;
     setGhost(true);
-    const t = setTimeout(() => setGhost(false), MOTION.dur.crossfade);
-    return () => clearTimeout(t);
+    // A tap is pending (card pressed, sheet not moving yet): hold both fades at their first frame (ghost opaque,
+    // content transparent under it) until the sheet moves, so the crossfade never competes with the sheet start.
+    let t = 0;
+    const run = () => { setHold(false); window.clearTimeout(t); t = window.setTimeout(() => setGhost(false), MOTION.dur.crossfade); };
+    if (tapPending()) { setHold(true); window.addEventListener(PRESS_RELEASED_EVENT, run, { once: true }); }
+    else t = window.setTimeout(() => setGhost(false), MOTION.dur.crossfade);
+    return () => { window.clearTimeout(t); window.removeEventListener(PRESS_RELEASED_EVENT, run); };
   }, [loading]);
   return (
-    <div ref={box} style={{ position: 'relative' }}>
+    <div ref={box} data-xf-hold={hold ? '' : undefined} style={{ position: 'relative' }}>
       {children}
       {ghost && !loading && (
         <div aria-hidden="true" data-testid="home-skeleton-out" className="luma-skel-out"
@@ -226,6 +232,7 @@ export const railCss = `
 .luma-rails-in{animation:lumaRailsIn var(--m-dur-crossfade) var(--m-ease-standard) both}
 .luma-skel-out{animation:lumaSkelOut var(--m-dur-crossfade) var(--m-ease-standard) both}
 @keyframes lumaSkelOut{from{opacity:1}to{opacity:0}}
+[data-xf-hold] .luma-rails-in,[data-xf-hold] .luma-skel-out{animation-play-state:paused}
 @keyframes lumaRailsIn{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-motion: reduce){.luma-shimmer{animation:none}.luma-rails-in{animation:none}}
 `;
@@ -262,6 +269,8 @@ const cardSub: React.CSSProperties = { marginTop: 2, fontSize: 12, color: 'rgba(
 const barTrack: React.CSSProperties = { position: 'absolute', left: 10, right: 10, bottom: 10, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.25)' };
 const barFill: React.CSSProperties = { height: '100%', borderRadius: 2, background: '#3b82f6' };
 const skel: React.CSSProperties = { borderRadius: 12 };
+/** The fading copy's blocks: the shimmer's mid tone, static (no infinite animation under the 200ms fade; Reviewer). */
+const GHOST_FILL: React.CSSProperties = { background: 'rgba(255,255,255,0.08)' };
 
 /** Prod 1b4ea74's font stack (Tailwind's default sans, inherited by its home page). */
 export const PROD_FONT = 'ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"';
