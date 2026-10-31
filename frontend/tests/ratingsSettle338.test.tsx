@@ -144,4 +144,17 @@ describe('ratings settle into one row', () => {
     await flush();
     expect(h.result.current).toEqual({ shown: true, ratings: imdb });
   });
+
+  it('desktop: the reserved height equals the rendered lg bar (margin + 36px line), the all-fail row too', async () => {
+    const { RATINGS_SLOT_LG } = await import('@/components/media/RatingsBar');
+    expect(RATINGS_SLOT_LG).toBe(50);
+    const r = render(<RatingsSettle settle={{ shown: true, ratings: all }} size="lg" reserve={RATINGS_SLOT_LG} />);
+    const bar = (r.container.firstChild as HTMLElement).firstChild as HTMLElement;
+    const lineH = [...bar.querySelectorAll('span')].map(sp => sp.style.lineHeight);
+    expect(lineH.every(h => h === '36px')).toBe(true);
+    expect(parseInt(bar.style.marginTop) + parseInt(bar.style.minHeight)).toBe(RATINGS_SLOT_LG);
+    [...bar.querySelectorAll('img')].forEach(i => expect(parseInt(i.style.height)).toBeLessThanOrEqual(36));
+    const empty = render(<RatingsSettle settle={{ shown: true, ratings: null }} size="lg" reserve={RATINGS_SLOT_LG} />);
+    expect((empty.container.firstChild as HTMLElement).style.minHeight).toBe('50px');
+  });
 });

@@ -59,6 +59,8 @@ export function RatingsBar({ ratings, size = 'md', style }: RatingsBarProps) {
           <span
             style={{
               fontSize: `${preset.fontSize}px`,
+              // lg: the value line is exactly the icon height, so the bar is RATINGS_SLOT_LG tall (the reserved row).
+              ...(size === 'lg' ? { lineHeight: `${preset.iconHeight}px` } : {}),
               fontWeight: 600,
               color: '#fff',
             }}
