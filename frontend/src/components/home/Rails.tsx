@@ -1,5 +1,5 @@
 /** Phone-first rails on Luma's purple-navy glass. */
-import { img, type Card, type Rail } from './homeApi';
+import { CARD_SIZES, cardSrcSet, img, type Card, type Rail } from './homeApi';
 import { FONT } from '@/components/start/StartUI';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MOTION, reducedMotion } from '@/theme/motion';
@@ -87,7 +87,7 @@ export function PosterCard({ card, onOpen, own, onLongPress }: { card: Card; onO
   return (
     <CardShell card={card} onOpen={onOpen} onLongPress={onLongPress} style={posterCard} own={own ?? plexOwned(card) ?? undefined}>
       <div style={{ ...posterImg, ...GLASS }}>
-        {src && <img src={src} alt="" loading="lazy" style={fill} draggable={false} />}
+        {src && <img src={src} srcSet={cardSrcSet(src, 'poster')} sizes={CARD_SIZES.poster} alt="" loading="lazy" style={fill} draggable={false} />}
         <OwnedOrb own={own} />
       </div>
       {card.label && <div style={cardLabel} data-testid="card-label">{card.label}</div>}
@@ -104,7 +104,7 @@ export function WatchlistPosterCard({ card, onOpen }: { card: Card; onOpen?: OnO
   return (
     <CardShell card={card} onOpen={onOpen} style={wlCard}>
       <div style={wlPoster}>
-        {src && <img src={src} alt="" loading="lazy" style={fill} draggable={false} />}
+        {src && <img src={src} srcSet={cardSrcSet(src, 'poster')} sizes={CARD_SIZES.watchlist} alt="" loading="lazy" style={fill} draggable={false} />}
       </div>
       <div style={wlText}>
         {card.label && <p style={wlLabel} data-testid="card-label">{card.label}</p>}
@@ -121,7 +121,7 @@ export function WideCard({ card, onOpen, own }: { card: Card; onOpen?: OnOpen; o
   return (
     <CardShell card={card} onOpen={onOpen} style={wideCard}>
       <div style={{ ...wideImg, ...GLASS }}>
-        {src && <img src={src} alt="" loading="lazy" style={fill} draggable={false} />}
+        {src && <img src={src} srcSet={cardSrcSet(src, 'wide')} sizes={CARD_SIZES.wide} alt="" loading="lazy" style={fill} draggable={false} />}
         {pct > 0 && (
           <div style={barTrack}><div data-testid="progress" style={{ ...barFill, width: `${pct * 100}%` }} /></div>
         )}
