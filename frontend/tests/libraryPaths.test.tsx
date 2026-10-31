@@ -119,7 +119,7 @@ describe('Settings > Library paths', () => {
     expect(textOf(section)).toBe(
       'PathsMovies/media/Movies4K Movies/media/4K MoviesOld drive/media/Old DriveMissingAdd path'
       + 'Rules2160p4K MoviesPast 6 monthsMoviesAdd ruleFallbackMovies'
-      + 'TransferCopyHardlinkPath map/data/torrents/downloadsAdd mapping');
+      + 'TransferCopyHardlinkTransfer addressSavePath map/data/torrents/downloadsAdd mapping');
     // Only the new store's API: never the seeded media.* settings.
     expect(calls.every(c => c.url.includes('/api/settings/library-'))).toBe(true);
   });

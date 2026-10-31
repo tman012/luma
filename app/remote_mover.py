@@ -16,6 +16,12 @@ under /run/luma-mover. Defaults try:
   2) /run/luma-mover/mover.sock   (sock file inside mounted dir)
   3) /run/luma-mover             (sock file mounted directly at that path)
 
+Transfer address (optional, Settings > Library paths): when set and reachable the
+POST body carries an extra "transfer_host" key and the helper hands it to the remote
+CLI as LUMA_TRANSFER_HOST, so the copy to the library goes to that address instead of
+the library server's main one. Blank: the body is exactly as before. Unreachable, or a
+copy through it fails outright: logged, and the copy runs once more on the main address.
+
 Path map (container → .72):
   LUMA_DOWNLOADS_ROOT / /storage/downloads / /downloads
       → LUMA_REMOTE_DOWNLOADS_ROOT (default /scratch/downloads)
@@ -413,11 +419,42 @@ def transfer(src_container: str, dest_container: str, mode: str = 'cp',
     _assert_remote_bounds(rsrc, rdest, cfg)
     tmp_container = tmp_container or remote_temp_for(dest_container)
     from app import partial_cleanup
+    host = transfer_host()
     with partial_cleanup.tracking(tmp_container):   # the sweep never touches a partial this call is waiting on
+        if host:
+            try:
+                return _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_container,
+                                         transfer_host=host)
+            except RemoteTransient:
+                raise   # cut off, not refused: the copy may still be running, retried with backoff as before
+            except RemoteMoverError as e:
+                logger.warning('Remote mover: copy via transfer address %s failed (%s); '
+                               'using the main address', host, e)
         return _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_container)
 
 
-def _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_container):
+def transfer_host() -> str:
+    """The transfer address to send, or '' for the main address (blank setting, or the
+    address does not answer: logged, never a silent stall)."""
+    try:
+        from app import file_management
+        addr = file_management.transfer_address()
+    except Exception:
+        return ''
+    if not addr:
+        return ''
+    try:
+        from app import file_management
+        ok = file_management.address_reachable(addr)
+    except Exception:
+        ok = False
+    if not ok:
+        logger.warning('Remote mover: transfer address %s unreachable; using the main address', addr)
+        return ''
+    return addr
+
+
+def _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_container, transfer_host=''):
     rtmp = to_remote(tmp_container, cfg)
     if os.path.dirname(rtmp) != os.path.dirname(rdest):
         raise RemoteMoverError(f'temp must sit next to dest: {rtmp} vs {rdest}')
@@ -425,7 +462,10 @@ def _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_c
     # Size-based socket timeout so Luma itself never gives up first.
     timeout = max(int(cfg['timeout']), int(_deadline_for(_size_of(src_container))))
     # Locked Ops JSON: field name is "mode" (not "op").
-    payload = json.dumps({'mode': op, 'src': rsrc, 'dest': rdest, 'tmp': rtmp}).encode()
+    body = {'mode': op, 'src': rsrc, 'dest': rdest, 'tmp': rtmp}
+    if transfer_host:
+        body['transfer_host'] = transfer_host   # optional extra key; helpers that ignore it use the main address
+    payload = json.dumps(body).encode()
     try:
         status, raw = _http_post_unix(str(cfg['sock']), '/move', payload, timeout)
     except RemoteMoverError as e:
@@ -477,7 +517,8 @@ def _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_c
         if op == 'cp':
             _verify_final(src_container, dest_container, tmp_container)
         how = 'moved' if op == 'mv' else 'copied'
-        logger.info('Remote mover via unix socket: %s %s -> %s', op, rsrc, rdest)
+        logger.info('Remote mover via unix socket: %s %s -> %s%s', op, rsrc, rdest,
+                    f' (transfer address {transfer_host})' if transfer_host else '')
         return how
     raise RemoteMoverError(
         f'host mover unexpected response HTTP {status}: {raw[:200]!r} '

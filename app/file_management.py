@@ -9,7 +9,7 @@ POST   /api/settings/library-paths            add a path {name, path}
 PUT    /api/settings/library-paths/<id>       rename or repoint a path
 DELETE /api/settings/library-paths/<id>       409 while a rule or the fallback uses it
 PUT    /api/settings/library-rules            {rules: [...], fallback_path_id}
-PUT    /api/settings/library-paths/mapping    {path_map: [...], transfer}
+PUT    /api/settings/library-paths/mapping    {path_map: [...], transfer, transfer_address}
 GET    /api/settings/library-paths/browse?path=  folders for the picker (allowed roots only)
 
 Its own store (data dir, file_management.json, 0600), empty on a fresh
@@ -83,6 +83,8 @@ IN_DOWNLOADS = 'Overlaps the downloads folder'
 NAME_TAKEN = 'Name already used'
 IN_USE = 'In use by a rule or the fallback'
 TOO_MANY = 'Too many'
+INVALID_ADDRESS = 'Enter an IP address or host name'
+UNREACHABLE_ADDRESS = "Can't reach this address"
 
 _ID_RE = re.compile(r'^[pr]_[0-9a-f]{8}$')
 _CTRL_RE = re.compile(r'[\x00-\x1f\x7f]')
@@ -94,7 +96,7 @@ _lock = threading.RLock()
 
 def empty() -> Dict[str, Any]:
     return {'version': 1, 'paths': [], 'rules': [], 'fallback_path_id': None,
-            'path_map': [], 'transfer': 'copy', 'jobs': {}}
+            'path_map': [], 'transfer': 'copy', 'transfer_address': '', 'jobs': {}}
 
 
 def store_path() -> Path:
@@ -160,10 +162,82 @@ def _normalize(raw: Any) -> Dict[str, Any]:
         if isinstance(m, dict) and isinstance(m.get('remote'), str) and isinstance(m.get('local'), str):
             d['path_map'].append({'remote': m['remote'], 'local': m['local']})
     d['transfer'] = raw.get('transfer') if raw.get('transfer') in TRANSFERS else 'copy'
+    ta = raw.get('transfer_address')
+    d['transfer_address'] = ta.strip() if isinstance(ta, str) and valid_address(ta.strip()) else ''
     jobs = raw.get('jobs')
     if isinstance(jobs, dict):
         d['jobs'] = {k: v for k, v in jobs.items() if isinstance(k, str) and isinstance(v, dict)}
     return d
+
+
+# ------------------------------------------------------------------ transfer address
+# Optional second address of the library server for the download-host -> library copy
+# (remote push-import / mover). Blank: the copy uses the main address as before. Plex and
+# library API calls never read it.
+
+_HOST_RE = re.compile(r'^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
+                      r'(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$')
+TRANSFER_PROBE_PORTS_ENV = 'LUMA_TRANSFER_PROBE_PORTS'
+DEFAULT_TRANSFER_PROBE_PORTS = (22, 445)
+TRANSFER_PROBE_TIMEOUT_S = 2.0
+
+
+def valid_address(addr: str) -> bool:
+    """An IPv4/IPv6 literal or a DNS host name; no scheme, port, path or spaces."""
+    if not isinstance(addr, str) or not addr or len(addr) > 253:
+        return False
+    import ipaddress
+    try:
+        ipaddress.ip_address(addr)
+        return True
+    except ValueError:
+        pass
+    if re.fullmatch(r'[0-9.]+', addr):
+        return False   # looks like a broken IPv4
+    return bool(_HOST_RE.match(addr))
+
+
+def transfer_probe_ports() -> Tuple[int, ...]:
+    raw = (os.environ.get(TRANSFER_PROBE_PORTS_ENV) or '').strip()
+    if raw:
+        try:
+            ports = tuple(int(x) for x in raw.replace(' ', '').split(',') if x)
+            if ports and all(0 < p < 65536 for p in ports):
+                return ports
+        except ValueError:
+            pass
+    return DEFAULT_TRANSFER_PROBE_PORTS
+
+
+def address_reachable(addr: str, timeout: float = TRANSFER_PROBE_TIMEOUT_S) -> bool:
+    """TCP probe (the same raw-socket check the other host fields use): any of the copy
+    ports (SSH 22 / SMB 445 by default) answering counts."""
+    from app import adb_utils
+    return any(adb_utils.tcp_probe(addr, port, timeout)['ok'] for port in transfer_probe_ports())
+
+
+def check_transfer_address(raw: Any) -> Tuple[str, Optional[str]]:
+    """(address, error). Blank clears it; otherwise it must be valid and reachable."""
+    if raw is None:
+        return '', None
+    if not isinstance(raw, str):
+        return '', INVALID_ADDRESS
+    addr = raw.strip()
+    if not addr:
+        return '', None
+    if not valid_address(addr):
+        return addr, INVALID_ADDRESS
+    if not address_reachable(addr):
+        return addr, UNREACHABLE_ADDRESS
+    return addr, None
+
+
+def transfer_address() -> str:
+    """The saved transfer address, '' when unset (a missing key reads as blank)."""
+    try:
+        return load().get('transfer_address') or ''
+    except Exception:
+        return ''
 
 
 def _new_id(prefix: str, taken) -> str:
@@ -840,6 +914,7 @@ def view(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         'fallback_path_id': data['fallback_path_id'],
         'path_map': copy.deepcopy(data['path_map']),
         'transfer': data['transfer'],
+        'transfer_address': data.get('transfer_address') or '',
         'downloads': downloads_status(),
         'not_found': sorted(
             ({'title': j.get('title') or '', 'since': j.get('pending_since') or 0,
@@ -1032,10 +1107,18 @@ def library_mapping_put():
         transfer = body.get('transfer', data['transfer'])
         if transfer not in TRANSFERS:
             errors['transfer'] = INVALID
+        address = data.get('transfer_address') or ''
+        if 'transfer_address' in body:
+            address, aerr = check_transfer_address(body.get('transfer_address'))
+            if aerr:
+                errors['transfer_address'] = aerr
         if errors:
             return _no_store(jsonify({'errors': errors}), 400)
         changed = path_map != data['path_map']
         data['path_map'], data['transfer'] = path_map, transfer
+        if address != (data.get('transfer_address') or ''):
+            logger.info('Library mover: transfer address %s', address or 'cleared (main address)')
+        data['transfer_address'] = address
         if changed:
             n = requeue_path_errors(data)
             if n:

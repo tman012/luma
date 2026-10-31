@@ -28,6 +28,8 @@ export interface NotFound { title: string; since: number; reason?: 'not_found' |
 export interface FailedJob { hash: string; title: string; since: number; reason: 'no_space' }
 export interface LibraryView {
   paths: LibPath[]; rules: Rule[]; fallback_path_id: string | null; path_map: PathMapRow[]; transfer: Transfer;
+  /** Optional second library-server address for the copy from the download host ('' = main address). */
+  transfer_address?: string;
   downloads?: { path: string; status: 'ok' | 'missing' };
   not_found?: NotFound[];
   failed?: FailedJob[];
@@ -64,7 +66,7 @@ export const editPath = (id: string, name: string, path: string) => send(`${LP_U
 export const deletePath = (id: string) => send(`${LP_URL}/${encodeURIComponent(id)}`, 'DELETE');
 export const saveRules = (rules: Rule[], fallback_path_id: string | null) => send(RULES_URL, 'PUT', { rules, fallback_path_id });
 export const retryJob = (hash: string) => send(`${LP_URL}/jobs/${encodeURIComponent(hash)}/retry`, 'POST');
-export const saveMapping = (body: { path_map?: PathMapRow[]; transfer?: Transfer }) => send(MAP_URL, 'PUT', body);
+export const saveMapping = (body: { path_map?: PathMapRow[]; transfer?: Transfer; transfer_address?: string }) => send(MAP_URL, 'PUT', body);
 
 /** Persist media.downloads_root via PUT /api/settings (settings win over env). */
 export async function saveDownloadsRoot(path: string): Promise<{ ok: true } | { ok: false; error: string }> {

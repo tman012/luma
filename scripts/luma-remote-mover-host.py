@@ -11,6 +11,9 @@ Ops FINAL (preferred):
          4th CLI arg. The CLI copies SRC→tmp, checks size, renames tmp→dest
          (no replace), removes tmp on failure, and adds NO suffix of its own.
          → {"ok": bool, "rc": N, "output": "..."}
+         Optional "transfer_host": the library server's transfer address (Settings >
+         Library paths). Passed to the CLI as env LUMA_TRANSFER_HOST (over SSH as a
+         quoted VAR=value prefix); absent → the CLI runs exactly as before.
     GET  /health → {"ok": true}
 
 TCP 127.0.0.1:18772 is HOST ONLY — containers must use the Unix socket
@@ -59,16 +62,22 @@ def remote_command(argv) -> str:
     return shlex.join([str(a) for a in argv])
 
 
-def build_cmd(mode: str, src: str, dest: str, tmp: str = '') -> list:
+TRANSFER_ENV = 'LUMA_TRANSFER_HOST'
+_HOST_OK = re.compile(r'^[A-Za-z0-9.:\-]{1,253}$')
+
+
+def build_cmd(mode: str, src: str, dest: str, tmp: str = '', transfer_host: str = '') -> list:
     """argv for subprocess (never a shell): the local CLI, or ssh with one quoted remote command."""
     args = [mode, src, dest] + ([tmp] if tmp else [])
     if SSH_TARGET:
-        return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', SSH_TARGET, '--',
-                remote_command([REMOTE_CLI, *args])]
+        remote = remote_command([REMOTE_CLI, *args])
+        if transfer_host:
+            remote = f'{TRANSFER_ENV}={shlex.quote(transfer_host)} {remote}'
+        return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', SSH_TARGET, '--', remote]
     return [CLI, *args]
 
 
-def run_move(mode: str, src: str, dest: str, tmp: str = '') -> tuple[int, str]:
+def run_move(mode: str, src: str, dest: str, tmp: str = '', transfer_host: str = '') -> tuple[int, str]:
     if mode not in ('cp', 'mv'):
         return 2, f'mode must be cp|mv, got {mode!r}'
     if not _under(src, DOWNLOADS_ROOT):
@@ -77,9 +86,14 @@ def run_move(mode: str, src: str, dest: str, tmp: str = '') -> tuple[int, str]:
         return 2, f'dest must be under {MEDIA_ROOT}'
     if tmp and (os.path.dirname(tmp) != os.path.dirname(dest) or not TMP_RE.match(os.path.basename(tmp))):
         return 2, 'tmp must be <dest dir>/.luma-<hex16>.luma-partial'
-    cmd = build_cmd(mode, src, dest, tmp)
+    if transfer_host and not _HOST_OK.match(transfer_host):
+        return 2, 'transfer_host must be an IP address or host name'
+    cmd = build_cmd(mode, src, dest, tmp, transfer_host)
+    env = None
+    if transfer_host:
+        env = dict(os.environ, **{TRANSFER_ENV: transfer_host})
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_S, check=False)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_S, check=False, env=env)
     except FileNotFoundError:
         return 127, f'CLI not found: {CLI}'
     except subprocess.TimeoutExpired:
@@ -127,7 +141,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {'ok': False, 'rc': 2, 'output': 'src and dest required'})
             return
         tmp = str(data.get('tmp') or '').strip()
-        rc, output = run_move(mode, src, dest, tmp)
+        transfer_host = str(data.get('transfer_host') or '').strip()
+        rc, output = run_move(mode, src, dest, tmp, transfer_host)
         ok = rc == 0
         code = 200 if ok else (409 if rc == EXISTS else 500)
         self._json(code, {'ok': ok, 'rc': rc, 'output': output})

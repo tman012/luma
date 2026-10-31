@@ -130,6 +130,7 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
           setView({ ...view, transfer: t });
           saveMapping({ transfer: t }).then(r => { if (r.ok) setView(r.view); else { setView(before); setToast(r.error); } });
         }} />
+        <TransferAddress view={view} onView={setView} onToast={setToast} />
       </div>
 
       <div data-testid="lp-path-map">
@@ -208,6 +209,47 @@ function DownloadsStatus({ view, onView, onToast }: {
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+/** Optional transfer address of the library server (blank: the main address). Saved on submit;
+ *  the server checks it answers before keeping it. */
+function TransferAddress({ view, onView, onToast }: {
+  view: LibraryView; onView: (v: LibraryView) => void; onToast: (t: string) => void;
+}) {
+  const saved = view.transfer_address || '';
+  const [addr, setAddr] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { setAddr(saved); setError(''); }, [saved]);
+  const trimmed = addr.trim();
+  const canSave = trimmed !== saved && !busy;
+  const save = async () => {
+    if (!canSave) return;
+    setBusy(true);
+    setError('');
+    const r = await saveMapping({ transfer_address: trimmed });
+    setBusy(false);
+    if (r.ok) { onView(r.view); onToast('Saved'); return; }
+    if (r.errors.transfer_address) setError(r.errors.transfer_address);
+    else onToast(r.error);
+  };
+  return (
+    <div style={{ ...card, marginTop: 12 }}>
+      <form data-testid="lp-transfer-address-form" style={{ ...formBox }} onSubmit={e => { e.preventDefault(); void save(); }}>
+        <label htmlFor="lp-transfer-address" style={labelStyle}>Transfer address</label>
+        <input id="lp-transfer-address" data-testid="lp-transfer-address" value={addr} inputMode="url"
+          autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+          aria-invalid={error ? true : undefined} aria-describedby={error ? 'lp-transfer-address-error' : undefined}
+          onChange={e => { setAddr(e.target.value); setError(''); }}
+          style={{ ...inputStyle, fontFamily: MONO, fontSize: 15, ...(error ? invalid : null) }} />
+        {error ? <span id="lp-transfer-address-error" data-testid="lp-transfer-address-error" style={fieldError}>{error}</span> : null}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+          <button type="submit" disabled={!canSave} className="lp-focus" data-testid="lp-transfer-address-save"
+            style={{ ...primary, opacity: canSave ? 1 : 0.5, cursor: canSave ? 'pointer' : 'default' }}>Save</button>
+        </div>
+      </form>
     </div>
   );
 }
