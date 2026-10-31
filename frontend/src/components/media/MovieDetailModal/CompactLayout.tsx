@@ -6,7 +6,7 @@ import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { formatRuntime } from '@/utils/image';
+import { formatRuntime, backdropUpgrade } from '@/utils/image';
 import {
   PERSON_FALLBACK_SVG,
   getCastImageUrl,
@@ -501,6 +501,7 @@ export function CompactLayout(props: MovieModalViewProps) {
               {/* Backdrop — Plex-like cover-cropped header via BackdropHero */}
               <BackdropHero
                 backdropUrl={hero.seeded ? hero.art : detail.backdropUrl}
+                upgradeUrl={backdropUpgrade(hero.seeded, detail.backdropUrl)}
                 posterUrl={hero.seeded ? null : detail.posterUrl}
                 effects={backdropEffects}
                 phase={phase}
@@ -1069,6 +1070,7 @@ export function CompactLayout(props: MovieModalViewProps) {
           {detailsIn && (
             <BackdropHero
               backdropUrl={hero.seeded ? hero.art : detail.backdropUrl}
+                upgradeUrl={backdropUpgrade(hero.seeded, detail.backdropUrl)}
               posterUrl={hero.seeded ? null : detail.posterUrl}
               effects={backdropEffects}
               phase={phase}

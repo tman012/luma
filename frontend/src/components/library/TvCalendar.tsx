@@ -3,6 +3,8 @@
  * A card opens the show's detail at that episode. The week toolbar: ‹ › (and Today) on the left, the range centered. */
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { ContentReveal } from '@/components/motion/ContentReveal';
+import { MOTION } from '@/theme/motion';
 import { ModalHostContext } from '@/contexts/ModalHostContext';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
@@ -28,7 +30,11 @@ const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
 const W95 = 'rgba(255,255,255,0.95)';
 
-export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, phone: forcePhone = false, heroIn = null }: {
+/** The last answer per week (this session): a sheet reopened on a week it has seen renders it on frame 0. */
+const calCache = new Map<string, CalendarData>();
+export function _clearCalendarCache() { calCache.clear(); }
+
+export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, phone: forcePhone = false, heroIn = null, reveal }: {
   today: Day; week: Day; onWeek: (start: Day) => void; reload?: number;
   /** v204: the home screen's TV calendar sheet is always the phone layout */
   phone?: boolean;
@@ -36,17 +42,21 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
   toolbar?: boolean;
   /** v326 (Taylor): desktop, the This week strip renders here (the page's top row, where the search was) */
   heroIn?: HTMLElement | null;
+  /** In a sheet: the first load settles in one ContentReveal (no per-row rise or stagger). */
+  reveal?: { id: string; landMs: number };
 }) {
-  const [data, setData] = useState<{ key: string; cal: CalendarData } | null>(null);
-  const [failed, setFailed] = useState('');
   const key = `${week}/${reload}`;
+  const [data, setData] = useState<{ key: string; cal: CalendarData } | null>(() => {
+    const c = calCache.get(week); return c ? { key, cal: c } : null;
+  });
+  const [failed, setFailed] = useState('');
   useEffect(() => {
     let live = true;
     let timer = 0;
     setFailed('');
     void loadCalendar(week, 7).then(r => {
       if (!live) return;
-      if (r.ok) setData({ key, cal: r.data }); else setFailed(key);
+      if (r.ok) { calCache.set(week, r.data); setData(prev => keepIfSame(prev, key, r.data)); } else setFailed(key);
       // air times are being fetched for this week: ask once more, quietly
       if (r.ok && r.data.refreshing) {
         timer = window.setTimeout(() => {
@@ -86,13 +96,16 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
   const eps = data?.key === key ? data.cal.episodes.filter(e => e.air_date >= week && e.air_date < end && shown(e)) : [];
   // v322 (SPEC-fade-in): the phone list rises in on the view's first load only; paging and refetches crossfade
   const played = useRef(false);
-  const motion: GlassMotion = played.current ? 'fade' : 'rise';
+  const motion: GlassMotion = reveal ? 'none' : played.current ? 'fade' : 'rise';
   useEffect(() => { if (!loading && failed !== key) played.current = true; });
+  const settled = useRef(false);
+  if (!loading) settled.current = true;
 
   return (
     <div data-testid="tv-calendar" style={{ fontFamily: FONT, width: '100%', containerType: 'inline-size', containerName: 'tvcal' }}>
       {/* v322 (TOKENS-C motion): phone keeps the day nav while loading; no placeholder cards (v301 skeletons retired) */}
       {phone ? <DayHeader day={day} today={today} onStep={step} /> : toolbar && <WeekControls today={today} week={week} onWeek={onWeek} />}
+      <MaybeReveal reveal={phone ? reveal : undefined} ready={settled.current}>
       <div style={{ marginTop: phone ? 18 : toolbar ? 16 : 0 }}>
         {failed === key ? (
           <div role="alert" style={emptyCard}>{"Couldn't load calendar"}</div>
@@ -113,8 +126,14 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
           </WeekIn>
         )}
       </div>
+      </MaybeReveal>
     </div>
   );
+}
+
+function MaybeReveal({ reveal, ready, children }: { reveal?: { id: string; landMs: number }; ready: boolean; children: React.ReactNode }) {
+  if (!reveal) return <>{children}</>;
+  return <ContentReveal id={reveal.id} landMs={reveal.landMs} ready={ready} testId="tv-cal-reveal">{children}</ContentReveal>;
 }
 
 /** The page's top row center: ‹ range › (prev, the week, next). */
@@ -516,10 +535,10 @@ export function DayHeader({ day, today, onStep }: { day: Day; today: Day; onStep
 
 /** v322 (Taylor's pick, option C minimal glass; TOKENS-C): the phone day list, one card per show and air time
  * listing every episode (no count, no expander). No title text; the date is in the day nav. */
-export type GlassMotion = 'rise' | 'fade';
+export type GlassMotion = 'rise' | 'fade' | 'none';
 export function PhoneDay({ eps, day, today, motion = 'fade' }: { eps: CalEpisode[]; day: Day; today: Day; motion?: GlassMotion }) {
   const list = sortDay(eps.filter(e => e.air_date === day));
-  if (!list.length) return <><style>{glassCss}</style><div data-testid="tv-cal-empty" className="tvg-fade" style={{ ...emptyCard, minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No episodes</div></>;
+  if (!list.length) return <><style>{glassCss}</style><div data-testid="tv-cal-empty" className={motion === 'none' ? undefined : 'tvg-fade'} style={{ ...emptyCard, minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No episodes</div></>;
   return (
     <div data-testid="tv-cal-phone" data-motion={motion} className={motion === 'fade' ? 'tvg-fade' : undefined}>
       <style>{glassCss}</style>
@@ -605,7 +624,7 @@ function GlassGlow({ src }: { src: string }) {
     <img ref={ref} data-testid="tv-glass-art" className="tvg-art" src={src} alt="" aria-hidden="true" onLoad={() => setOn(true)} onError={() => setOn(false)}
       style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', filter: `blur(${GLASS.glowBlur}px)`,
         opacity: on ? GLASS.glowOpacity : 0, pointerEvents: 'none',
-        transition: now ? 'none' : 'opacity var(--motion-fade-dur, 240ms) var(--motion-fade-ease, cubic-bezier(0.2,0,0,1))' }} />
+        transition: now ? 'none' : `opacity ${MOTION.dur.rowImage}ms ${MOTION.ease.contentFade}` }} />
   );
 }
 

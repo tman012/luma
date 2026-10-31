@@ -136,7 +136,7 @@ export function ActivitySheet({ open, onClose }: ActivitySheetProps) {
           className="luma-scroll-y flex-1 px-3 pb-2"
           style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
         >
-          <ActivityFeed embedded onOpen={() => setBehindModal(true)} />
+          <ActivityFeed embedded onOpen={() => setBehindModal(true)} reveal={{ id: 'activity-sheet', landMs: ENTER_DURATION }} />
           <div className="shrink-0" style={{ height: 'env(safe-area-inset-bottom, 12px)' }} />
         </div>
       </div>

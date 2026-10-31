@@ -12,7 +12,8 @@
 // Used by both MovieDetailModal/CompactLayout and TvDetailModal/CompactLayout.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { MOTION, reducedMotion } from '@/theme/motion';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 
@@ -21,6 +22,8 @@ export interface BackdropHeroProps {
   hold?: boolean;
   /** No fades of its own (the phone sheet fades in as one, composed). */
   instant?: boolean;
+  /** A sharper image for the same box (see backdropHiRes): crossfaded in once decoded. */
+  upgradeUrl?: string | null;
   /** Primary backdrop image URL. */
   backdropUrl?: string | null;
   /** Fallback poster URL when no backdrop available. */
@@ -44,6 +47,7 @@ export function BackdropHero({
   containerRef,
   hold = false,
   instant = false,
+  upgradeUrl = null,
 }: BackdropHeroProps) {
   const containerStyle = useMemo<React.CSSProperties>(
     () => ({
@@ -73,6 +77,22 @@ export function BackdropHero({
     if (el && src && el.complete && el.naturalWidth > 0) setLoadedSrc(src);
   }, [src]);
   const fade: React.CSSProperties = { transition: instant ? 'none' : 'opacity 0.45s ease-out' };
+  // The sharp art over the first (seeded or small) art: loaded and decoded off-screen, then crossfaded in the same
+  // box over MOTION.dur.backdropSwap. Nothing moves or resizes; the sheet's own motion is untouched.
+  const [sharp, setSharp] = useState<string | null>(null);
+  useEffect(() => {
+    if (!upgradeUrl || upgradeUrl === src) { setSharp(null); return; }
+    let live = true;
+    const im = new Image();
+    im.src = upgradeUrl;
+    const done = typeof im.decode === 'function' ? im.decode() : new Promise<void>((res, rej) => { im.onload = () => res(); im.onerror = () => rej(); });
+    done.then(() => { if (live) setSharp(upgradeUrl); }).catch(() => { /* keep the first art */ });
+    return () => { live = false; };
+  }, [upgradeUrl, src]);
+  const fadeSharp = useCallback((el: HTMLImageElement | null) => {
+    if (!el || reducedMotion() || typeof el.animate !== 'function') return;
+    el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.dur.backdropSwap, easing: MOTION.ease.contentFade, fill: 'backwards' });
+  }, []);
 
   return (
     <div ref={containerRef} style={{ ...containerStyle, background: instant ? 'transparent' : '#111318' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
@@ -101,6 +121,10 @@ export function BackdropHero({
           }}
         />
       ) : null}
+      {sharp && loaded && (
+        <img key={sharp} ref={fadeSharp} src={sharp} alt="" data-backdrop-sharp="true"
+          style={{ ...effects.headerImgStyle, position: 'absolute', top: 0, left: 0 }} />
+      )}
 
       {/* Subtle bottom vignette — just enough for text readability.
           The container-level mask handles the smooth fade to transparent. */}

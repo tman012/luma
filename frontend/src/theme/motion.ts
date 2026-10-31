@@ -16,6 +16,8 @@ export const MOTION = {
   dur: { instant: 0, fast: 120, standard: 240, emphasized: 360, sheetEnter: SHEET_ENTER, sheetExit: SHEET_EXIT, sheetDragMin: SHEET_MOTION.dragMinMs,
     sheetScrimEnter: SHEET_MOTION.scrimEnterMs, sheetScrimExit: SHEET_MOTION.scrimExitMs,
     press: 100, image: 240, crossfade: 200,
+    /** Sheet content (TV Calendar, Activity, Rooms): one fade of the whole block once its data is ready; row images fade on their own. */
+    contentFade: 240, rowImage: 200, backdropSwap: 200,
     /** Back (popstate) waits for the longest exit: the phone sheet's, or the desktop expanded modal's owner timer. */
     dismissExit: Math.max(SHEET_EXIT, MODAL_EXIT_DESK) },
   ease: {
@@ -23,6 +25,7 @@ export const MOTION = {
     decel: 'cubic-bezier(0.05,0.7,0.1,1)',
     accel: 'cubic-bezier(0.3,0,0.8,0.15)',
     spring: SPRING,
+    contentFade: 'cubic-bezier(0.4,0,0.2,1)',
     sheet: SHEET_MOTION.enterEase,
     sheetExit: SHEET_MOTION.exitEase,
     sheetScrimEnter: SHEET_MOTION.scrimEnterEase,

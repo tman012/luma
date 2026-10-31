@@ -67,6 +67,25 @@ export function backdropUrl(
   return resolveImageUrl(path, phoneMinimal() && size === 'original' ? 'w780' : size);
 }
 
+/** The sharp version of a popup backdrop that phones first load small (w780 / a 780px Plex transcode):
+ *  TMDb w1280 (a 390pt phone at 3x is ~1170px wide), Plex 1280x720. Null when the URL is already the sharp one.
+ *  The sheet shows the small or seeded art first and crossfades to this once it has decoded. */
+export function backdropHiRes(url: string | null | undefined): string | null {
+  if (!url) return null;
+  let up = url
+    .replace(/([?&]size=)w780(?=&|$)/, '$1w1280')
+    .replace(/\/t\/p\/w780\//, '/t/p/w1280/');
+  if (/\/api\/img\/plex/.test(up)) up = up.replace(/([?&])w=780(&h=439)?(?=&|$)/, (_m, sep) => `${sep}w=1280&h=720`);
+  return up === url ? null : up;
+}
+
+/** The image a backdrop box upgrades to: over seeded art, the title's own backdrop (sharp size); over the
+ *  backdrop itself, its sharp size when it was loaded small. */
+export function backdropUpgrade(seeded: boolean, url: string | null | undefined): string | null {
+  if (!url) return null;
+  return seeded ? backdropHiRes(url) ?? url : backdropHiRes(url);
+}
+
 /** Minimal mode on a phone-width screen (the desktop popup keeps its sizes). */
 export function phoneMinimal(): boolean {
   return isMinimal() && typeof window !== 'undefined' && window.innerWidth < 1024;

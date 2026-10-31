@@ -9,7 +9,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 import { SEARCH_DEBOUNCE_MS } from '@/components/library/TvSearch';
-import { CAL_MAX_W, CARD_TEXT_H, POLL_MS, WeekGrid, WeekHero, airLine, keepIfSame, tvCalendarCss, weekCounts } from '@/components/library/TvCalendar';
+import { CAL_MAX_W, CARD_TEXT_H, POLL_MS, WeekGrid, WeekHero, airLine, keepIfSame, _clearCalendarCache, tvCalendarCss, weekCounts } from '@/components/library/TvCalendar';
 import { ModalHostContext, type ModalHostContextValue } from '@/contexts/ModalHostContext';
 import {
   addDays, agendaLabel, byDay, episodeState, isDay, localDay, seasonsText, shortDate, weekDays, weekLabel, weekStart, type CalEpisode,
@@ -32,6 +32,7 @@ let addStatus: number;
 let libShows: unknown[];
 const calls: { url: string; method: string; body: unknown }[] = [];
 beforeEach(() => {
+  _clearCalendarCache();
   vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
   vi.setSystemTime(NOW);
   calls.length = 0;

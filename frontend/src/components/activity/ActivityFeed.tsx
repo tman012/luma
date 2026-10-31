@@ -13,6 +13,7 @@ import { getBadgeColor } from '@/components/media/TvDetailModal/tvSourcesUtils';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { posterUrl } from '@/utils/image';
+import { ContentReveal, FadeImg } from '@/components/motion/ContentReveal';
 import { apiFetch } from '../../apiClient';
 
 /** A single completed download, badged by its origin. */
@@ -94,19 +95,18 @@ function RowWash({ posterPath }: { posterPath: string | null }) {
         WebkitMaskImage: 'linear-gradient(to right, black 0%, rgba(0,0,0,0.35) 45%, transparent 80%)',
       }}
     >
-      <img
+      <FadeImg
         src={src}
         alt=""
-        loading="lazy"
         draggable={false}
         onError={() => setFailed(true)}
+        opacity={0.38}
         style={{
           width: '100%', height: '100%', objectFit: 'cover',
           // Scale past the edges so the blur doesn't sample transparent pixels
           // and leave a pale halo around the row.
           transform: 'scale(1.6)',
           filter: 'blur(28px) saturate(1.7) brightness(0.62)',
-          opacity: 0.38,
         }}
       />
     </div>
@@ -150,15 +150,14 @@ function RowThumb({ posterPath, title, progress }: {
         <>
           {/* Undeveloped layer — only visible above the fill line */}
           {developing && (
-            <img src={src} alt="" aria-hidden loading="lazy" draggable={false}
+            <FadeImg src={src} alt="" aria-hidden draggable={false}
               onError={() => setFailed(true)}
               style={{ ...base, filter: 'grayscale(1) brightness(0.42)' }} />
           )}
           {/* Full-colour layer, clipped to the completed portion */}
-          <img
+          <FadeImg
             src={src}
             alt={title}
-            loading="lazy"
             draggable={false}
             onError={() => setFailed(true)}
             style={{
@@ -231,15 +230,22 @@ function originChipStyle(badge: string): React.CSSProperties | undefined {
   return undefined;
 }
 
-export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean; onOpen?: () => void }) {
-  const [entries, setEntries] = useState<ActivityEntry[]>([]);
-  const [active, setActive] = useState<ActiveDownload[]>([]);
+/** The last answers (this session): a reopened sheet renders them on frame 0, then refreshes quietly. */
+let feedCache: { entries: ActivityEntry[]; active: ActiveDownload[]; activeLoaded: boolean; historyLoaded: boolean } = { entries: [], active: [], activeLoaded: false, historyLoaded: false };
+export function _clearActivityCache() { feedCache = { entries: [], active: [], activeLoaded: false, historyLoaded: false }; }
+
+export function ActivityFeed({ embedded = false, onOpen, reveal }: { embedded?: boolean; onOpen?: () => void;
+  /** In a sheet: the first load (history and the active list) settles in one ContentReveal. */
+  reveal?: { id: string; landMs: number } }) {
+  const [entries, setEntries] = useState<ActivityEntry[]>(() => feedCache.entries);
+  const [active, setActive] = useState<ActiveDownload[]>(() => feedCache.active);
+  const [activeLoaded, setActiveLoaded] = useState(() => feedCache.activeLoaded);
   // Per-row remove UI lives inside the filename expand panel (not a standalone
   // Remove… button). confirmHash = delete-files confirm; busyHash = in-flight.
   const [confirmHash, setConfirmHash] = useState<string | null>(null);
   const [busyHash, setBusyHash] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !feedCache.historyLoaded);
   const [error, setError] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
   // Which rows have their full torrent/file name expanded (keyed by a stable id).
@@ -357,7 +363,8 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
             setReloadTick((t) => t + 1);
           }
           prevActiveKeysRef.current = newKeys;
-          setActive(list);
+          feedCache.active = list; feedCache.activeLoaded = true;
+          setActive(list); setActiveLoaded(true);
         });
     };
     loadActive();
@@ -366,7 +373,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
   }, []);
 
   const load = useCallback(() => {
-    setLoading(true);
+    if (!feedCache.historyLoaded) setLoading(true);
     setError(false);
     apiFetch('/api/downloads/history?limit=30')
       .then((r) => (r.ok ? r.json() : { history: [], _error: true }))
@@ -390,6 +397,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
             posterPath: d.poster_path ?? null,
           };
         }).sort((a, b) => b.ts - a.ts);
+        if (!(list.length === 0 && (hist as { _error?: boolean })._error)) { feedCache.entries = list; feedCache.historyLoaded = true; }
         setEntries(list);
         // Only call it "empty" when the history actually loaded. A failed/timed-
         // out fetch must not masquerade as "no downloads".
@@ -578,7 +586,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
   // refreshes (fired every time a download finishes) keep the existing list
   // rendered so it doesn't blank/reflow.
   if (loading && entries.length === 0) {
-    historySection = <p className="text-[12px] text-white/30 px-1">Loading...</p>;
+    historySection = reveal ? null : <p className="text-[12px] text-white/30 px-1">Loading...</p>;
   } else if (error && entries.length === 0) {
     historySection = (
       <button onClick={load} className="text-[12px] text-white/45 px-1 underline underline-offset-2">
@@ -713,6 +721,14 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
     );
   }
 
+  if (reveal) {
+    return (
+      <ContentReveal id={reveal.id} landMs={reveal.landMs} ready={!(loading && entries.length === 0) && activeLoaded} testId="activity-reveal">
+        {activeSection}
+        {historySection}
+      </ContentReveal>
+    );
+  }
   return (
     <>
       {activeSection}

@@ -8,6 +8,7 @@ import { isLiveTvNoArt, liveTvDisplayTitle, LiveTvGlyph } from '@/components/roo
 import { fetchRooms, type DeviceData } from '@/services/settingsApi';
 import { cn } from '@/utils/cn';
 import { apiUrl } from '@/urlHelpers';
+import { ContentReveal, FadeImg } from '@/components/motion/ContentReveal';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -149,7 +150,7 @@ function RoomCard({
               <div className="absolute inset-0 bg-sky-500/15" />
             )}
             {poster ? (
-              <img src={poster} alt="" className="relative h-full w-full object-cover" />
+              <FadeImg src={poster} alt="" className="relative h-full w-full object-cover" />
             ) : liveNoArt ? (
               <div className="relative flex h-full w-full items-center justify-center text-white/70">
                 <LiveTvGlyph size={28} />
@@ -318,7 +319,7 @@ function UnmatchedSessionCard({ session }: { session: SessionData }) {
     <div className="flex items-center gap-4 rounded-2xl bg-white/5 p-4">
       <div className="h-[90px] w-[60px] shrink-0 overflow-hidden rounded-lg bg-white/5">
         {poster ? (
-          <img src={poster} alt="" className="h-full w-full object-cover" />
+          <FadeImg src={poster} alt="" className="h-full w-full object-cover" />
         ) : (
           <PosterPlaceholder />
         )}
@@ -377,12 +378,17 @@ interface RoomsSheetProps {
   onClose: () => void;
 }
 
+/** The last device config (this session): a reopened sheet renders its rooms on frame 0. */
+let deviceCache: { map: Record<string, DeviceData[]>; hubs: Record<string, string> } | null = null;
+export function _clearRoomsCache() { deviceCache = null; }
+
 export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
   const { rooms, roomsLoading, unmatchedSessions } = useNotificationsContext();
   const [expandedRoom, setExpandedRoom] = useState<string | null>(null);
   const [remoteTarget, setRemoteTarget] = useState<{ roomId: string; deviceId: string } | null>(null);
-  const [deviceMap, setDeviceMap] = useState<Record<string, DeviceData[]>>({});
-  const [hubMap, setHubMap] = useState<Record<string, string>>({});
+  const [deviceMap, setDeviceMap] = useState<Record<string, DeviceData[]>>(() => deviceCache?.map ?? {});
+  const [hubMap, setHubMap] = useState<Record<string, string>>(() => deviceCache?.hubs ?? {});
+  const [devicesLoaded, setDevicesLoaded] = useState(() => !!deviceCache);
   const [deviceNotice, setDeviceNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -423,10 +429,12 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
           map[r.id] = r.devices || [];
           hubs[r.id] = (r.harmonyHubIp || '').trim();
         }
+        deviceCache = { map, hubs };
         setDeviceMap(map);
         setHubMap(hubs);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setDevicesLoaded(true));
   }, [open]);
 
   const toggleRoom = useCallback((roomId: string) => {
@@ -553,19 +561,9 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
             className="luma-scroll-y flex-1 px-3 pb-2"
             style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
           >
-            {roomsLoading ? (
-              <div className="flex flex-col gap-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-4 rounded-2xl bg-white/5 p-4">
-                    <div className="h-[52px] w-[52px] shrink-0 animate-pulse rounded-xl bg-white/5" />
-                    <div className="flex-1 space-y-2">
-                      <div className="h-4 w-1/3 animate-pulse rounded bg-white/5" />
-                      <div className="h-3 w-1/4 animate-pulse rounded bg-white/5" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : rooms.length === 0 ? (
+            {/* One reveal once rooms and their devices are ready (no skeletons, no per-list pop-in). */}
+            <ContentReveal id="rooms-sheet" landMs={ENTER_DURATION} ready={!roomsLoading && devicesLoaded} testId="rooms-reveal">
+            {rooms.length === 0 ? (
               <p className="text-center text-[15px] text-white/40 py-12">
                 No rooms configured
               </p>
@@ -596,6 +594,7 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
                 </div>
               </div>
             )}
+            </ContentReveal>
 
             <div className="shrink-0" style={{ height: 'env(safe-area-inset-bottom, 12px)' }} />
           </div>

@@ -157,7 +157,7 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
               onBack={() => setEp(null)} />
           ) : (
             <OpenShowContext.Provider value={openEpisode}>
-              <TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone />
+              <TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone reveal={{ id: 'tv-calendar-sheet', landMs: ENTER_DURATION }} />
             </OpenShowContext.Provider>
           )}
           <div data-scroll-content className="shrink-0" style={{ height: 'calc(var(--luma-end-pad) + 12px)' }} />
