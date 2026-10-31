@@ -89,7 +89,7 @@ describe('sheets', () => {
   it('no skeletons, loading text or per-row rise in the three sheets', () => {
     const rooms = src('components/rooms/RoomsSheet.tsx');
     expect(rooms).not.toMatch(/animate-pulse/);
-    expect(rooms).toMatch(/<ContentReveal id="rooms-sheet"/);
+    expect(rooms).toMatch(/<ContentReveal key=\{seq\} id="rooms-sheet"/);
     const act_ = src('components/activity/ActivityFeed.tsx');
     expect(act_).toMatch(/testId="activity-reveal"/);
     const cal = src('components/library/TvCalendar.tsx');
@@ -116,6 +116,6 @@ describe('backdrop upgrade', () => {
 
   it('both sheets pass the upgrade', () => {
     expect(src('components/media/MovieDetailModal/CompactLayout.tsx').match(/upgradeUrl=\{backdropUpgrade\(hero\.seeded/g)).toHaveLength(2);
-    expect(src('components/media/TvDetailModal/CompactLayout.tsx')).toMatch(/upgradeUrl=\{backdropUpgrade\(hero\.seeded/);
+    expect(src('components/media/TvDetailModal/CompactLayout.tsx')).toMatch(/: backdropUpgrade\(hero\.seeded, show\.backdropUrl\)\}/);
   });
 });
