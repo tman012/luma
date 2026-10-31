@@ -7,6 +7,7 @@ import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { formatRuntime, backdropUpgrade } from '@/utils/image';
+import { SeededLogo, seededTitleStyle, useLogoSwap } from '@/components/media/SeededLogo';
 import {
   PERSON_FALLBACK_SVG,
   getCastImageUrl,
@@ -145,6 +146,9 @@ export function CompactLayout(props: MovieModalViewProps) {
   const hero = useSeededHero(composed, paletteColors);
   const heroHold = hero.seeded ? false : titleState === 'hold';
   const heroTitleState = hero.seeded ? 'text' : titleState;
+  // Seeded opens keep the tapped card's text title on frame 0; the clearlogo swaps in with the sharp backdrop.
+  const seededLogo = hero.seeded ? (detail?.clearLogoUrl) || null : null;
+  const logoSwap = useLogoSwap(hero.seeded, seededLogo, backdropUpgrade(hero.seeded, detail?.backdropUrl));
   // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
   const ultraBlurColors = hero.colors;
   const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
@@ -379,8 +383,9 @@ export function CompactLayout(props: MovieModalViewProps) {
   );
   const titleEl = (<>
 {/* Clearlogo / Title */}
-                <div data-hero-keep=""
+                <div data-hero-keep="" data-title-box=""
                   style={{
+                    position: 'relative',
                     margin: '0 auto 24px',
                     maxWidth: '100%',
                     width: '100%',
@@ -409,9 +414,11 @@ export function CompactLayout(props: MovieModalViewProps) {
                       }}
                     />
                   ) : null}
+                  {logoSwap && seededLogo ? <SeededLogo url={seededLogo} alt={detail?.title} /> : null}
                   <h1
                     style={{
                       ...titleTextStyle(heroTitleState),
+                      ...(hero.seeded ? seededTitleStyle(logoSwap) : {}),
                       fontSize: '28px',
                       fontWeight: 700,
                       color: '#fff',

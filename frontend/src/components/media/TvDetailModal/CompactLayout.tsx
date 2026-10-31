@@ -31,6 +31,7 @@ import { MobilePlaybackSheet } from '../MovieDetailModal/MobilePlaybackSheet';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { PlexSeason } from '@/services/playbackApi';
 import { posterUrl, backdropUpgrade } from '@/utils/image';
+import { SeededLogo, seededTitleStyle, useLogoSwap } from '@/components/media/SeededLogo';
 import { RatingsBar, RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
 import { useImdbRatingsState } from '@/hooks/useImdbRatings';
 import { buildRatingItems } from '@/utils/ratingIcons';
@@ -210,6 +211,9 @@ export function CompactLayout(props: TvModalViewProps) {
   const hero = useSeededHero(composed, detailColors);
   const heroHold = hero.seeded ? false : titleState === 'hold';
   const heroTitleState = hero.seeded ? 'text' : titleState;
+  // Seeded opens keep the tapped card's text title on frame 0; the clearlogo swaps in with the sharp backdrop.
+  const seededLogo = hero.seeded ? (show?.clearLogoUrl ? withBase(show.clearLogoUrl) : null) || null : null;
+  const logoSwap = useLogoSwap(hero.seeded, seededLogo, backdropUpgrade(hero.seeded, show?.backdropUrl));
   const ultraBlurColors = hero.colors;
   const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
   useEffect(() => {
@@ -463,8 +467,9 @@ export function CompactLayout(props: TvModalViewProps) {
   );
   const titleEl = (<>
 {/* Clearlogo / Title */}
-                <div data-hero-keep=""
+                <div data-hero-keep="" data-title-box=""
                   style={{
+                    position: 'relative',
                     margin: '0 auto 24px',
                     maxWidth: '700px',
                     width: '95%',
@@ -493,9 +498,11 @@ export function CompactLayout(props: TvModalViewProps) {
                       }}
                     />
                   ) : null}
+                  {logoSwap && seededLogo ? <SeededLogo url={seededLogo} alt={show?.title} /> : null}
                   <h1
                     style={{
                       ...titleTextStyle(heroTitleState),
+                      ...(hero.seeded ? seededTitleStyle(logoSwap) : {}),
                       fontSize: '28px',
                       fontWeight: 700,
                       color: '#fff',
