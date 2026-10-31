@@ -25,3 +25,10 @@ describe('v326 phone sheet slide tokens (MOTION.md amendment 7:30 PM)', () => {
     expect(d).not.toContain('MOTION.ease.spring');
   });
 });
+
+describe('v326 UltraBlur blobs are not composited layers', () => {
+  it('no will-change on the blurred blobs (a sheet slide re-blurred them every frame)', () => {
+    const s = readFileSync('src/components/media/UltraBlurOverlay.tsx', 'utf8');
+    expect(s).not.toMatch(/willChange: lite \? undefined : 'transform'/);
+  });
+});

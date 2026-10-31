@@ -283,7 +283,7 @@ function BlurLayer({
               left: `${blob.x * 100}%`,
               top: `${blob.y * 100}%`,
               pointerEvents: 'none',
-              willChange: lite ? undefined : 'transform',
+              // No will-change: the blobs never move; as composited layers their 100px blur was redrawn on every frame of a sheet slide (viz-bound). Rasterized once instead.
             }}
           />
         ))}
