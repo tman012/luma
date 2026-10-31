@@ -12,7 +12,7 @@ export function useDecodedUrl(url: string | null | undefined): string | null {
     im.src = url;
     const p = typeof im.decode === 'function' ? im.decode() : new Promise<void>((res, rej) => { im.onload = () => res(); im.onerror = () => rej(); });
     p.then(() => { if (live) setDone(url); }).catch(() => { /* keep what is on screen */ });
-    return () => { live = false; };
+    return () => { live = false; im.onload = null; im.onerror = null; im.src = ''; };
   }, [url]);
   return done === url ? done : null;
 }

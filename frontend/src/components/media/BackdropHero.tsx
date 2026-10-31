@@ -77,22 +77,38 @@ export function BackdropHero({
     if (el && src && el.complete && el.naturalWidth > 0) setLoadedSrc(src);
   }, [src]);
   const fade: React.CSSProperties = { transition: instant ? 'none' : 'opacity 0.45s ease-out' };
-  // The sharp art over the first (seeded or small) art: loaded and decoded off-screen, then crossfaded in the same
-  // box over MOTION.dur.backdropSwap. Nothing moves or resizes; the sheet's own motion is untouched.
-  const [sharp, setSharp] = useState<string | null>(null);
+  // Sharper art over the first (seeded or small) art, in the same box. Each new URL is loaded and decoded off-screen
+  // and only then faded in over MOTION.dur.backdropSwap on top of whatever layer is showing; the layer under it stays
+  // until the fade has landed, so a later swap (e.g. Plex art -> TMDb text-free) never cuts back to the seed. Once
+  // better art shows it stays for this title, even if upgradeUrl goes away. In-flight decodes are dropped on change.
+  const [layers, setLayers] = useState<{ src: string | null; urls: string[] }>({ src: null, urls: [] });
+  const shown = layers.src === src ? layers.urls : [];
   useEffect(() => {
-    if (!upgradeUrl || upgradeUrl === src) { setSharp(null); return; }
+    if (!upgradeUrl || upgradeUrl === src || shown[shown.length - 1] === upgradeUrl) return;
     let live = true;
     const im = new Image();
     im.src = upgradeUrl;
     const done = typeof im.decode === 'function' ? im.decode() : new Promise<void>((res, rej) => { im.onload = () => res(); im.onerror = () => rej(); });
-    done.then(() => { if (live) setSharp(upgradeUrl); }).catch(() => { /* keep the first art */ });
-    return () => { live = false; };
+    done.then(() => {
+      if (!live) return;
+      setLayers(prev => {
+        const base = prev.src === src ? prev.urls.filter(u => u !== upgradeUrl) : [];
+        return { src, urls: [...base.slice(-1), upgradeUrl] };
+      });
+    }).catch(() => { /* keep what is showing */ });
+    return () => { live = false; im.onload = null; im.onerror = null; im.src = ''; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [upgradeUrl, src]);
-  const fadeSharp = useCallback((el: HTMLImageElement | null) => {
-    if (!el || reducedMotion() || typeof el.animate !== 'function') return;
-    el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.dur.backdropSwap, easing: MOTION.ease.contentFade, fill: 'backwards' });
+  const top = shown[shown.length - 1] ?? null;
+  const settle = useCallback(() => {
+    setLayers(prev => (prev.urls.length > 1 ? { src: prev.src, urls: prev.urls.slice(-1) } : prev));
   }, []);
+  const fadeSharp = useCallback((el: HTMLImageElement | null) => {
+    if (!el) return;
+    if (reducedMotion() || typeof el.animate !== 'function') { settle(); return; }
+    const a = el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.dur.backdropSwap, easing: MOTION.ease.contentFade, fill: 'backwards' });
+    if (a) a.onfinish = settle; else settle();
+  }, [settle]);
 
   return (
     <div ref={containerRef} style={{ ...containerStyle, background: instant ? 'transparent' : '#111318' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
@@ -121,10 +137,10 @@ export function BackdropHero({
           }}
         />
       ) : null}
-      {sharp && loaded && (
-        <img key={sharp} ref={fadeSharp} src={sharp} alt="" data-backdrop-sharp="true"
+      {loaded && shown.map(u => (
+        <img key={u} ref={u === top ? fadeSharp : undefined} src={u} alt="" data-backdrop-sharp="true"
           style={{ ...effects.headerImgStyle, position: 'absolute', top: 0, left: 0 }} />
-      )}
+      ))}
 
       {/* Subtle bottom vignette — just enough for text readability.
           The container-level mask handles the smooth fade to transparent. */}

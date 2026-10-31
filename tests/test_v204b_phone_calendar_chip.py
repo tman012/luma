@@ -15,7 +15,7 @@ CAL = (ROOT / 'frontend/src/components/library/TvCalendar.tsx').read_text()
 def test_sheet_reads_luma_calendar_not_sonarr():
     assert '/api/sonarr/calendar' not in SHEET and 'sonarr' not in SHEET.lower().replace('sonarr is not read', '')
     # TvCalendar loads /api/tv/calendar (loadCalendar) and is forced to the phone layout: day-nav A + Q2a chip
-    assert '<TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone />' in SHEET
+    assert '<TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone ' in SHEET   # v334: + reveal prop
     assert 'const phone = forcePhone || isPhone;' in CAL
     assert '<DayHeader day={day} today={today} onStep={step} />' in CAL
     # v322 (option C, replaces U3Row): no quality chip; the status dot is the only got-it indicator

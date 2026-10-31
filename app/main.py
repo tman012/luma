@@ -1279,8 +1279,22 @@ def _tmdb_needs_spelling_correction(results, query_str):
     return False
 
 # TMDB API functions
+def _num(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _rank_image(img: Dict) -> tuple:
-    return (img.get('vote_average') or 0, img.get('vote_count') or 0, img.get('width') or 0)
+    return (_num(img.get('vote_average')), _num(img.get('vote_count')), _num(img.get('width')))
+
+
+def _image_entries(value) -> List[Dict]:
+    """TMDb image entries that are usable: dicts with a string file_path (anything else is skipped, never raised on)."""
+    if not isinstance(value, list):
+        return []
+    return [e for e in value if isinstance(e, dict) and isinstance(e.get('file_path'), str) and e['file_path']]
 
 
 def choose_backdrop(details: Optional[Dict]) -> Optional[Dict]:
@@ -1290,22 +1304,26 @@ def choose_backdrop(details: Optional[Dict]) -> Optional[Dict]:
     the title then shows twice. When the title has a logo (en or no-language, the pool /api/clearlogo picks from),
     use the best no-language (iso_639_1 null) backdrop; keep a language backdrop only when there is no logo or no
     text-free backdrop. Adds backdrop_textless / has_logo and, when swapped, backdrop_path_language. The raw image
-    lists are dropped so the payload stays small.
+    lists are dropped so the payload stays small. Malformed image data never breaks the details: it is skipped.
     """
     if not isinstance(details, dict):
         return details
-    images = details.pop('images', None) or {}
-    logos = [l for l in images.get('logos') or [] if l.get('iso_639_1') in ('en', None) and l.get('file_path')]
-    textless = sorted((b for b in images.get('backdrops') or [] if b.get('iso_639_1') is None and b.get('file_path')),
-                      key=_rank_image, reverse=True)
-    current = details.get('backdrop_path')
-    is_textless = bool(current) and any(b['file_path'] == current for b in textless)
-    if logos and textless and not is_textless:
-        details['backdrop_path_language'] = current
-        details['backdrop_path'] = textless[0]['file_path']
-        is_textless = True
-    details['backdrop_textless'] = is_textless
-    details['has_logo'] = bool(logos)
+    try:
+        images = details.pop('images', None)
+        images = images if isinstance(images, dict) else {}
+        logos = [l for l in _image_entries(images.get('logos')) if l.get('iso_639_1') in ('en', None)]
+        textless = sorted((b for b in _image_entries(images.get('backdrops')) if b.get('iso_639_1') is None),
+                          key=_rank_image, reverse=True)
+        current = details.get('backdrop_path')
+        is_textless = bool(current) and any(b['file_path'] == current for b in textless)
+        if logos and textless and not is_textless:
+            details['backdrop_path_language'] = current
+            details['backdrop_path'] = textless[0]['file_path']
+            is_textless = True
+        details['backdrop_textless'] = is_textless
+        details['has_logo'] = bool(logos)
+    except Exception as e:  # never drop the details over the image choice
+        logger.warning(f"choose_backdrop skipped: {_redact_secrets(e)}")
     return details
 
 

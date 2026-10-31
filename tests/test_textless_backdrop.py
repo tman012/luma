@@ -62,3 +62,27 @@ def test_movie_and_tv_details_request_images_and_choose():
         params = g.call_args.kwargs['params']
         assert 'images' in params['append_to_response'].split(',') and params['include_image_language'] == 'en,null'
         assert out['backdrop_path'] == '/nolang.jpg'
+
+
+def test_malformed_image_entries_are_skipped():
+    d = {'backdrop_path': '/lang.jpg', 'title': 'T', 'images': {
+        'logos': [None, 'x', {'iso_639_1': 'en'}, {'file_path': 5, 'iso_639_1': 'en'}, {'file_path': '/ok.png', 'iso_639_1': 'en'}],
+        'backdrops': [None, 7, {'file_path': None, 'iso_639_1': None}, {'file_path': '/a.jpg', 'iso_639_1': None, 'vote_average': 'bad'},
+                      {'file_path': '/b.jpg', 'iso_639_1': None, 'vote_average': 6.1, 'vote_count': None}]}}
+    out = m.choose_backdrop(d)
+    assert out['title'] == 'T' and out['backdrop_path'] == '/b.jpg' and out['has_logo'] is True
+
+
+def test_malformed_images_container():
+    for images in ('oops', ['list'], {'logos': 'x', 'backdrops': {'a': 1}}, {'logos': None, 'backdrops': None}):
+        out = m.choose_backdrop({'backdrop_path': '/x.jpg', 'title': 'T', 'images': images})
+        assert out['title'] == 'T' and out['backdrop_path'] == '/x.jpg' and out['has_logo'] is False
+
+
+def test_details_call_survives_malformed_images():
+    payload = {'backdrop_path': '/x.jpg', 'title': 'T', 'images': {'logos': [None, {'file_path': 3}], 'backdrops': 'bad'}}
+    c = m.TMDBClient('k')
+    for fn in (c.get_movie_details, c.get_tv_details):
+        with mock.patch.object(m.requests, 'get', return_value=_resp(dict(payload))):
+            out = fn(1)
+        assert out is not None and out['title'] == 'T' and out['backdrop_path'] == '/x.jpg'
