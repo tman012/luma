@@ -401,7 +401,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // Effective ratings: Plex ratings augmented with RT scores from reviews (shared with the phone layout)
   const effectiveRatings = useMemo<Ratings | null>(() => mergeRatings(ratings, reviewData), [ratings, reviewData]);
   // ONE settled row, faded in once; the Info shelf's later reviews don't add badges to it for this open.
-  const ratingsSettle = useRatingsSettle(effectiveRatings, !!detail && !props.ratingsLoading && props.ratingsSettled !== false, props.openKey);
+  const ratingsSettle = useRatingsSettle(effectiveRatings, !!detail && !props.ratingsLoading && props.ratingsSettled !== false, props.openKey, !!detail);
   const ratingsRow = useRef(ratingsExpectedAtTap(true)).current || !!ratingsSettle.ratings;
 
 

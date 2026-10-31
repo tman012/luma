@@ -97,4 +97,51 @@ describe('ratings settle into one row', () => {
     }
     expect(src('hooks/useMovieDetail.ts')).toMatch(/\.finally\(\(\) => \{ if \(!cancelled\) setRatingsSettled\(true\); \}\)/);
   });
+
+  type A = { v: Ratings | null; s: boolean; k: string; a: boolean };
+  const mountA = (p: A) => renderHook(({ v, s, k, a }: A) => useRatingsSettle(v, s, k, a), { initialProps: p });
+
+  it('empty at the 1s cap does not lock: ratings at 1.6s show once, later sources still dropped', async () => {
+    const h = mountA({ v: null, s: false, k: 'a', a: true });
+    act(() => { vi.advanceTimersByTime(RATINGS_CAP_MS); });
+    await flush();
+    expect(h.result.current).toEqual({ shown: false, ratings: null });
+    act(() => { vi.advanceTimersByTime(600); });
+    h.rerender({ v: imdb, s: false, k: 'a', a: true });
+    await flush();
+    expect(h.result.current).toEqual({ shown: true, ratings: imdb });
+    const el = render(<RatingsSettle settle={h.result.current} size="sm" reserve={32} />).container.firstChild as HTMLElement;
+    expect(el.style.transition).toBe(`opacity ${MOTION.dur.contentFade}ms ${MOTION.ease.contentFade}`);
+    h.rerender({ v: all, s: true, k: 'a', a: true });
+    await flush();
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(h.result.current.ratings).toBe(imdb);
+  });
+
+  it('empty past the cap: the reserved empty row once every source has failed, then frozen', async () => {
+    const h = mountA({ v: null, s: false, k: 'a', a: true });
+    act(() => { vi.advanceTimersByTime(3000); });
+    await flush();
+    expect(h.result.current.shown).toBe(false);
+    h.rerender({ v: null, s: true, k: 'a', a: true });
+    await flush();
+    expect(h.result.current).toEqual({ shown: true, ratings: null });
+    h.rerender({ v: all, s: true, k: 'a', a: true });
+    await flush();
+    expect(h.result.current.ratings).toBeNull();
+  });
+
+  it('the cap starts when the details land, not at the tap', async () => {
+    const h = mountA({ v: null, s: false, k: 'a', a: false });
+    act(() => { vi.advanceTimersByTime(2000); });
+    h.rerender({ v: imdb, s: false, k: 'a', a: true });
+    await flush();
+    expect(h.result.current.shown).toBe(false);
+    act(() => { vi.advanceTimersByTime(RATINGS_CAP_MS - 1); });
+    await flush();
+    expect(h.result.current.shown).toBe(false);
+    act(() => { vi.advanceTimersByTime(1); });
+    await flush();
+    expect(h.result.current).toEqual({ shown: true, ratings: imdb });
+  });
 });

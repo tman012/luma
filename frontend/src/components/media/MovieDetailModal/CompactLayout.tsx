@@ -165,7 +165,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   // All sources (Plex/OMDb, the RT fill, the reviews endpoint) settle into ONE row that fades in once (useRatingsSettle).
   const effRatings = useEffectiveRatingsState(ratings, detail?.title, detail?.year);
   const ratingsSettle = useRatingsSettle(effRatings.ratings,
-    !!detail && !ratingsLoading && props.ratingsSettled !== false && effRatings.settled, props.openKey);
+    !!detail && !ratingsLoading && props.ratingsSettled !== false && effRatings.settled, props.openKey, !!detail);
   const hasRatings = !!ratingsSettle.ratings;
     // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed
   // reserves the ratings row from it and the row keeps that box, so a late ratings fetch never moves the rows below.
