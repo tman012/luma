@@ -373,7 +373,7 @@ export function CompactLayout(props: MovieModalViewProps) {
               placeholder is what the user sees for the first few hundred ms. */}
           <SeedLayer show={shellShown.current} ready={composed} overlap={100} rows={
             <ReservedRows actions={
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', padding: '20px 16px', maxWidth: `${76 + 32}px`, margin: '0 auto', boxSizing: 'border-box' }}>
+              <div data-action-row="" data-modal-actions="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', padding: '20px 16px', maxWidth: `${76 + 32}px`, margin: '0 auto', boxSizing: 'border-box' }}>
                 <ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} />
               </div>} />} />
 

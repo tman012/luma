@@ -31,8 +31,12 @@ export function ReservedRows({ actions }: { actions: ReactNode }) {
   return (
     <div data-seed-rows="" aria-hidden="true" style={{ opacity: 0, margin: `${TITLE_BLOCK_MB}px -16px 0`, textAlign: 'center', pointerEvents: 'none' }}>
       <div data-box="meta" style={META_ROW}><span>{'\u00a0'}</span></div>
-      <div data-box="watchlist" style={{ ...PILL, background: 'none' }}>
-        <svg width={PILL_ICON} height={PILL_ICON} aria-hidden="true" /><span>{'\u00a0'}</span>
+      {/* Same wrapper as the real pill, so the build's display rules (html.luma-minimal [data-modal-actions])
+          treat the reserve exactly like the real row. */}
+      <div data-modal-actions="">
+        <div data-box="watchlist" style={{ ...PILL, background: 'none' }}>
+          <svg width={PILL_ICON} height={PILL_ICON} aria-hidden="true" /><span>{'\u00a0'}</span>
+        </div>
       </div>
       {actions}
       <div style={OVERVIEW_WRAP}>

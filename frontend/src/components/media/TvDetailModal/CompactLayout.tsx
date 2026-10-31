@@ -1,4 +1,5 @@
 import { sheetBase } from '@/utils/posterColors';
+import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
@@ -448,7 +449,11 @@ export function CompactLayout(props: TvModalViewProps) {
           }}
         >
           {/* Loading */}
-          <SeedLayer show={shellShown.current} ready={composed} overlap={220} />
+          <SeedLayer show={shellShown.current} ready={composed} overlap={220} rows={
+            <ReservedRows actions={
+              <div data-modal-actions="" style={{ display: 'flex', justifyContent: 'center', gap: '18px', padding: '20px 16px' }}>
+                <span data-modal-keep="" style={{ display: 'contents' }}><ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} /></span>
+              </div>} />} />
 
           {/* Error */}
           {!loading && error && (
@@ -647,15 +652,9 @@ export function CompactLayout(props: TvModalViewProps) {
                   <>
                     {/* Meta info line: year . seasons . network . content_rating */}
                     {metaItems.length > 0 && (
-                      <div
+                      <div data-box="meta"
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '10px',
-                          marginTop: '8px',
-                          flexWrap: 'nowrap',
-                          fontSize: '14px',
+                          ...META_ROW,
                           color: 'rgba(255, 255, 255, 0.9)',
                         }}
                       >
@@ -700,7 +699,7 @@ export function CompactLayout(props: TvModalViewProps) {
                     <div data-modal-actions>
                     {(activeSeasonData ? seasonDetailIsOwned : showOwned) ? (
                       /* Watch button — full-width white pill */
-                      <button
+                      <button data-box="watchlist"
                         type="button"
                         data-modal-keep=""
                         data-owned-watch=""
@@ -712,20 +711,11 @@ export function CompactLayout(props: TvModalViewProps) {
                           }
                         }}
                         style={{
-                          width: 'calc(100% - 32px)',
-                          margin: '20px 16px 0',
-                          padding: '14px 20px',
+                          ...PILL,
                           background: '#ffffff',
                           color: '#000000',
-                          borderRadius: '50px',
                           border: 'none',
-                          fontSize: '16px',
-                          fontWeight: 600,
                           cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '10px',
                         }}
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -735,21 +725,14 @@ export function CompactLayout(props: TvModalViewProps) {
                       </button>
                     ) : (activeSeasonData && (addedSeasons.has(seasonDetailMode!) || isSeasonMonitored(sonarrStatus, seasonDetailMode!))) ? (
                       /* Season already monitored — show status, not an action */
-                      <div
+                      <div data-box="watchlist"
                         style={{
-                          width: 'calc(100% - 32px)',
-                          margin: '20px 16px 0',
-                          padding: '14px 20px',
+                          ...PILL,
+                          // the 1px border sits inside the pill's box (padding - 1px), same 52px as every pill
+                          padding: '13px 19px',
                           background: 'rgba(74,222,128,0.12)',
                           color: '#4ade80',
-                          borderRadius: '50px',
                           border: '1px solid rgba(74,222,128,0.35)',
-                          fontSize: '16px',
-                          fontWeight: 600,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '10px',
                         }}
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -759,21 +742,14 @@ export function CompactLayout(props: TvModalViewProps) {
                       </div>
                     ) : (!activeSeasonData && (sonarrStatus?.exists || showAddedThisSession)) ? (
                       /* Show already in the watchlist (Sonarr) — status, not an action */
-                      <div
+                      <div data-box="watchlist"
                         style={{
-                          width: 'calc(100% - 32px)',
-                          margin: '20px 16px 0',
-                          padding: '14px 20px',
+                          ...PILL,
+                          // the 1px border sits inside the pill's box (padding - 1px), same 52px as every pill
+                          padding: '13px 19px',
                           background: 'rgba(74,222,128,0.12)',
                           color: '#4ade80',
-                          borderRadius: '50px',
                           border: '1px solid rgba(74,222,128,0.35)',
-                          fontSize: '16px',
-                          fontWeight: 600,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '10px',
                         }}
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -786,7 +762,7 @@ export function CompactLayout(props: TvModalViewProps) {
                          Show-level add needs a resolved tvdbId (both the
                          AddToSonarr modal and the fast-add path are keyed on it),
                          so disable it until tvdbId lands to avoid a no-op tap. */
-                      <button
+                      <button data-box="watchlist"
                         type="button"
                         data-testid="tv-add-watchlist"
                         disabled={!activeSeasonData && !tvdbId}
@@ -798,21 +774,12 @@ export function CompactLayout(props: TvModalViewProps) {
                           }
                         }}
                         style={{
-                          width: 'calc(100% - 32px)',
-                          margin: '20px 16px 0',
-                          padding: '14px 20px',
+                          ...PILL,
                           background: '#3b82f6',
                           color: '#ffffff',
                           borderRadius: '12px',
-                          border: 'none',
-                          fontSize: '16px',
-                          fontWeight: 600,
                           cursor: (!activeSeasonData && !tvdbId) ? 'default' : 'pointer',
                           opacity: (!activeSeasonData && !tvdbId) ? 0.6 : 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '10px',
                         }}
                       >
                         <svg
@@ -966,29 +933,14 @@ export function CompactLayout(props: TvModalViewProps) {
 
                 {/* Plot summary — season overview in season detail mode, show overview otherwise */}
                 {!isEpisodeIntent && (activeSeasonData?.overview || show.summary) && (
-                  <div
-                    style={{
-                      padding: '0 16px',
-                      marginBottom: '24px',
-                      textAlign: 'left',
-                    }}
-                  >
-                    <p
+                  <div style={OVERVIEW_WRAP}>
+                    <p data-box="overview"
                       onClick={() => setPlotExpanded((v) => !v)}
                       style={{
-                        fontSize: '16px',
-                        lineHeight: 1.6,
+                        ...OVERVIEW_TEXT,
                         color: 'rgba(255, 255, 255, 0.9)',
-                        margin: 0,
                         cursor: 'pointer',
-                        ...(!plotExpanded
-                          ? {
-                              display: '-webkit-box',
-                              WebkitLineClamp: 3,
-                              WebkitBoxOrient: 'vertical' as const,
-                              overflow: 'hidden',
-                            }
-                          : {}),
+                        ...(!plotExpanded ? OVERVIEW_CLAMP : {}),
                       }}
                     >
                       {activeSeasonData?.overview || show.summary}
