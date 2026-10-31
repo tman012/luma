@@ -1,5 +1,6 @@
 """v207 (PM): on test (LUMA_MINIMAL) the phone movie sheet is plain navy as prod shows: neither the poster
 tint nor the /api/tmdb/colors sample reaches it; prod's path is unchanged."""
+import re
 import pathlib
 import subprocess
 
@@ -20,4 +21,10 @@ def test_prod_palette_path_unchanged():
     for f in ('frontend/src/hooks/useModalColors.ts', 'frontend/src/services/modalColors.ts',
               'frontend/src/utils/posterColors.ts', 'frontend/src/components/media/UltraBlurOverlay.tsx'):
         prod = subprocess.run(['git', 'show', f'1b4ea74:{f}'], cwd=ROOT, capture_output=True, text=True, check=True).stdout
-        assert prod == (ROOT / f).read_text(), f
+        cur = (ROOT / f).read_text()
+        # v326 (MOTION §7 #12, Designer): the sheet base mixes into #111318; the UltraBlur blobs drop will-change
+        # (perf, same pixels). Everything else stays prod's.
+        cur = cur.replace("// The sheet base mixes into the app surface #111318 (MOTION §7 #12), not the navy token.\nconst NAVY: [number, number, number] = [0x11, 0x13, 0x18];",
+                          "const NAVY: [number, number, number] = [0x15, 0x10, 0x2a];")
+        cur = re.sub(r"              // No will-change: the blobs never move;[^\n]*\n", "              willChange: lite ? undefined : 'transform',\n", cur)
+        assert prod == cur, f
