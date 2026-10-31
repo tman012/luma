@@ -193,7 +193,14 @@ export function remainingCap(fallback: number): number {
 }
 
 /** What the tapped card/row already shows (title, poster), for the sheet's seed shell (MOTION.md §1.2). */
-export interface TapShell { title: string; poster: string | null; at: number }
+/** `owned`: in the library (a Plex rating key, or the card's resolved ownership orb, data-owned); null when the
+ *  card didn't know yet; `plex`: opened by a Plex rating key. The seed reserves the owned-only rows from them. */
+export interface TapShell { title: string; poster: string | null; at: number; owned: boolean | null; plex: boolean }
+function tapOwned(card: HTMLElement | null, ratingKey: number | undefined): boolean | null {
+  if (ratingKey) return true;
+  const o = card?.closest('[data-owned]')?.getAttribute('data-owned') ?? card?.querySelector('[data-owned]')?.getAttribute('data-owned');
+  return o === 'true' ? true : o === 'false' ? false : null;
+}
 let shell: TapShell | null = null;
 function tapTitle(card: HTMLElement): string {
   const t = card.getAttribute('aria-label') || card.querySelector('[data-testid="row-title"]')?.textContent
@@ -242,7 +249,7 @@ export async function openWhenReady(
   const img = card?.querySelector('img') ?? null;
   const seed = colorsFromImage(img);
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);
-  shell = card ? { title: tapTitle(card), poster: img?.currentSrc || img?.src || null, at: now() } : null;
+  shell = card ? { title: tapTitle(card), poster: img?.currentSrc || img?.src || null, at: now(), owned: tapOwned(card, ratingKey), plex: !!ratingKey } : null;
   card?.setAttribute('data-pressed', 'true');
   let timer = 0;
   try {

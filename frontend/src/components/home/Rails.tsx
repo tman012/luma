@@ -3,7 +3,7 @@ import { img, type Card, type Rail } from './homeApi';
 import { FONT } from '@/components/start/StartUI';
 import { Fragment, useEffect, useRef } from 'react';
 import { scheduleWarm, warmDetail } from '@/services/modalPrefetch';
-import { OwnedOrb, useRailOwnership, type CardOwnership } from './railOwnership';
+import { OwnedOrb, plexOwned, useRailOwnership, type CardOwnership } from './railOwnership';
 import { LONG_PRESS_STYLE, useLongPress } from './useLongPress';
 
 export const GLASS: React.CSSProperties = {
@@ -61,7 +61,7 @@ type OnLongPress = ((card: Card) => void) | undefined;
 
 /** A card is a plain button when it can open the detail popup. v254: with *onLongPress* (What you're missing),
  * a long press opens the dismiss sheet instead (prod's MobilePosterCard gesture, useLongPress). */
-function CardShell({ card, onOpen, onLongPress, style, children }: { card: Card; onOpen: OnOpen; onLongPress?: OnLongPress; style: React.CSSProperties; children: React.ReactNode }) {
+function CardShell({ card, onOpen, onLongPress, style, children, own }: { card: Card; onOpen: OnOpen; onLongPress?: OnLongPress; style: React.CSSProperties; children: React.ReactNode; own?: CardOwnership }) {
   const ref = useRef<HTMLButtonElement>(null);
   useWarmWhenVisible(ref, card, !!onOpen);
   const lp = useLongPress(onLongPress ? () => onLongPress(card) : undefined);
@@ -74,7 +74,7 @@ function CardShell({ card, onOpen, onLongPress, style, children }: { card: Card;
       onTouchStart={(e) => { warm(); lp?.onTouchStart(e); }}
       onTouchMove={lp?.onTouchMove} onTouchEnd={lp?.onTouchEnd} onTouchCancel={lp?.onTouchCancel}
       onContextMenu={lp?.onContextMenu}
-      data-testid={`card-${card.key}`} className={lp ? 'luma-pressable longpress-poster' : 'luma-pressable'}
+      data-testid={`card-${card.key}`} data-owned={own ? String(own.owned) : undefined} className={lp ? 'luma-pressable longpress-poster' : 'luma-pressable'}
       style={{ ...cardButton, ...style, ...(lp ? LONG_PRESS_STYLE : null) }}>
       {children}
     </button>
@@ -84,7 +84,7 @@ function CardShell({ card, onOpen, onLongPress, style, children }: { card: Card;
 export function PosterCard({ card, onOpen, own, onLongPress }: { card: Card; onOpen?: OnOpen; own?: CardOwnership; onLongPress?: OnLongPress }) {
   const src = img(card.poster);
   return (
-    <CardShell card={card} onOpen={onOpen} onLongPress={onLongPress} style={posterCard}>
+    <CardShell card={card} onOpen={onOpen} onLongPress={onLongPress} style={posterCard} own={own ?? plexOwned(card) ?? undefined}>
       <div style={{ ...posterImg, ...GLASS }}>
         {src && <img src={src} alt="" loading="lazy" style={fill} draggable={false} />}
         <OwnedOrb own={own} />

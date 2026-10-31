@@ -17,6 +17,10 @@ export const PILL: CSSProperties = {
   fontSize: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
 };
 export const PILL_ICON = 16;
+/** Action button box: the circle's slot is the largest circle (5-6 buttons only shrink the circle inside it) and
+ *  the label line is the 11px label's, so the row's height never depends on how many buttons it holds. */
+export const ACTION_CIRCLE_SLOT = '50px';
+export const ACTION_LABEL_LINE = 'calc(11px * 1.15)';
 /** Overview: wrapper and clamped text (3 lines of 16px at 1.6). */
 export const OVERVIEW_WRAP: CSSProperties = { padding: '0 16px', marginBottom: '24px', textAlign: 'left' };
 export const OVERVIEW_LINES = 3;
@@ -27,14 +31,15 @@ export const OVERVIEW_CLAMP: CSSProperties = {
 
 /** The seed's reserved rows: the same boxes as the real meta row, primary pill, action row and overview, empty
  *  and invisible (opacity 0, no fill). `actions` is the layout's own action row with one invisible button. */
-export function ReservedRows({ actions }: { actions: ReactNode }) {
+export function ReservedRows({ actions, pillKept = false, ratingsH = 0 }: { actions: ReactNode; pillKept?: boolean; ratingsH?: number }) {
   return (
     <div data-seed-rows="" aria-hidden="true" style={{ opacity: 0, margin: `${TITLE_BLOCK_MB}px -16px 0`, textAlign: 'center', pointerEvents: 'none' }}>
       <div data-box="meta" style={META_ROW}><span>{'\u00a0'}</span></div>
+      {ratingsH > 0 && <div style={{ minHeight: `${ratingsH}px` }} />}
       {/* Same wrapper as the real pill, so the build's display rules (html.luma-minimal [data-modal-actions])
           treat the reserve exactly like the real row. */}
       <div data-modal-actions="">
-        <div data-box="watchlist" style={{ ...PILL, background: 'none' }}>
+        <div data-box="watchlist" data-modal-keep={pillKept ? '' : undefined} style={{ ...PILL, background: 'none' }}>
           <svg width={PILL_ICON} height={PILL_ICON} aria-hidden="true" /><span>{'\u00a0'}</span>
         </div>
       </div>

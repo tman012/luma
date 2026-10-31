@@ -3,7 +3,8 @@ import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedR
 import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
-import { REVEALED_EVENT } from '@/services/modalPrefetch';
+import { REVEALED_EVENT, tapShell } from '@/services/modalPrefetch';
+import { isMinimal } from '@/minimal';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -154,6 +155,8 @@ function ActionButton({
 export function CompactLayout(props: TvModalViewProps) {
   const { user } = useAuth();
   const isOwner = !!user?.is_admin;
+  // What the tapped card knew about ownership (null: unknown), read once at mount: the seed reserves from it.
+  const seedOwned = useRef(tapShell()?.owned ?? null).current;
   const {
     show,
     seasons,
@@ -196,6 +199,8 @@ export function CompactLayout(props: TvModalViewProps) {
     shuffleTarget,
     setShuffleTarget,
   } = props;
+  // Owned as soon as anything says so: the Plex path's show, the card at tap time, or the ownership lookup.
+  const showOwnedNow = showOwned || !!show?.isOwned || seedOwned === true;
   const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
   // Phone: the sheet stays off-screen until it can show fully composed
   // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
@@ -209,6 +214,9 @@ export function CompactLayout(props: TvModalViewProps) {
   const { ratings, loading: ratingsLoading } = useImdbRatingsState(show?.title, show?.year);
   const hasRatings = !!ratings && buildRatingItems(ratings).length > 0;
   const [reserveRatings, setReserveRatings] = useState(false);
+  // Known at tap time: outside minimal builds the ratings row has a source (OMDb/RT); the seed reserves it and the
+  // row keeps that box, so a late ratings fetch never moves the rows below.
+  const ratingsExpected = useRef(!isMinimal()).current;
   useEffect(() => { setReserveRatings(false); }, [show?.title]);
   useEffect(() => {
     if (composed && (ratingsLoading || hasRatings)) setReserveRatings(true);
@@ -450,7 +458,7 @@ export function CompactLayout(props: TvModalViewProps) {
         >
           {/* Loading */}
           <SeedLayer show={shellShown.current} ready={composed} overlap={220} rows={
-            <ReservedRows actions={
+            <ReservedRows pillKept={seedOwned !== false} ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
               <div data-modal-actions="" style={{ display: 'flex', justifyContent: 'center', gap: '18px', padding: '20px 16px' }}>
                 <span data-modal-keep="" style={{ display: 'contents' }}><ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} /></span>
               </div>} />} />
@@ -679,7 +687,7 @@ export function CompactLayout(props: TvModalViewProps) {
                     )}
 
                     {/* Ratings bar — centered icons (same slot as the movie sheet) */}
-                    <div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>
+                    <div data-ratings-slot style={{ minHeight: reserveRatings || ratingsExpected ? `${RATINGS_SLOT_SM}px` : 0 }}>
                       {ratings && <RatingsBar ratings={ratings} size="sm" />}
                     </div>
 
@@ -697,7 +705,14 @@ export function CompactLayout(props: TvModalViewProps) {
 
                     {/* Primary action area */}
                     <div data-modal-actions>
-                    {(activeSeasonData ? seasonDetailIsOwned : showOwned) ? (
+                    {/* Ownership the seed couldn't know: minimal builds show only the owned Watch pill, so its box stays
+                        reserved (empty) for the sheet's life unless Watch lands in it; the rows below never move. */}
+                    {isMinimal() && seedOwned === null && !activeSeasonData && !showOwnedNow && (
+                      <div data-box="watchlist" data-modal-keep="" aria-hidden="true" style={{ ...PILL, visibility: 'hidden' }}>
+                        <svg width="16" height="16" aria-hidden="true" /><span>{'\u00a0'}</span>
+                      </div>
+                    )}
+                    {(activeSeasonData ? seasonDetailIsOwned : showOwnedNow) ? (
                       /* Watch button — full-width white pill */
                       <button data-box="watchlist"
                         type="button"
@@ -895,7 +910,7 @@ export function CompactLayout(props: TvModalViewProps) {
                                 onClick={() => setShuffleTarget!({ ratingKey: activeSeasonPlexData.ratingKey, label: `Shuffling ${activeSeasonData.name || `Season ${seasonDetailMode}`}...` })}
                               />
                             ))
-                          : (showOwned && show?.ratingKey && (
+                          : (showOwnedNow && show?.ratingKey && (
                               <ActionButton
                                 icon={
                                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

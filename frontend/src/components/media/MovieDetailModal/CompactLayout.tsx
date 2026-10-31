@@ -1,11 +1,12 @@
 import { sheetBase } from '@/utils/posterColors';
-import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
+import { ACTION_CIRCLE_SLOT, ACTION_LABEL_LINE, META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
-import { REVEALED_EVENT } from '@/services/modalPrefetch';
+import { REVEALED_EVENT, tapShell } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { isMinimal } from '@/minimal';
 import { formatRuntime } from '@/utils/image';
 import {
   PERSON_FALLBACK_SVG,
@@ -66,6 +67,7 @@ function ActionButton({
         minWidth: 0,
       }}
     >
+      <div style={{ height: ACTION_CIRCLE_SLOT, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div
         style={{
           width: circle,
@@ -80,6 +82,7 @@ function ActionButton({
       >
         {icon}
       </div>
+      </div>
       <span
         style={{
           fontSize,
@@ -88,6 +91,7 @@ function ActionButton({
           letterSpacing: fontSize === '11px' ? '0.02em' : 0,
           textAlign: 'center',
           lineHeight: 1.15,
+          height: ACTION_LABEL_LINE,
           whiteSpace: 'nowrap',
         }}
       >
@@ -150,6 +154,9 @@ export function CompactLayout(props: MovieModalViewProps) {
   const shownRatings = useEffectiveRatings(ratings, detail?.title, detail?.year);
   const hasRatings = !!shownRatings && buildRatingItems(shownRatings).length > 0;
   const [reserveRatings, setReserveRatings] = useState(false);
+  // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed
+  // reserves the ratings row from it and the row keeps that box, so a late ratings fetch never moves the rows below.
+  const ratingsExpected = useRef(!isMinimal() || !!tapShell()?.plex).current;
   useEffect(() => { setReserveRatings(false); }, [detail?.title]);
   useEffect(() => {
     if (composed && (ratingsLoading || hasRatings)) setReserveRatings(true);
@@ -372,7 +379,7 @@ export function CompactLayout(props: MovieModalViewProps) {
           {/* Loading — the sheet now slides up before the data lands, so this
               placeholder is what the user sees for the first few hundred ms. */}
           <SeedLayer show={shellShown.current} ready={composed} overlap={100} rows={
-            <ReservedRows actions={
+            <ReservedRows ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
               <div data-action-row="" data-modal-actions="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', padding: '20px 16px', maxWidth: `${76 + 32}px`, margin: '0 auto', boxSizing: 'border-box' }}>
                 <ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} />
               </div>} />} />
@@ -541,7 +548,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   )}
 
                   {/* Ratings bar — centered icons */}
-                  <div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>
+                  <div data-ratings-slot style={{ minHeight: reserveRatings || ratingsExpected ? `${RATINGS_SLOT_SM}px` : 0 }}>
                     {shownRatings && <RatingsBar ratings={shownRatings} size="sm" />}
                   </div>
 
@@ -549,12 +556,13 @@ export function CompactLayout(props: MovieModalViewProps) {
                   <div data-modal-actions>
                   {isOwned ? (
                     /* Watch button — full-width white pill */
-                    <button
+                    <button data-box="watchlist"
                       type="button"
                       data-modal-keep=""
                       data-owned-watch=""
                       onClick={() => setShowPlayback(true)}
                       style={{
+                        ...PILL,
                         width: 'calc(100% - 32px)',
                         margin: '20px 16px 0',
                         padding: '14px 20px',
@@ -578,14 +586,14 @@ export function CompactLayout(props: MovieModalViewProps) {
                     </button>
                   ) : inWatchlist ? (
                     /* In Watchlist — tap to remove (confirm sheet) */
-                    <div
+                    <div data-box="watchlist"
                       style={{
                         display: 'flex',
                         justifyContent: 'center',
                         margin: '20px 16px 0',
                       }}
                     >
-                      <button data-box="watchlist"
+                      <button
                         type="button"
                         onClick={() => {
                           setRemoveWatchlistError(null);
@@ -595,7 +603,8 @@ export function CompactLayout(props: MovieModalViewProps) {
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '8px',
-                          padding: '12px 28px',
+                          // the pill's box: PILL's 14px padding with the 1px border inside it, 52px like every pill
+                          padding: '13px 27px',
                           borderRadius: '50px',
                           background: 'rgba(74,222,128,0.12)',
                           border: '1px solid rgba(74,222,128,0.3)',
