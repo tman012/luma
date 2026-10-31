@@ -133,18 +133,43 @@ export function WideCard({ card, onOpen, own }: { card: Card; onOpen?: OnOpen; o
   );
 }
 
-/** v289: afterFirst sits under the first (CW-shaped) skeleton rail — same slot as loaded HomeRails — so pills do not paint at the top then jump. */
-export function SkeletonRails({ rails = 3, afterFirst, afterH, ghost }: { rails?: number; afterFirst?: React.ReactNode; afterH?: number; ghost?: boolean }) {
+/** Home skeleton layout (Designer 1:03 AM ET): the skeleton is drawn from the last Home that rendered, so its
+ *  rails (and the pills under the first one) sit where the content will. Generic: per rendered rail only its shape
+ *  (wide = Continue Watching cards, else posters), box height and top margin; no titles, ids or user data. */
+export type SkeletonRail = { wide: boolean; h: number; mt: number };
+export const HOME_LAYOUT_KEY = 'luma.homeSkeletonLayout.v1';
+/** First-ever load (no history): poster rails, the first one 265px (the common no-CW Home). */
+export const DEFAULT_SKELETON_LAYOUT: SkeletonRail[] = [{ wide: false, h: 265, mt: 28 }, { wide: false, h: 265, mt: 28 }, { wide: false, h: 265, mt: 28 }];
+export function readHomeLayout(): SkeletonRail[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(HOME_LAYOUT_KEY) || 'null');
+    if (Array.isArray(v) && v.length && v.every(r => r && typeof r.h === 'number' && r.h > 0 && r.h < 2000 && typeof r.mt === 'number'))
+      return v.slice(0, 3).map(r => ({ wide: !!r.wide, h: Math.round(r.h), mt: Math.round(r.mt) }));
+  } catch { /* private mode / bad JSON: the default */ }
+  return DEFAULT_SKELETON_LAYOUT;
+}
+function saveHomeLayout(root: HTMLElement | null) {
+  if (!root) return;
+  const rails = Array.from(root.children).filter((e): e is HTMLElement => e.tagName === 'SECTION').slice(0, 3)
+    .map(e => ({ wide: e.getAttribute('data-testid') === 'rail-continue', h: e.offsetHeight, mt: parseFloat(getComputedStyle(e).marginTop) || 0 }));
+  if (!rails.length || rails.some(r => !r.h)) return;
+  try { localStorage.setItem(HOME_LAYOUT_KEY, JSON.stringify(rails)); } catch { /* quota / private mode */ }
+}
+
+/** v289: afterFirst sits under the first skeleton rail (the same slot as loaded HomeRails: after Continue Watching,
+ *  else after the first rail), so the pills don't paint at the top and then jump. Each rail's box is the last Home's. */
+export function SkeletonRails({ afterFirst, afterH, ghost, layout }: { rails?: number; afterFirst?: React.ReactNode; afterH?: number; ghost?: boolean; layout?: SkeletonRail[] }) {
+  const rails = layout ?? readHomeLayout();
   return (
     <div data-testid={ghost ? undefined : 'home-skeleton'} aria-busy={ghost ? undefined : 'true'}>
-      {Array.from({ length: rails }, (_, r) => (
+      {rails.map((rl, r) => (
         <Fragment key={r}>
-          <section style={railWrap}>
+          <section style={{ marginTop: rl.mt, height: rl.h, overflow: 'hidden' }} data-skel-rail={rl.wide ? 'wide' : 'poster'}>
             <div className={ghost ? undefined : 'luma-shimmer'} style={{ ...skel, ...(ghost ? GHOST_FILL : null), width: 140, height: 18, borderRadius: 6, marginLeft: 20 }} />
             <div style={scroller}>
               {Array.from({ length: 6 }, (_, i) => (
-                <div key={i} style={r === 0 ? wideCard : posterCard}>
-                  <div className={ghost ? undefined : 'luma-shimmer'} style={{ ...skel, ...(ghost ? GHOST_FILL : null), ...(r === 0 ? wideImg : posterImg) }} />
+                <div key={i} style={rl.wide ? wideCard : posterCard}>
+                  <div className={ghost ? undefined : 'luma-shimmer'} style={{ ...skel, ...(ghost ? GHOST_FILL : null), ...(rl.wide ? wideImg : posterImg) }} />
                 </div>
               ))}
             </div>
@@ -162,11 +187,13 @@ export function SkeletonRails({ rails = 3, afterFirst, afterH, ghost }: { rails?
 export function SkeletonCrossfade({ loading, children }: { loading: boolean; children: React.ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const afterH = useRef<number | undefined>(undefined);
+  const layoutRef = useRef<SkeletonRail[] | undefined>(undefined);
   const was = useRef(loading);
   const [ghost, setGhost] = useState(false);
   const [hold, setHold] = useState(false);
   useLayoutEffect(() => {
     if (loading) {
+      layoutRef.current = readHomeLayout();
       const a = box.current?.querySelector<HTMLElement>('[data-testid="home-skeleton"] > section + :not(section)');
       afterH.current = a ? a.offsetHeight : 0;
     }
@@ -188,7 +215,7 @@ export function SkeletonCrossfade({ loading, children }: { loading: boolean; chi
       {ghost && !loading && (
         <div aria-hidden="true" data-testid="home-skeleton-out" className="luma-skel-out"
           style={{ position: 'absolute', top: 0, left: 0, right: 0, pointerEvents: 'none' }}>
-          <SkeletonRails ghost afterH={afterH.current ?? 0} />
+          <SkeletonRails ghost afterH={afterH.current ?? 0} layout={layoutRef.current} />
         </div>
       )}
     </div>
@@ -202,8 +229,11 @@ export function HomeRails({ cw, rails, onOpen, onDismiss, afterFirst }: { cw: Ca
   // v181: prod's rule: no orb on all-owned library rails (Continue watching, every Plex library rail);
   // the orb only on mixed rails (Trakt), resolved by prod's batch check.
   const own = useRailOwnership(rails.flatMap(r => r.items).filter(c => c.tmdb_id));
+  const root = useRef<HTMLDivElement>(null);
+  // The next cold load's skeleton is drawn from this layout (after paint: never on the tap path).
+  useEffect(() => { const t = window.setTimeout(() => saveHomeLayout(root.current), 500); return () => window.clearTimeout(t); });
   return (
-    <div data-testid="home-rails" className="luma-rails-in">
+    <div ref={root} data-testid="home-rails" className="luma-rails-in">
       {cw.length > 0 && (
         <RailRow title="Continue Watching" testId="rail-continue">
           {cw.map(c => <WideCard key={c.key} card={c} onOpen={onOpen} />)}
