@@ -1,12 +1,11 @@
 import { sheetBase } from '@/utils/posterColors';
-import { ACTION_CIRCLE_SLOT, ACTION_LABEL_LINE, META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
+import { ACTION_CIRCLE_SLOT, ACTION_LABEL_LINE, META_ROW, ratingsExpectedAtTap, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
-import { REVEALED_EVENT, tapShell } from '@/services/modalPrefetch';
+import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { isMinimal } from '@/minimal';
 import { formatRuntime } from '@/utils/image';
 import {
   PERSON_FALLBACK_SVG,
@@ -153,11 +152,11 @@ export function CompactLayout(props: MovieModalViewProps) {
   // Phone parity with web: RT from the reviews endpoint when the ratings lack it (mergeRatings).
   const shownRatings = useEffectiveRatings(ratings, detail?.title, detail?.year);
   const hasRatings = !!shownRatings && buildRatingItems(shownRatings).length > 0;
-  const [reserveRatings, setReserveRatings] = useState(false);
-  // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed
+    // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed
   // reserves the ratings row from it and the row keeps that box, so a late ratings fetch never moves the rows below.
-  const ratingsExpected = useRef(!isMinimal() || !!tapShell()?.plex).current;
-  useEffect(() => { setReserveRatings(false); }, [detail?.title]);
+  const ratingsExpected = useRef(ratingsExpectedAtTap(true)).current;
+  const [reserveRatings, setReserveRatings] = useState(ratingsExpected);
+  useEffect(() => { setReserveRatings(ratingsExpected); }, [detail?.title]);
   useEffect(() => {
     if (composed && (ratingsLoading || hasRatings)) setReserveRatings(true);
   }, [composed, ratingsLoading, hasRatings]);
@@ -548,7 +547,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   )}
 
                   {/* Ratings bar — centered icons */}
-                  <div data-ratings-slot style={{ minHeight: reserveRatings || ratingsExpected ? `${RATINGS_SLOT_SM}px` : 0 }}>
+                  <div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>
                     {shownRatings && <RatingsBar ratings={shownRatings} size="sm" />}
                   </div>
 

@@ -1,5 +1,5 @@
 import { sheetBase } from '@/utils/posterColors';
-import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
+import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows, ratingsExpectedAtTap } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
@@ -213,11 +213,11 @@ export function CompactLayout(props: TvModalViewProps) {
   // sheet, keep their row reserved once the sheet shows so nothing below moves.
   const { ratings, loading: ratingsLoading } = useImdbRatingsState(show?.title, show?.year);
   const hasRatings = !!ratings && buildRatingItems(ratings).length > 0;
-  const [reserveRatings, setReserveRatings] = useState(false);
-  // Known at tap time: outside minimal builds the ratings row has a source (OMDb/RT); the seed reserves it and the
+    // Known at tap time: outside minimal builds the ratings row has a source (OMDb/RT); the seed reserves it and the
   // row keeps that box, so a late ratings fetch never moves the rows below.
-  const ratingsExpected = useRef(!isMinimal()).current;
-  useEffect(() => { setReserveRatings(false); }, [show?.title]);
+  const ratingsExpected = useRef(ratingsExpectedAtTap(false)).current;
+  const [reserveRatings, setReserveRatings] = useState(ratingsExpected);
+  useEffect(() => { setReserveRatings(ratingsExpected); }, [show?.title]);
   useEffect(() => {
     if (composed && (ratingsLoading || hasRatings)) setReserveRatings(true);
   }, [composed, ratingsLoading, hasRatings]);
@@ -687,7 +687,7 @@ export function CompactLayout(props: TvModalViewProps) {
                     )}
 
                     {/* Ratings bar — centered icons (same slot as the movie sheet) */}
-                    <div data-ratings-slot style={{ minHeight: reserveRatings || ratingsExpected ? `${RATINGS_SLOT_SM}px` : 0 }}>
+                    <div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>
                       {ratings && <RatingsBar ratings={ratings} size="sm" />}
                     </div>
 

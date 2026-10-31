@@ -2,6 +2,8 @@
  *  Designer 8:53 PM: the details' boxes are reserved from frame 0). The real rows and the seed's invisible
  *  reserves are built from these same constants, so the boxes match exactly; the content fades in inside them. */
 import type { CSSProperties, ReactNode } from 'react';
+import { isMinimal } from '@/minimal';
+import { tapShell } from '@/services/modalPrefetch';
 
 /** Under the 140px title block: the title block's own bottom margin (title `margin: 0 auto 24px`). */
 export const TITLE_BLOCK_H = 140;
@@ -17,6 +19,11 @@ export const PILL: CSSProperties = {
   fontSize: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
 };
 export const PILL_ICON = 16;
+/** Known at tap time: the ratings row has a source (OMDb/RT outside minimal builds; Plex for a title opened by its
+ *  rating key, `plex` true for movies only). The seed reserves that row and the sheet starts with it reserved. */
+export function ratingsExpectedAtTap(plexRatings: boolean): boolean {
+  return !isMinimal() || (plexRatings && !!tapShell()?.plex);
+}
 /** Action button box: the circle's slot is the largest circle (5-6 buttons only shrink the circle inside it) and
  *  the label line is the 11px label's, so the row's height never depends on how many buttons it holds. */
 export const ACTION_CIRCLE_SLOT = '50px';
