@@ -5,13 +5,13 @@ import { MOTION } from '@/theme/motion';
 describe('v326 phone sheet slide tokens (MOTION.md amendment 7:30 PM)', () => {
   it('tokens', () => {
     expect(MOTION.dur.sheetEnter).toBe(380);
-    expect(MOTION.ease.sheet).toBe('cubic-bezier(0.32,0.72,0,1)');
+    expect(MOTION.ease.sheet).toBe('cubic-bezier(0.3,0.6,0.2,1)');
     expect(MOTION.dur.sheetExit).toBe(260);
     expect(MOTION.ease.sheetExit).toBe('cubic-bezier(0.32,0,0.67,0)');
     expect(MOTION.dur.sheetDragMin).toBe(180);
     expect(MOTION.dur.dismissExit).toBe(300);
     const css = readFileSync('src/index.css', 'utf8');
-    expect(css).toContain('--m-ease-sheet: cubic-bezier(0.32, 0.72, 0, 1)');
+    expect(css).toContain('--m-ease-sheet: cubic-bezier(0.3, 0.6, 0.2, 1)');
     expect(css).toContain('--m-ease-sheet-exit: cubic-bezier(0.32, 0, 0.67, 0)');
   });
   it('SheetFrame and the drag release read them; scrim exits over the same duration', () => {

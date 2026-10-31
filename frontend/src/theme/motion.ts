@@ -13,7 +13,7 @@ export const MOTION = {
     decel: 'cubic-bezier(0.05,0.7,0.1,1)',
     accel: 'cubic-bezier(0.3,0,0.8,0.15)',
     spring: SPRING,
-    sheet: 'cubic-bezier(0.32,0.72,0,1)',
+    sheet: 'cubic-bezier(0.3,0.6,0.2,1)',
     sheetExit: 'cubic-bezier(0.32,0,0.67,0)',
   },
   spring: { stiffness: 380, damping: 36, mass: 1 },

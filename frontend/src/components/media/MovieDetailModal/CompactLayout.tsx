@@ -509,7 +509,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   }}>
                   {/* Meta info line: year • runtime • content_rating • genres */}
                   {metaItems.length > 0 && (
-                    <div
+                    <div data-box="meta"
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -586,7 +586,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                         margin: '20px 16px 0',
                       }}
                     >
-                      <button
+                      <button data-box="watchlist"
                         type="button"
                         onClick={() => {
                           setRemoveWatchlistError(null);
@@ -619,7 +619,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                     </div>
                   ) : (
                     /* Add to Watchlist — full-width white pill */
-                    <button
+                    <button data-box="watchlist"
                       type="button"
                       onClick={handleUpgradeToggle}
                       style={{
@@ -828,7 +828,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                       textAlign: 'left',
                     }}
                   >
-                    <p
+                    <p data-box="overview"
                       onClick={() => setPlotExpanded((v) => !v)}
                       style={{
                         fontSize: '16px',
