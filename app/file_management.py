@@ -177,15 +177,18 @@ def _normalize(raw: Any) -> Dict[str, Any]:
 _HOST_RE = re.compile(r'^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
                       r'(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$')
 def valid_address(addr: str) -> bool:
-    """An IPv4/IPv6 literal or a DNS host name; no scheme, port, path or spaces."""
+    """An IPv4/IPv6 literal or a DNS host name; no scheme, port, path or spaces. Loopback,
+    link-local, multicast and unspecified IPs are refused (a LAN copy target never is one);
+    private ranges are fine."""
     if not isinstance(addr, str) or not addr or len(addr) > 253:
         return False
     import ipaddress
     try:
-        ipaddress.ip_address(addr)
-        return True
+        ip = ipaddress.ip_address(addr)
     except ValueError:
-        pass
+        ip = None
+    if ip is not None:
+        return not (ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified)
     if re.fullmatch(r'[0-9.]+', addr):
         return False   # looks like a broken IPv4
     return bool(_HOST_RE.match(addr))

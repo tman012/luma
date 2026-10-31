@@ -63,7 +63,24 @@ def remote_command(argv) -> str:
 
 
 TRANSFER_ENV = 'LUMA_TRANSFER_HOST'
-_HOST_OK = re.compile(r'^[A-Za-z0-9.:\-]{1,253}$')
+_DNS_RE = re.compile(r'^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
+                     r'(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$')
+
+
+def valid_transfer_host(host: str) -> bool:
+    """Same rule as Luma's file_management.valid_address: an IP literal (not loopback, link-local,
+    multicast or unspecified) or a DNS name whose labels start alphanumeric. Never a leading '-'
+    (no option injection downstream), no user@, brackets, ports, spaces or shell characters."""
+    import ipaddress
+    if not isinstance(host, str) or not host or len(host) > 253:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        if re.fullmatch(r'[0-9.]+', host):
+            return False
+        return bool(_DNS_RE.match(host))
+    return not (ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified)
 
 
 def build_cmd(mode: str, src: str, dest: str, tmp: str = '', transfer_host: str = '') -> list:
@@ -71,7 +88,7 @@ def build_cmd(mode: str, src: str, dest: str, tmp: str = '', transfer_host: str 
     args = [mode, src, dest] + ([tmp] if tmp else [])
     if SSH_TARGET:
         remote = remote_command([REMOTE_CLI, *args])
-        if transfer_host:
+        if transfer_host and valid_transfer_host(transfer_host):
             remote = f'{TRANSFER_ENV}={shlex.quote(transfer_host)} {remote}'
         return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', SSH_TARGET, '--', remote]
     return [CLI, *args]
@@ -86,7 +103,7 @@ def run_move(mode: str, src: str, dest: str, tmp: str = '', transfer_host: str =
         return 2, f'dest must be under {MEDIA_ROOT}'
     if tmp and (os.path.dirname(tmp) != os.path.dirname(dest) or not TMP_RE.match(os.path.basename(tmp))):
         return 2, 'tmp must be <dest dir>/.luma-<hex16>.luma-partial'
-    if transfer_host and not _HOST_OK.match(transfer_host):
+    if transfer_host and not valid_transfer_host(transfer_host):
         return 2, 'transfer_host must be an IP address or host name'
     cmd = build_cmd(mode, src, dest, tmp, transfer_host)
     env = None

@@ -214,7 +214,7 @@ function DownloadsStatus({ view, onView, onToast }: {
 }
 
 /** Optional transfer address of the library server (blank: the main address). Saved on submit;
- *  the server checks it answers before keeping it. */
+ *  the server checks the format only (IP or host name); the copy itself falls back to the main address. */
 function TransferAddress({ view, onView, onToast }: {
   view: LibraryView; onView: (v: LibraryView) => void; onToast: (t: string) => void;
 }) {

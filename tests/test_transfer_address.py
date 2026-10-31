@@ -235,3 +235,104 @@ def test_reference_helper_forwards_env_without_renames(monkeypatch):
     withh = mod.build_cmd('cp', '/scratch/downloads/a b.mkv', '/media/M/a b.mkv', '', '10.10.10.25')
     assert withh[-1] == 'LUMA_TRANSFER_HOST=10.10.10.25 ' + plain[-1]
     assert mod.run_move('cp', '/scratch/downloads/a', '/media/a', '', 'x;rm -rf /')[0] == 2
+
+
+# ------------------------------------------------------------------ B1: option injection (helper + CLI)
+
+BAD_HOSTS = ['-Jx', '-oProxyCommand', 'a b', 'a;b', 'u@h', '[::1]', '-Jevil.com', 'x$(id)', '127.0.0.1', '::1',
+             '169.254.169.254', '224.0.0.1', '0.0.0.0', 'fe80::1', 'ff02::1', '']
+GOOD_HOSTS = ['10.10.10.25', '192.168.1.5', '172.16.0.9', 'nas', 'nas.lan', 'ffserver.lan', 'fd00::25', '2001:db8::5']
+
+
+def _helper():
+    import importlib.util
+    path = pathlib.Path(__file__).resolve().parents[1] / 'scripts' / 'luma-remote-mover-host.py'
+    spec = importlib.util.spec_from_file_location('mover_host_b1', path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize('host', BAD_HOSTS)
+def test_helper_rejects_bad_transfer_host(host, monkeypatch):
+    mod = _helper()
+    assert not mod.valid_transfer_host(host)
+    assert not fm.valid_address(host)
+    monkeypatch.setattr(mod.subprocess, 'run', lambda *a, **k: pytest.fail('must not run'))
+    if host:
+        rc, out = mod.run_move('cp', '/scratch/downloads/a', '/media/a', '', host)
+        assert rc == 2 and 'transfer_host' in out
+    monkeypatch.setattr(mod, 'SSH_TARGET', 'u@dl')
+    assert 'LUMA_TRANSFER_HOST' not in mod.build_cmd('cp', '/scratch/downloads/a', '/media/a', '', host)[-1]
+
+
+@pytest.mark.parametrize('host', GOOD_HOSTS)
+def test_helper_and_app_accept_lan_hosts(host):
+    assert _helper().valid_transfer_host(host)
+    assert fm.valid_address(host)
+
+
+def _run_cli(tmp_path, transfer_host):
+    import os
+    import subprocess
+    script = pathlib.Path(__file__).resolve().parents[1] / 'scripts' / 'luma-host-remote-mover.sh'
+    bindir = tmp_path / 'bin'
+    bindir.mkdir(exist_ok=True)
+    fake = bindir / 'ssh'
+    fake.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "${@: -1}"\n')
+    fake.chmod(0o755)
+    env = dict(os.environ, PATH=f'{bindir}:{os.environ["PATH"]}', LUMA_REMOTE_SSH_HOST='dl', LUMA_TRANSFER_HOST=transfer_host)
+    return subprocess.run(['bash', str(script), 'cp', '/scratch/downloads/a b', '/media/M/a b'],
+                          capture_output=True, text=True, env=env, timeout=20)
+
+
+@pytest.mark.parametrize('host', [h for h in BAD_HOSTS if h])
+def test_cli_ignores_bad_transfer_host_with_a_log_line(tmp_path, host):
+    p = _run_cli(tmp_path, host)
+    assert p.returncode == 0, p.stderr
+    assert 'LUMA_TRANSFER_HOST' not in p.stdout
+    assert 'invalid LUMA_TRANSFER_HOST ignored; using the main address' in p.stderr
+
+
+@pytest.mark.parametrize('host', GOOD_HOSTS)
+def test_cli_forwards_good_transfer_host(tmp_path, host):
+    p = _run_cli(tmp_path, host)
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.startswith(f'LUMA_TRANSFER_HOST={host} ') and p.stderr == ''
+
+
+def test_cli_blank_is_unchanged(tmp_path):
+    p = _run_cli(tmp_path, '')
+    assert p.returncode == 0 and 'LUMA_TRANSFER_HOST' not in p.stdout and p.stderr == ''
+
+
+# ------------------------------------------------------------------ PM: .72 mover exits 2 -> fallback
+
+def test_mover_exit_2_relayed_by_helper_falls_back_to_main(remote_env, monkeypatch, caplog):
+    """The .72 mover exits 2 when it can't mount the share via the transfer host; the helper relays
+    HTTP 500 {"ok": false, "rc": 2}: an outright failure, so the copy runs once on the main address."""
+    _set_address('10.10.10.25')
+    calls = _capture(monkeypatch, replies=[
+        (500, json.dumps({'ok': False, 'rc': 2, 'output': 'mount via transfer host failed'})), OK])
+    with caplog.at_level(logging.WARNING, logger='app.remote_mover'):
+        assert rm.transfer(str(remote_env), '/media/Movies/a.mkv') == 'copied'
+    assert [c.get('transfer_host') for c in calls] == ['10.10.10.25', None]
+    assert len(_fallback_logs(caplog, '10.10.10.25')) == 1
+
+
+def test_mover_exit_2_with_observable_dest_still_falls_back(remote_env, monkeypatch):
+    _set_address('10.10.10.25')
+    monkeypatch.setattr(rm, '_dest_observable', lambda d: True)
+    monkeypatch.setattr(rm, '_verify_final', lambda *a: None)
+    calls = _capture(monkeypatch, replies=[(500, json.dumps({'ok': False, 'rc': 2, 'output': 'x'})), OK])
+    assert rm.transfer(str(remote_env), '/media/Movies/a.mkv') == 'copied'
+    assert [c.get('transfer_host') for c in calls] == ['10.10.10.25', None]
+
+
+def test_unusual_500_without_script_rc_is_transient_not_fallback(remote_env, monkeypatch):
+    _set_address('10.10.10.25')
+    monkeypatch.setattr(rm, '_dest_observable', lambda d: False)
+    calls = _capture(monkeypatch, replies=[(500, json.dumps({'ok': False, 'rc': 1, 'output': 'boom'}))])
+    with pytest.raises(rm.RemoteTransient):
+        rm.transfer(str(remote_env), '/media/Movies/a.mkv')
+    assert len(calls) == 1 and rm._transfer_cooldown_until == {}
