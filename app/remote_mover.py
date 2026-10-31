@@ -16,11 +16,12 @@ under /run/luma-mover. Defaults try:
   2) /run/luma-mover/mover.sock   (sock file inside mounted dir)
   3) /run/luma-mover             (sock file mounted directly at that path)
 
-Transfer address (optional, Settings > Library paths): when set and reachable the
-POST body carries an extra "transfer_host" key and the helper hands it to the remote
-CLI as LUMA_TRANSFER_HOST, so the copy to the library goes to that address instead of
-the library server's main one. Blank: the body is exactly as before. Unreachable, or a
-copy through it fails outright: logged, and the copy runs once more on the main address.
+Transfer address (optional, Settings > Library paths): when set the POST body carries an
+extra "transfer_host" key and the helper hands it to the remote CLI as LUMA_TRANSFER_HOST,
+so the copy to the library goes to that address instead of the library server's main one.
+Blank: the body is exactly as before. A copy through it that fails outright runs once more
+on the main address; the address then cools down (TRANSFER_COOLDOWN_S, in memory) and the
+fallback log line is rate-limited per address (TRANSFER_LOG_INTERVAL_S).
 
 Path map (container → .72):
   LUMA_DOWNLOADS_ROOT / /storage/downloads / /downloads
@@ -428,14 +429,21 @@ def transfer(src_container: str, dest_container: str, mode: str = 'cp',
             except RemoteTransient:
                 raise   # cut off, not refused: the copy may still be running, retried with backoff as before
             except RemoteMoverError as e:
-                logger.warning('Remote mover: copy via transfer address %s failed (%s); '
-                               'using the main address', host, e)
+                _note_transfer_fallback(host, e)
         return _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_container)
+
+
+# Transfer-address fallback state, in memory per address (a restart resets it).
+TRANSFER_COOLDOWN_S = 15 * 60       # after a fallback: copies go to the main address this long
+TRANSFER_LOG_INTERVAL_S = 60 * 60   # the fallback log line: at most once per hour per address
+_transfer_clock = time.monotonic
+_transfer_cooldown_until: Dict[str, float] = {}
+_transfer_logged_at: Dict[str, float] = {}
 
 
 def transfer_host() -> str:
     """The transfer address to send, or '' for the main address (blank setting, or the
-    address does not answer: logged, never a silent stall)."""
+    address is cooling down after a recent fallback)."""
     try:
         from app import file_management
         addr = file_management.transfer_address()
@@ -443,15 +451,19 @@ def transfer_host() -> str:
         return ''
     if not addr:
         return ''
-    try:
-        from app import file_management
-        ok = file_management.address_reachable(addr)
-    except Exception:
-        ok = False
-    if not ok:
-        logger.warning('Remote mover: transfer address %s unreachable; using the main address', addr)
+    if _transfer_clock() < _transfer_cooldown_until.get(addr, 0.0):
         return ''
     return addr
+
+
+def _note_transfer_fallback(addr: str, err: Exception) -> None:
+    now = _transfer_clock()
+    _transfer_cooldown_until[addr] = now + TRANSFER_COOLDOWN_S
+    last = _transfer_logged_at.get(addr)
+    if last is None or now - last >= TRANSFER_LOG_INTERVAL_S:
+        _transfer_logged_at[addr] = now
+        logger.warning('Remote mover: copy via transfer address %s failed (%s); using the main address '
+                       '(retrying the transfer address in %d min)', addr, err, TRANSFER_COOLDOWN_S // 60)
 
 
 def _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_container, transfer_host=''):

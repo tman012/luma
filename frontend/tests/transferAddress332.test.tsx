@@ -62,14 +62,14 @@ describe('Transfer address field (v332)', () => {
   });
 
   it('shows the server error under the field and keeps the typed value', async () => {
-    reject = "Can't reach this address";
+    reject = 'Enter an IP address or host name';
     render(<LibraryPathsSettings />);
     const input = await screen.findByTestId('lp-transfer-address') as HTMLInputElement;
-    fireEvent.change(input, { target: { value: 'nas.lan' } });
+    fireEvent.change(input, { target: { value: 'smb://nas' } });
     fireEvent.submit(screen.getByTestId('lp-transfer-address-form'));
-    expect((await screen.findByTestId('lp-transfer-address-error')).textContent).toBe("Can't reach this address");
+    expect((await screen.findByTestId('lp-transfer-address-error')).textContent).toBe('Enter an IP address or host name');
     expect(input.getAttribute('aria-invalid')).toBe('true');
-    expect(input.value).toBe('nas.lan');
+    expect(input.value).toBe('smb://nas');
   });
 
   it('clearing a saved address sends blank', async () => {

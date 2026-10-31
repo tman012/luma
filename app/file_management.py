@@ -84,7 +84,6 @@ NAME_TAKEN = 'Name already used'
 IN_USE = 'In use by a rule or the fallback'
 TOO_MANY = 'Too many'
 INVALID_ADDRESS = 'Enter an IP address or host name'
-UNREACHABLE_ADDRESS = "Can't reach this address"
 
 _ID_RE = re.compile(r'^[pr]_[0-9a-f]{8}$')
 _CTRL_RE = re.compile(r'[\x00-\x1f\x7f]')
@@ -177,11 +176,6 @@ def _normalize(raw: Any) -> Dict[str, Any]:
 
 _HOST_RE = re.compile(r'^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
                       r'(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$')
-TRANSFER_PROBE_PORTS_ENV = 'LUMA_TRANSFER_PROBE_PORTS'
-DEFAULT_TRANSFER_PROBE_PORTS = (22, 445)
-TRANSFER_PROBE_TIMEOUT_S = 2.0
-
-
 def valid_address(addr: str) -> bool:
     """An IPv4/IPv6 literal or a DNS host name; no scheme, port, path or spaces."""
     if not isinstance(addr, str) or not addr or len(addr) > 253:
@@ -197,27 +191,9 @@ def valid_address(addr: str) -> bool:
     return bool(_HOST_RE.match(addr))
 
 
-def transfer_probe_ports() -> Tuple[int, ...]:
-    raw = (os.environ.get(TRANSFER_PROBE_PORTS_ENV) or '').strip()
-    if raw:
-        try:
-            ports = tuple(int(x) for x in raw.replace(' ', '').split(',') if x)
-            if ports and all(0 < p < 65536 for p in ports):
-                return ports
-        except ValueError:
-            pass
-    return DEFAULT_TRANSFER_PROBE_PORTS
-
-
-def address_reachable(addr: str, timeout: float = TRANSFER_PROBE_TIMEOUT_S) -> bool:
-    """TCP probe (the same raw-socket check the other host fields use): any of the copy
-    ports (SSH 22 / SMB 445 by default) answering counts."""
-    from app import adb_utils
-    return any(adb_utils.tcp_probe(addr, port, timeout)['ok'] for port in transfer_probe_ports())
-
-
 def check_transfer_address(raw: Any) -> Tuple[str, Optional[str]]:
-    """(address, error). Blank clears it; otherwise it must be valid and reachable."""
+    """(address, error). Blank clears it; otherwise it must be an IP or host name (format only:
+    the copy itself decides whether the address works, falling back to the main one)."""
     if raw is None:
         return '', None
     if not isinstance(raw, str):
@@ -227,8 +203,6 @@ def check_transfer_address(raw: Any) -> Tuple[str, Optional[str]]:
         return '', None
     if not valid_address(addr):
         return addr, INVALID_ADDRESS
-    if not address_reachable(addr):
-        return addr, UNREACHABLE_ADDRESS
     return addr, None
 
 

@@ -1,5 +1,5 @@
 """Transfer address: optional second library-server address for the download-host -> library
-copy (remote push-import / mover). Blank keeps the old path, set sends it, unreachable or a
+copy (remote push-import / mover). Blank keeps the old path, set sends it (format-only save), a
 failed copy through it falls back to the main address with a log line, Plex never reads it."""
 
 from __future__ import annotations
@@ -66,59 +66,121 @@ def test_valid_address():
 
 # ------------------------------------------------------------------ runtime copy path
 
+class Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+@pytest.fixture(autouse=True)
+def fresh_state(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(rm, '_transfer_clock', clock)
+    monkeypatch.setattr(rm, '_transfer_cooldown_until', {})
+    monkeypatch.setattr(rm, '_transfer_logged_at', {})
+    return clock
+
+
+FAIL = (500, json.dumps({'ok': False, 'rc': 5, 'output': 'copy failed'}))
+OK = (200, json.dumps({'ok': True, 'rc': 0, 'output': ''}))
+
+
+def _fallback_logs(caplog, addr):
+    return [r for r in caplog.records if f'via transfer address {addr} failed' in r.getMessage()]
+
+
+def test_constants():
+    assert rm.TRANSFER_COOLDOWN_S == 15 * 60
+    assert rm.TRANSFER_LOG_INTERVAL_S == 60 * 60
+    assert not hasattr(fm, 'address_reachable') and not hasattr(fm, 'UNREACHABLE_ADDRESS')
+
+
 def test_blank_keeps_old_body(remote_env, monkeypatch):
-    probed = []
-    monkeypatch.setattr(fm, 'address_reachable', lambda a, *k: probed.append(a) or True)
     calls = _capture(monkeypatch)
     assert rm.transfer(str(remote_env), '/media/Movies/a.mkv') == 'copied'
     assert len(calls) == 1
     body = calls[0]
     assert re.fullmatch(r'/media/Movies/\.luma-[0-9a-f]{16}\.luma-partial', body.pop('tmp'))
     assert body == {'mode': 'cp', 'src': '/scratch/downloads/a.mkv', 'dest': '/media/Movies/a.mkv'}
-    assert probed == []   # blank: nothing probed
 
 
-def test_set_uses_transfer_address(remote_env, monkeypatch):
+def test_set_uses_transfer_address_without_probe(remote_env, monkeypatch):
     _set_address('10.10.10.25')
-    monkeypatch.setattr(fm, 'address_reachable', lambda a, *k: True)
+    from app import adb_utils
+    monkeypatch.setattr(adb_utils, 'tcp_probe', lambda *a, **k: pytest.fail('no pre-probe'))
     calls = _capture(monkeypatch)
     assert rm.transfer(str(remote_env), '/media/Movies/a.mkv') == 'copied'
     assert len(calls) == 1 and calls[0]['transfer_host'] == '10.10.10.25'
     assert calls[0]['src'] == '/scratch/downloads/a.mkv' and calls[0]['dest'] == '/media/Movies/a.mkv'
 
 
-def test_unreachable_falls_back_and_logs(remote_env, monkeypatch, caplog):
-    _set_address('10.10.10.25')
-    monkeypatch.setattr(fm, 'address_reachable', lambda a, *k: False)
-    calls = _capture(monkeypatch)
-    with caplog.at_level(logging.WARNING, logger='app.remote_mover'):
-        assert rm.transfer(str(remote_env), '/media/Movies/a.mkv') == 'copied'
-    assert len(calls) == 1 and 'transfer_host' not in calls[0]
-    assert any('10.10.10.25 unreachable; using the main address' in r.getMessage() for r in caplog.records)
-
-
-def test_failed_copy_via_transfer_retries_on_main_and_logs(remote_env, monkeypatch, caplog):
+def test_failed_copy_falls_back_once_and_logs(remote_env, monkeypatch, caplog):
     _set_address('nas-10g')
-    monkeypatch.setattr(fm, 'address_reachable', lambda a, *k: True)
-    calls = _capture(monkeypatch, replies=[
-        (500, json.dumps({'ok': False, 'rc': 5, 'output': 'copy failed'})),
-        (200, json.dumps({'ok': True, 'rc': 0, 'output': ''})),
-    ])
+    calls = _capture(monkeypatch, replies=[FAIL, OK])
     with caplog.at_level(logging.WARNING, logger='app.remote_mover'):
         assert rm.transfer(str(remote_env), '/media/Movies/a.mkv') == 'copied'
     assert [c.get('transfer_host') for c in calls] == ['nas-10g', None]
     assert calls[0]['tmp'] == calls[1]['tmp']
-    assert any('via transfer address nas-10g failed' in r.getMessage() for r in caplog.records)
+    assert len(_fallback_logs(caplog, 'nas-10g')) == 1
+
+
+def test_main_failure_after_fallback_is_not_retried_again(remote_env, monkeypatch):
+    _set_address('nas-10g')
+    calls = _capture(monkeypatch, replies=[FAIL, FAIL])
+    with pytest.raises(rm.RemoteMoverError):
+        rm.transfer(str(remote_env), '/media/Movies/a.mkv')
+    assert [c.get('transfer_host') for c in calls] == ['nas-10g', None]
 
 
 def test_transient_failure_is_not_retried_on_main(remote_env, monkeypatch):
     _set_address('nas-10g')
-    monkeypatch.setattr(fm, 'address_reachable', lambda a, *k: True)
     monkeypatch.setattr(rm, '_dest_observable', lambda d: False)
     calls = _capture(monkeypatch, replies=[(500, json.dumps({'ok': False, 'rc': 255, 'output': 'ssh: connection refused'}))])
     with pytest.raises(rm.RemoteTransient):
         rm.transfer(str(remote_env), '/media/Movies/a.mkv')
     assert len(calls) == 1
+    assert rm._transfer_cooldown_until == {}   # not a fallback: no cooldown
+
+
+def test_cooldown_skips_then_resumes(remote_env, monkeypatch, fresh_state):
+    clock = fresh_state
+    _set_address('nas-10g')
+    calls = _capture(monkeypatch, replies=[FAIL, OK, OK, OK, OK])
+    rm.transfer(str(remote_env), '/media/Movies/a.mkv')            # fallback -> cooldown starts
+    clock.t += rm.TRANSFER_COOLDOWN_S - 1
+    rm.transfer(str(remote_env), '/media/Movies/a.mkv')            # still cooling: main address
+    clock.t += 1
+    rm.transfer(str(remote_env), '/media/Movies/a.mkv')            # 15 min up: transfer address again
+    assert [c.get('transfer_host') for c in calls] == ['nas-10g', None, None, 'nas-10g']
+
+
+def test_cooldown_is_per_address(remote_env, monkeypatch):
+    _set_address('nas-a')
+    calls = _capture(monkeypatch, replies=[FAIL, OK, OK])
+    rm.transfer(str(remote_env), '/media/Movies/a.mkv')
+    _set_address('nas-b')
+    rm.transfer(str(remote_env), '/media/Movies/a.mkv')
+    assert [c.get('transfer_host') for c in calls] == ['nas-a', None, 'nas-b']
+
+
+def test_fallback_log_rate_limited_per_hour_per_address(remote_env, monkeypatch, caplog, fresh_state):
+    clock = fresh_state
+    _set_address('nas-10g')
+    _capture(monkeypatch, replies=[FAIL, OK] * 6)
+    with caplog.at_level(logging.WARNING, logger='app.remote_mover'):
+        for _ in range(4):                                           # every 15 min for 45 min
+            rm.transfer(str(remote_env), '/media/Movies/a.mkv')
+            clock.t += rm.TRANSFER_COOLDOWN_S
+        assert len(_fallback_logs(caplog, 'nas-10g')) == 1
+        clock.t += rm.TRANSFER_LOG_INTERVAL_S - 4 * rm.TRANSFER_COOLDOWN_S   # an hour after the first line
+        rm.transfer(str(remote_env), '/media/Movies/a.mkv')
+        assert len(_fallback_logs(caplog, 'nas-10g')) == 2
+        _set_address('nas-other')
+        clock.t += rm.TRANSFER_COOLDOWN_S
+        rm.transfer(str(remote_env), '/media/Movies/a.mkv')
+        assert len(_fallback_logs(caplog, 'nas-other')) == 1
 
 
 # ------------------------------------------------------------------ Plex untouched
@@ -132,7 +194,6 @@ def test_plex_and_library_api_never_read_transfer_address():
 def test_plex_url_unchanged_by_transfer_address(minimal, media, monkeypatch):  # noqa: F811
     from app.main import settings
     before = settings.get('plex.url')
-    monkeypatch.setattr(fm, 'address_reachable', lambda a, *k: True)
     c = _client(minimal)
     r = c.put(MAPPING, json={'transfer_address': '10.10.10.25'}, environ_base=REMOTE, headers=HDR)
     assert r.status_code == 200, r.get_json()
@@ -141,34 +202,23 @@ def test_plex_url_unchanged_by_transfer_address(minimal, media, monkeypatch):  #
 
 # ------------------------------------------------------------------ save
 
-def test_save_validates_and_persists(minimal, media, monkeypatch):  # noqa: F811
-    reach = {'10.10.10.25': True, 'down.lan': False}
-    probed = []
-    monkeypatch.setattr(fm, 'address_reachable', lambda a, *k: probed.append(a) or reach.get(a, False))
+def test_save_validates_format_only_and_persists(minimal, media, monkeypatch):  # noqa: F811
+    from app import adb_utils
+    monkeypatch.setattr(adb_utils, 'tcp_probe', lambda *a, **k: pytest.fail('save must not probe'))
     c = _client(minimal)
     r = c.put(MAPPING, json={'transfer_address': ' 10.10.10.25 '}, environ_base=REMOTE, headers=HDR)
     assert r.status_code == 200 and r.get_json()['transfer_address'] == '10.10.10.25'
     assert fm.load()['transfer_address'] == '10.10.10.25'
-    r = c.put(MAPPING, json={'transfer_address': 'down.lan'}, environ_base=REMOTE, headers=HDR)
-    assert r.status_code == 400 and r.get_json()['errors']['transfer_address'] == fm.UNREACHABLE_ADDRESS
-    r = c.put(MAPPING, json={'transfer_address': 'smb://x'}, environ_base=REMOTE, headers=HDR)
-    assert r.status_code == 400 and r.get_json()['errors']['transfer_address'] == fm.INVALID_ADDRESS
-    assert fm.load()['transfer_address'] == '10.10.10.25'
+    r = c.put(MAPPING, json={'transfer_address': 'down.lan'}, environ_base=REMOTE, headers=HDR)   # unreachable is fine
+    assert r.status_code == 200 and r.get_json()['transfer_address'] == 'down.lan'
+    for bad in ('smb://x', '10.0.0.1:445', 'a b', 5):
+        r = c.put(MAPPING, json={'transfer_address': bad}, environ_base=REMOTE, headers=HDR)
+        assert r.status_code == 400 and r.get_json()['errors']['transfer_address'] == fm.INVALID_ADDRESS, bad
+    assert fm.load()['transfer_address'] == 'down.lan'
     r = c.put(MAPPING, json={'transfer': 'hardlink'}, environ_base=REMOTE, headers=HDR)   # untouched by others
-    assert r.get_json()['transfer_address'] == '10.10.10.25'
+    assert r.get_json()['transfer_address'] == 'down.lan'
     r = c.put(MAPPING, json={'transfer_address': ''}, environ_base=REMOTE, headers=HDR)
     assert r.status_code == 200 and r.get_json()['transfer_address'] == ''
-    assert probed == ['10.10.10.25', 'down.lan']
-
-
-def test_reachable_uses_tcp_probe(monkeypatch):
-    from app import adb_utils
-    seen = []
-    monkeypatch.setattr(adb_utils, 'tcp_probe', lambda h, p, t: seen.append((h, p)) or {'ok': p == 445})
-    assert fm.address_reachable('10.0.0.9') is True
-    assert seen == [('10.0.0.9', 22), ('10.0.0.9', 445)]
-    monkeypatch.setenv('LUMA_TRANSFER_PROBE_PORTS', '873')
-    assert fm.address_reachable('10.0.0.9') is False
 
 
 # ------------------------------------------------------------------ reference helper
