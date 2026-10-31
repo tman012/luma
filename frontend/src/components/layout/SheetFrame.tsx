@@ -141,10 +141,11 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go: goPr
     card.style.willChange = 'transform';
     // The composed card's first paint (hero art, wash, blur layers) happens off-screen on a primed frame, so the
     // slide's first frames don't carry that raster (a 72 ms stall at 4x CPU, sheetmeasure tv-owned).
-    if (!rm) { card.style.transform = 'translate3d(0, 100%, 0)'; scrim.style.opacity = '0'; }
+    if (rm) card.style.opacity = '0'; else card.style.transform = 'translate3d(0, 100%, 0)';
+    scrim.style.opacity = '0';
     let raf = requestAnimationFrame(() => { raf = requestAnimationFrame(() => { raf = 0; start(); }); });
     const start = () => {
-    card.style.transform = 'translate3d(0, 0, 0)'; scrim.style.opacity = '';
+    card.style.transform = 'translate3d(0, 0, 0)'; card.style.opacity = ''; scrim.style.opacity = '';
     const enter = rm
       ? card.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.dur.fast, easing: MOTION.ease.standard })
       : card.animate([{ transform: 'translate3d(0, 100%, 0)' }, { transform: 'translate3d(0, 0, 0)' }],
