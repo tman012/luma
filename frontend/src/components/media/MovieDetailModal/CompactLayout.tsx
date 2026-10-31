@@ -1,7 +1,7 @@
 import { sheetBase } from '@/utils/posterColors';
 import { ACTION_CIRCLE_SLOT, ACTION_LABEL_LINE, META_ROW, ratingsExpectedAtTap, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
-import { SheetFrame, SheetCard, SeedLayer, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { SheetFrame, SheetCard, SeedLayer, useSheetGo, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
@@ -345,13 +345,16 @@ export function CompactLayout(props: MovieModalViewProps) {
   // Animation styles
   // -------------------------------------------------------------------------
 
-  const shellShown = useRef(loading);
-  if (loading) shellShown.current = true;
+  // The seed shell (and the details' crossfade over it) only if the sheet had to start before it was composed
+  // (open cap): a composed start draws the final hero from frame 0 with nothing fading (Designer F1).
+  const go = useSheetGo(composed);
+  const shellShown = useRef(false);
+  if (loading && go) shellShown.current = true;
   // Enter/exit motion, scrim, scroll lock and the app background live in SheetFrame (MOTION.md §1).
   if (phase === 'gone') return null;
 
   return (
-    <SheetFrame name="MovieDetailModal" phase={phase} composed={composed} onScrimClick={onClose}>
+    <SheetFrame name="MovieDetailModal" phase={phase} composed={composed} go={go} onScrimClick={onClose}>
       <SheetCard background={sheetBg}>
         {/* Scrollable content */}
         <div

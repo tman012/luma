@@ -13,7 +13,7 @@ import { createContext, useCallback, useContext, useLayoutEffect, useRef, useSta
 import { createPortal } from 'react-dom';
 import { APP_BG, MOTION, reducedMotion } from '@/theme/motion';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
-import { tapShell } from '@/services/modalPrefetch';
+import { OPEN_CAP_MS, remainingCap, tapShell } from '@/services/modalPrefetch';
 
 export type SheetPhase = 'entering' | 'visible' | 'exiting' | 'gone';
 
@@ -48,16 +48,33 @@ function currentY(el: HTMLElement): number {
   return m[1] ? v[13]! : v[5]!;
 }
 
-export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimClick, children }: {
-  name: string; variant?: string; phase: SheetPhase; composed: boolean;
+/** When the phone sheet may start its slide (Designer F1, 10/30): once the details are composed (hero art, wash,
+ *  title in their final style) or the open cap runs out. Until then nothing is drawn, so the hero never restyles
+ *  after the slide. State, not derived: the render that flips it already holds the composed children. */
+export function useSheetGo(composed: boolean): boolean {
+  const [go, setGo] = useState(composed);
+  useLayoutEffect(() => {
+    if (go) return;
+    if (composed) { setGo(true); return; }
+    const t = window.setTimeout(() => setGo(true), remainingCap(OPEN_CAP_MS));
+    return () => window.clearTimeout(t);
+  }, [composed, go]);
+  return go;
+}
+
+export function SheetFrame({ name, variant = 'mobile', phase, composed, go: goProp, onScrimClick, children }: {
+  name: string; variant?: string; phase: SheetPhase; composed: boolean; go?: boolean;
   onScrimClick?: () => void; children: ReactNode;
 }) {
+  const goOwn = useSheetGo(composed);
+  const go = goProp ?? goOwn;
   const cardRef = useRef<HTMLDivElement>(null);
   const scrimRef = useRef<HTMLDivElement>(null);
   const anims = useRef<Animation[]>([]);
   const entered = useRef(false);
   const prevPhase = useRef<SheetPhase>(phase);
   const [entering, setEntering] = useState(true);
+  const primed = useRef<(() => void) | null>(null);
 
   // Scroll lock + app background paint, from enter start until unmount.
   useLayoutEffect(() => {
@@ -77,9 +94,17 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
     const card = cardRef.current;
     const scrim = scrimRef.current;
     if (!card || !scrim || typeof card.animate !== 'function') { setEntering(false); return; }
+    // Held off-screen until it can show composed: no frame is drawn before the slide.
+    if (!go && !entered.current) {
+      card.style.visibility = 'hidden'; scrim.style.visibility = 'hidden';
+      prevPhase.current = phase;
+      return;
+    }
+    card.style.visibility = ''; scrim.style.visibility = '';
     const rm = reducedMotion();
     const stop = () => { anims.current.forEach((a) => a.cancel()); anims.current = []; };
     if (phase === 'exiting') {
+      primed.current?.(); primed.current = null;   // closed during the primed frames: start the enter so the exit has a start point
       prevPhase.current = phase;
       const y = currentY(card);
       const h = card.offsetHeight || window.innerHeight;
@@ -114,6 +139,12 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
     }
     entered.current = true;
     card.style.willChange = 'transform';
+    // The composed card's first paint (hero art, wash, blur layers) happens off-screen on a primed frame, so the
+    // slide's first frames don't carry that raster (a 72 ms stall at 4x CPU, sheetmeasure tv-owned).
+    if (!rm) { card.style.transform = 'translate3d(0, 100%, 0)'; scrim.style.opacity = '0'; }
+    let raf = requestAnimationFrame(() => { raf = requestAnimationFrame(() => { raf = 0; start(); }); });
+    const start = () => {
+    card.style.transform = 'translate3d(0, 0, 0)'; scrim.style.opacity = '';
     const enter = rm
       ? card.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.dur.fast, easing: MOTION.ease.standard })
       : card.animate([{ transform: 'translate3d(0, 100%, 0)' }, { transform: 'translate3d(0, 0, 0)' }],
@@ -135,7 +166,9 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
     // A finish that never resolves (throttled tab, missed animation event) can't hang the sheet.
     const fallback = window.setTimeout(finish, (rm ? MOTION.dur.fast : MOTION.dur.sheetEnter) + ENTER_FALLBACK_SLACK_MS);
     enter.finished.then(finish, () => { window.clearTimeout(fallback); setEntering(false); });
-  }, [phase]);
+    };
+    primed.current = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; start(); } };
+  }, [phase, go]);
 
   if (phase === 'gone') return null;
   return createPortal(
@@ -149,7 +182,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
       <div ref={scrimRef} data-sheet-scrim="" aria-hidden="true"
         onClick={onScrimClick}
         style={{ position: 'absolute', inset: 0, background: '#000', opacity: MOTION.scrim }} />
-      <Entering.Provider value={entering || phase === 'exiting'}><CardRef.Provider value={cardRef}>{children}</CardRef.Provider></Entering.Provider>
+      <Entering.Provider value={(go && entering) || phase === 'exiting'}><CardRef.Provider value={cardRef}>{children}</CardRef.Provider></Entering.Provider>
     </div>,
     document.body,
   );
@@ -208,6 +241,12 @@ export function SeedShell({ overlap, rows }: { overlap: number; rows?: ReactNode
 export function SeedLayer({ show, ready, overlap, rows }: { show: boolean; ready: boolean; overlap: number; rows?: ReactNode }) {
   const [done, setDone] = useState(false);
   useLayoutEffect(() => { if (!ready) setDone(false); }, [ready]);
+  // animationend can be skipped (animations off, hidden tab): drop the seed after the fade's length + slack anyway.
+  useLayoutEffect(() => {
+    if (!show || !ready || done) return;
+    const t = window.setTimeout(() => setDone(true), MOTION.dur.crossfade + SEED_FALLBACK_SLACK_MS);
+    return () => window.clearTimeout(t);
+  }, [show, ready, done]);
   if (!show || done) return null;
   return (
     <div data-seed-layer={ready ? 'fading' : 'on'} aria-hidden="true"
@@ -218,6 +257,7 @@ export function SeedLayer({ show, ready, overlap, rows }: { show: boolean; ready
     </div>
   );
 }
+export const SEED_FALLBACK_SLACK_MS = 200;
 export const SEED_FADE_OUT = 'm-crossfade var(--m-dur-crossfade) var(--m-ease-standard) reverse both';
 
 /** Content that replaces a seed shell crossfades in (--m-dur-crossfade); content there from the first frame doesn't. */

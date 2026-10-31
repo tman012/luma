@@ -1,7 +1,7 @@
 import { sheetBase } from '@/utils/posterColors';
 import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows, ratingsExpectedAtTap } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
-import { SheetFrame, SheetCard, SeedLayer, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { SheetFrame, SheetCard, SeedLayer, useSheetGo, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT, tapShell } from '@/services/modalPrefetch';
 import { isMinimal } from '@/minimal';
@@ -199,8 +199,9 @@ export function CompactLayout(props: TvModalViewProps) {
     shuffleTarget,
     setShuffleTarget,
   } = props;
-  // Owned as soon as anything says so: the Plex path's show, the card at tap time, or the ownership lookup.
-  const showOwnedNow = showOwned || !!show?.isOwned || seedOwned === true;
+  // The tap-time seed only stands in until the details load; after that the details (or the ownership lookup) decide,
+  // so a stale card orb can't keep Watch in place of Add.
+  const showOwnedNow = (loading || !show) ? (showOwned || seedOwned === true) : (showOwned || !!show.isOwned);
   const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
   // Phone: the sheet stays off-screen until it can show fully composed
   // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
@@ -427,13 +428,16 @@ export function CompactLayout(props: TvModalViewProps) {
   // Animation styles
   // -----------------------------------------------------------------------
 
-  const shellShown = useRef(loading);
-  if (loading) shellShown.current = true;
+  // The seed shell (and the details' crossfade over it) only if the sheet had to start before it was composed
+  // (open cap): a composed start draws the final hero from frame 0 with nothing fading (Designer F1).
+  const go = useSheetGo(composed);
+  const shellShown = useRef(false);
+  if (loading && go) shellShown.current = true;
   // Enter/exit motion, scrim, scroll lock and the app background live in SheetFrame (MOTION.md §1).
   if (phase === 'gone') return null;
 
   return (
-    <SheetFrame name="TvDetailModal" phase={phase} composed={composed} onScrimClick={onClose}>
+    <SheetFrame name="TvDetailModal" phase={phase} composed={composed} go={go} onScrimClick={onClose}>
       <SheetCard background={sheetBg}>
         {/* Scrollable content */}
         <div
