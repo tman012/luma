@@ -352,10 +352,12 @@ export function useTvDetail(
 
     function applySeasons(result: Awaited<ReturnType<typeof fetchTvSeasons>>, { clearLoading }: { clearLoading: boolean }) {
       if (cancelled) return;
-      const regularSeasons = result.seasons.filter((s) => s.season_number > 0);
-      const displaySeasons = regularSeasons.length > 0 ? regularSeasons : result.seasons;
+      // A response without a seasons list (an error body, a partial mock) is no seasons, not a page error.
+      const all = Array.isArray(result?.seasons) ? result.seasons : [];
+      const regularSeasons = all.filter((s) => s.season_number > 0);
+      const displaySeasons = regularSeasons.length > 0 ? regularSeasons : all;
       if (displaySeasons.length > 0) setSeasons(displaySeasons);
-      if (result.tvdb_id) setTvdbId(result.tvdb_id);
+      if (result?.tvdb_id) setTvdbId(result.tvdb_id);
       if (clearLoading) setSeasonsLoading(false);
     }
 

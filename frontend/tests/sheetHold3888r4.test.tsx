@@ -29,6 +29,27 @@ describe('phone sheet hold', () => {
     expect(cancel).toHaveBeenCalled();
     delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
   });
+  it('Tester B2: close during the hold or mid-enter dismisses (exit runs, nothing re-opens)', () => {
+    const calls: unknown[][] = [];
+    (HTMLElement.prototype as unknown as { animate: unknown }).animate = vi.fn((k: unknown) => { calls.push([k]); return { finished: new Promise(() => {}), cancel() {}, play() {}, pause() {} }; });
+    const ui = (phase: 'entering' | 'exiting', go: boolean) => <SheetFrame name="MovieDetailModal" phase={phase} composed={false} go={go}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>;
+    // during the hold (not moving yet): exit leaves the card hidden, never starts the enter
+    const a = render(ui('entering', false));
+    a.rerender(ui('exiting', false));
+    const card = document.querySelector('[data-sheet-card]') as HTMLElement;
+    expect(card.style.visibility).toBe('hidden');
+    expect(calls.length).toBe(0);
+    a.rerender(ui('exiting', true));   // details/budget arrive after the close: still no enter
+    expect(calls.some(([k]) => JSON.stringify(k).includes('"translate3d(0, 0, 0)"') && JSON.stringify(k).indexOf('100%') < JSON.stringify(k).indexOf('(0, 0, 0)'))).toBe(false);
+    a.unmount();
+    // mid-enter: the exit animates to translateY(100%)
+    calls.length = 0;
+    const b = render(ui('entering', true));
+    b.rerender(ui('exiting', true));
+    expect(JSON.stringify(calls[calls.length - 2]?.[0])).toContain('translate3d(0, 100%, 0)');
+    b.unmount();
+    delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+  });
   it('SheetFrame has no useSheetGo of its own (layouts pass go)', () => {
     const s = read('components/layout/SheetFrame.tsx');
     const frame = s.slice(s.indexOf('export function SheetFrame('), s.indexOf('export function SheetCard('));
