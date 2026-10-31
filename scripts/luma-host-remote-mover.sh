@@ -26,26 +26,21 @@ if [ -n "$TMP" ]; then
 else
   REMOTE_CMD=$(printf '%q ' "$REMOTE_MOVER" "$MODE" "$SRC" "$DEST")
 fi
-# Transfer host: an IPv4/IPv6 literal or a DNS name starting alphanumeric (never a leading '-',
+# Transfer host: an IPv4 literal or a DNS name starting alphanumeric (never a leading '-',
 # no user@, brackets, spaces or shell characters). Invalid: ignored, the main address is used.
 valid_transfer_host() {
   local h="$1" o
   [ "${#h}" -ge 1 ] && [ "${#h}" -le 253 ] || return 1
   if [[ "$h" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then          # IPv4
     local IFS=.; set -- $h
-    for o in "$@"; do [ "$o" -le 255 ] || return 1; done
+    for o in "$@"; do [[ "$o" =~ ^(0|[1-9][0-9]*)$ ]] && [ "$o" -le 255 ] || return 1; done   # no leading zeros
     [ "$1" -eq 127 ] || [ "$1" -eq 0 ] || [ "$1" -ge 224 ] && return 1   # loopback, unspecified, multicast+
     [ "$1" -eq 169 ] && [ "$2" -eq 254 ] && return 1                      # link-local
     return 0
   fi
-  [[ "$h" =~ ^[0-9.]+$ ]] && return 1
-  if [[ "$h" == *:* ]]; then                                     # IPv6 (no brackets, no zone)
-    [[ "$h" =~ ^[0-9A-Fa-f]{0,4}(:[0-9A-Fa-f]{0,4}){2,7}$ ]] || return 1
-    case "$h" in
-      ::|::1|[Ff][Ee][89AaBb]*|[Ff][Ff]*) return 1 ;;
-    esac
-    return 0
-  fi
+  [[ "$h" =~ ^[0-9.]+$ ]] && return 1                         # broken IPv4
+  # IPv4 or DNS only (no IPv6). A hex-number label ('0x7f000001') is refused: inet_aton reads it as an IP.
+  [[ ".$h." =~ \.0[xX][0-9A-Fa-f]*\. ]] && return 1
   [[ "$h" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$ ]]
 }
 if [ -n "${LUMA_TRANSFER_HOST:-}" ] && ! valid_transfer_host "$LUMA_TRANSFER_HOST"; then

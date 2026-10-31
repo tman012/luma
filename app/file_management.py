@@ -174,24 +174,26 @@ def _normalize(raw: Any) -> Dict[str, Any]:
 # (remote push-import / mover). Blank: the copy uses the main address as before. Plex and
 # library API calls never read it.
 
-_HOST_RE = re.compile(r'^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
+_HOST_RE = re.compile(r'(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
                       r'(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$')
 def valid_address(addr: str) -> bool:
-    """An IPv4/IPv6 literal or a DNS host name; no scheme, port, path or spaces. Loopback,
-    link-local, multicast and unspecified IPs are refused (a LAN copy target never is one);
+    """An IPv4 literal or a DNS host name; no IPv6, scheme, port, path or spaces. Loopback,
+    link-local, multicast and unspecified IPv4 are refused (a LAN copy target never is one);
     private ranges are fine."""
+    import ipaddress
     if not isinstance(addr, str) or not addr or len(addr) > 253:
         return False
-    import ipaddress
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        ip = None
-    if ip is not None:
-        return not (ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified)
     if re.fullmatch(r'[0-9.]+', addr):
-        return False   # looks like a broken IPv4
-    return bool(_HOST_RE.match(addr))
+        try:
+            ip = ipaddress.IPv4Address(addr)
+        except ValueError:
+            return False   # a broken or non-canonical IPv4 (leading zeros, too few octets)
+        return not (ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified)
+    # IPv4 or DNS only (parity with the Ops mover): no IPv6, no ':' at all. A label that is a hex
+    # number ('0x7f000001', '0x7f.1') is refused: inet_aton would read it as an IP.
+    if not _HOST_RE.fullmatch(addr):
+        return False
+    return not any(re.fullmatch(r'0x[0-9a-f]*', label, re.IGNORECASE) for label in addr.split('.'))
 
 
 def check_transfer_address(raw: Any) -> Tuple[str, Optional[str]]:

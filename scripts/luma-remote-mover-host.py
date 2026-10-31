@@ -63,24 +63,29 @@ def remote_command(argv) -> str:
 
 
 TRANSFER_ENV = 'LUMA_TRANSFER_HOST'
-_DNS_RE = re.compile(r'^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
+_DNS_RE = re.compile(r'(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
                      r'(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$')
 
 
 def valid_transfer_host(host: str) -> bool:
-    """Same rule as Luma's file_management.valid_address: an IP literal (not loopback, link-local,
-    multicast or unspecified) or a DNS name whose labels start alphanumeric. Never a leading '-'
-    (no option injection downstream), no user@, brackets, ports, spaces or shell characters."""
+    """Same rule as Luma's file_management.valid_address: an IPv4 literal (not loopback, link-local,
+    multicast or unspecified) or a DNS name whose labels start alphanumeric and are not hex numbers.
+    No IPv6, never a leading '-' (no option injection downstream), no user@, brackets, ports, spaces
+    or shell characters."""
     import ipaddress
     if not isinstance(host, str) or not host or len(host) > 253:
         return False
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        if re.fullmatch(r'[0-9.]+', host):
-            return False
-        return bool(_DNS_RE.match(host))
-    return not (ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified)
+    if re.fullmatch(r'[0-9.]+', host):
+        try:
+            ip = ipaddress.IPv4Address(host)
+        except ValueError:
+            return False   # a broken or non-canonical IPv4 (leading zeros, too few octets)
+        return not (ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified)
+    # IPv4 or DNS only (parity with the Ops mover): no IPv6, no ':' at all. A label that is a hex
+    # number ('0x7f000001', '0x7f.1') is refused: inet_aton would read it as an IP.
+    if not _DNS_RE.fullmatch(host):
+        return False
+    return not any(re.fullmatch(r'0x[0-9a-f]*', label, re.IGNORECASE) for label in host.split('.'))
 
 
 def build_cmd(mode: str, src: str, dest: str, tmp: str = '', transfer_host: str = '') -> list:

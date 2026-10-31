@@ -58,9 +58,9 @@ def test_missing_key_reads_blank(store):  # noqa: F811
 
 
 def test_valid_address():
-    for ok in ('10.10.10.25', 'nas', 'nas.local', 'fd00::25', 'library-1.lan'):
+    for ok in ('10.10.10.25', 'nas', 'nas.local', 'library-1.lan'):
         assert fm.valid_address(ok), ok
-    for bad in ('', 'http://10.0.0.1', '10.0.0.1:22', '10.0.0', 'a b', '/media', '-x', '999.1.1.1'):
+    for bad in ('', 'http://10.0.0.1', '10.0.0.1:22', '10.0.0', 'a b', '/media', '-x', '999.1.1.1', 'fd00::25', '0x7f.1'):
         assert not fm.valid_address(bad), bad
 
 
@@ -240,8 +240,14 @@ def test_reference_helper_forwards_env_without_renames(monkeypatch):
 # ------------------------------------------------------------------ B1: option injection (helper + CLI)
 
 BAD_HOSTS = ['-Jx', '-oProxyCommand', 'a b', 'a;b', 'u@h', '[::1]', '-Jevil.com', 'x$(id)', '127.0.0.1', '::1',
-             '169.254.169.254', '224.0.0.1', '0.0.0.0', 'fe80::1', 'ff02::1', '']
-GOOD_HOSTS = ['10.10.10.25', '192.168.1.5', '172.16.0.9', 'nas', 'nas.lan', 'ffserver.lan', 'fd00::25', '2001:db8::5']
+             '169.254.169.254', '224.0.0.1', '0.0.0.0', 'fe80::1', 'ff02::1', '',
+             # no IPv6 at all (Ops mover is IPv4/DNS only)
+             'fd00::25', '2001:db8::5', '::ffff:7f00:1', '::ffff:10.0.0.1',
+             # hex-number labels inet_aton reads as an IP
+             '0x7f000001', '0x7f.1', '0X0A0A0A19', 'nas.0x1', '0x.lan',
+             # non-canonical IPv4
+             '010.10.10.25', '10.1', '2130706433', 'nas\n']
+GOOD_HOSTS = ['10.10.10.25', '192.168.1.5', '172.16.0.9', 'nas', 'nas.lan', 'ffserver.lan', '0xford.lan', 'x0.lan', 'nas-10g']
 
 
 def _helper():
@@ -329,10 +335,25 @@ def test_mover_exit_2_with_observable_dest_still_falls_back(remote_env, monkeypa
     assert [c.get('transfer_host') for c in calls] == ['10.10.10.25', None]
 
 
-def test_unusual_500_without_script_rc_is_transient_not_fallback(remote_env, monkeypatch):
-    _set_address('10.10.10.25')
+# ------------------------------------------------------------------ B2: helper 500 with no script rc, dest not watchable
+
+def test_unusual_500_unwatchable_is_a_final_refusal(remote_env, monkeypatch):
+    """Pre-580c76a1 behavior: a helper 500 with no script rc while the dest can't be watched is a plain
+    RemoteMoverError (final refusal), not RemoteTransient: movie_import does not re-send and
+    library_mover does not abandon the temp and start another copy."""
     monkeypatch.setattr(rm, '_dest_observable', lambda d: False)
     calls = _capture(monkeypatch, replies=[(500, json.dumps({'ok': False, 'rc': 1, 'output': 'boom'}))])
-    with pytest.raises(rm.RemoteTransient):
+    with pytest.raises(rm.RemoteMoverError) as ei:
         rm.transfer(str(remote_env), '/media/Movies/a.mkv')
-    assert len(calls) == 1 and rm._transfer_cooldown_until == {}
+    assert not isinstance(ei.value, rm.RemoteTransient)
+    assert len(calls) == 1   # no re-send, no second copy
+
+
+def test_unusual_500_unwatchable_with_transfer_address_is_one_fallback_then_final(remote_env, monkeypatch):
+    _set_address('10.10.10.25')
+    monkeypatch.setattr(rm, '_dest_observable', lambda d: False)
+    calls = _capture(monkeypatch, replies=[(500, json.dumps({'ok': False, 'rc': 1, 'output': 'boom'}))] * 2)
+    with pytest.raises(rm.RemoteMoverError) as ei:
+        rm.transfer(str(remote_env), '/media/Movies/a.mkv')
+    assert not isinstance(ei.value, rm.RemoteTransient)
+    assert [c.get('transfer_host') for c in calls] == ['10.10.10.25', None]

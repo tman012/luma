@@ -517,11 +517,6 @@ def _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_c
             logger.warning('Remote mover: helper gave up (HTTP %s rc=%s), waiting for copy: %s',
                            status, rc_i, rdest)
             return wait_for_remote_copy(src_container, dest_container, tmp_container)
-        if helper_gave_up and not is_connection_failure(rc_i, err):
-            # the helper stopped without an explicit script rc and Luma can't watch the dest: the copy may still
-            # be running, so this is transient (retried with backoff), never a refusal or a transfer fallback
-            raise RemoteTransient(
-                f'host mover gave up HTTP {status} rc={rc_i}: {err} ({op} {rsrc} -> {rdest})')
         if is_transient_failure(rc_i, err):
             # the helper's SSH to the remote host failed (e.g. it rebooted mid-copy): retry later
             raise RemoteConnectionLost(
