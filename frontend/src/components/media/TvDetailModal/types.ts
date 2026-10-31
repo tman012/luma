@@ -33,6 +33,8 @@ export interface EpisodeData {
 }
 
 export interface TvModalViewProps {
+  /** Identifies one open of the sheet (the title it was opened for): its backdrop latches once per open. */
+  openKey?: string;
   // Data from useTvDetail
   show: TvShowDetail | null;
   seasons: TvSeason[];

@@ -6,7 +6,8 @@ import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { formatRuntime, backdropUpgrade } from '@/utils/image';
+import { formatRuntime, finalBackdropUrl } from '@/utils/image';
+import { useSheetBackdrop } from '@/hooks/useSheetBackdrop';
 import { SeededLogo, seededTitleStyle, useLogoSwap } from '@/components/media/SeededLogo';
 import {
   PERSON_FALLBACK_SVG,
@@ -148,7 +149,10 @@ export function CompactLayout(props: MovieModalViewProps) {
   const heroTitleState = hero.seeded ? 'text' : titleState;
   // Seeded opens keep the tapped card's text title on frame 0; the clearlogo swaps in with the sharp backdrop.
   const seededLogo = hero.seeded ? (detail?.clearLogoUrl) || null : null;
-  const logoSwap = useLogoSwap(hero.seeded, seededLogo, backdropUpgrade(hero.seeded, detail?.backdropUrl));
+  // ONE backdrop per open: the final (sharp) image, latched once decoded or at the cap, never swapped (useSheetBackdrop).
+  const sheetArt = useSheetBackdrop(finalBackdropUrl(detail?.backdropUrl), !!detail, props.openKey);
+  const posterFill = detail && !detail.backdropUrl && !sheetArt ? detail.posterUrl : null;
+  const logoSwap = useLogoSwap(hero.seeded, seededLogo, sheetArt);
   // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
   const ultraBlurColors = hero.colors;
   const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
@@ -462,7 +466,7 @@ export function CompactLayout(props: MovieModalViewProps) {
           {/* Loading — the sheet now slides up before the data lands, so this
               placeholder is what the user sees for the first few hundred ms. */}
           <SeedLayer show={shellShown.current} ready={hero.seeded ? detailsIn : composed} overlap={100} hero={hero.seeded ? {
-            art: <BackdropHero backdropUrl={hero.art} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
+            art: <BackdropHero backdropUrl={sheetArt} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
             wash: washEl, title: titleEl } : undefined} rows={
             <ReservedRows ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
               <div data-action-row="" data-modal-actions="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', padding: '20px 16px', maxWidth: `${76 + 32}px`, margin: '0 auto', boxSizing: 'border-box' }}>
@@ -507,9 +511,8 @@ export function CompactLayout(props: MovieModalViewProps) {
             <>
               {/* Backdrop — Plex-like cover-cropped header via BackdropHero */}
               <BackdropHero
-                backdropUrl={hero.seeded ? hero.art : detail.backdropUrl}
-                upgradeUrl={backdropUpgrade(hero.seeded, detail.backdropUrl)}
-                posterUrl={hero.seeded ? null : detail.posterUrl}
+                backdropUrl={sheetArt}
+                posterUrl={posterFill}
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
@@ -1076,9 +1079,8 @@ export function CompactLayout(props: MovieModalViewProps) {
               art right up to the rounded top while it's still behind it. */}
           {detailsIn && (
             <BackdropHero
-              backdropUrl={hero.seeded ? hero.art : detail.backdropUrl}
-                upgradeUrl={backdropUpgrade(hero.seeded, detail.backdropUrl)}
-              posterUrl={hero.seeded ? null : detail.posterUrl}
+              backdropUrl={sheetArt}
+              posterUrl={posterFill}
               effects={backdropEffects}
               phase={phase}
               containerRef={topBackdropRef}

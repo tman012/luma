@@ -12,8 +12,8 @@
 // Used by both MovieDetailModal/CompactLayout and TvDetailModal/CompactLayout.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MOTION, reducedMotion } from '@/theme/motion';
+import { useCallback, useMemo, useState } from 'react';
+import { reducedMotion } from '@/theme/motion';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 
@@ -22,8 +22,6 @@ export interface BackdropHeroProps {
   hold?: boolean;
   /** No fades of its own (the phone sheet fades in as one, composed). */
   instant?: boolean;
-  /** A sharper image for the same box (see backdropHiRes): crossfaded in once decoded. */
-  upgradeUrl?: string | null;
   /** Primary backdrop image URL. */
   backdropUrl?: string | null;
   /** Fallback poster URL when no backdrop available. */
@@ -47,7 +45,6 @@ export function BackdropHero({
   containerRef,
   hold = false,
   instant = false,
-  upgradeUrl = null,
 }: BackdropHeroProps) {
   const containerStyle = useMemo<React.CSSProperties>(
     () => ({
@@ -76,40 +73,8 @@ export function BackdropHero({
   const markLoaded = useCallback((el: HTMLImageElement | null) => {
     if (el && src && el.complete && el.naturalWidth > 0) setLoadedSrc(src);
   }, [src]);
-  const fade: React.CSSProperties = { transition: instant ? 'none' : 'opacity 0.45s ease-out' };
-  // Sharper art over the first (seeded or small) art, in the same box. Each new URL is loaded and decoded off-screen
-  // and only then faded in over MOTION.dur.backdropSwap on top of whatever layer is showing; the layer under it stays
-  // until the fade has landed, so a later swap (e.g. Plex art -> TMDb text-free) never cuts back to the seed. Once
-  // better art shows it stays for this title, even if upgradeUrl goes away. In-flight decodes are dropped on change.
-  const [layers, setLayers] = useState<{ src: string | null; urls: string[] }>({ src: null, urls: [] });
-  const shown = layers.src === src ? layers.urls : [];
-  useEffect(() => {
-    if (!upgradeUrl || upgradeUrl === src || shown[shown.length - 1] === upgradeUrl) return;
-    let live = true;
-    const im = new Image();
-    im.src = upgradeUrl;
-    const done = typeof im.decode === 'function' ? im.decode() : new Promise<void>((res, rej) => { im.onload = () => res(); im.onerror = () => rej(); });
-    done.then(() => {
-      if (!live) return;
-      setLayers(prev => {
-        const base = prev.src === src ? prev.urls.filter(u => u !== upgradeUrl) : [];
-        return { src, urls: [...base.slice(-1), upgradeUrl] };
-      });
-    }).catch(() => { /* keep what is showing */ });
-    return () => { live = false; im.onload = null; im.onerror = null; im.src = ''; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [upgradeUrl, src]);
-  const top = shown[shown.length - 1] ?? null;
-  const settle = useCallback(() => {
-    setLayers(prev => (prev.urls.length > 1 ? { src: prev.src, urls: prev.urls.slice(-1) } : prev));
-  }, []);
-  const fadeSharp = useCallback((el: HTMLImageElement | null) => {
-    if (!el) return;
-    if (reducedMotion() || typeof el.animate !== 'function') { settle(); return; }
-    const a = el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.dur.backdropSwap, easing: MOTION.ease.contentFade, fill: 'backwards' });
-    if (a) a.onfinish = settle; else settle();
-  }, [settle]);
-
+  // The one backdrop fades in softly when it paints (also on the composed phone sheet, `instant`); reduced motion: no fade.
+  const fade: React.CSSProperties = { transition: reducedMotion() ? 'none' : 'opacity 0.45s ease-out' };
   return (
     <div ref={containerRef} style={{ ...containerStyle, background: instant ? 'transparent' : '#111318' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
       {backdropUrl ? (
@@ -137,10 +102,6 @@ export function BackdropHero({
           }}
         />
       ) : null}
-      {loaded && shown.map(u => (
-        <img key={u} ref={u === top ? fadeSharp : undefined} src={u} alt="" data-backdrop-sharp="true"
-          style={{ ...effects.headerImgStyle, position: 'absolute', top: 0, left: 0 }} />
-      ))}
 
       {/* Subtle bottom vignette — just enough for text readability.
           The container-level mask handles the smooth fade to transparent. */}

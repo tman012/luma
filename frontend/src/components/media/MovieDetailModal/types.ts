@@ -3,6 +3,8 @@ import type { ModalSource } from '@/contexts/ModalHostContext';
 import type { FixMatchResult } from './FixMatchSheet';
 
 export interface MovieModalViewProps {
+  /** Identifies one open of the sheet (the title it was opened for): its backdrop latches once per open. */
+  openKey?: string;
   // Data from useMovieDetail
   detail: MediaDetail | null;
   ratings: Ratings | null;

@@ -30,7 +30,8 @@ import { EpisodeHeader } from './EpisodeHeader';
 import { MobilePlaybackSheet } from '../MovieDetailModal/MobilePlaybackSheet';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { PlexSeason } from '@/services/playbackApi';
-import { posterUrl, backdropUpgrade, backdropHiRes } from '@/utils/image';
+import { posterUrl, finalBackdropUrl } from '@/utils/image';
+import { useSheetBackdrop } from '@/hooks/useSheetBackdrop';
 import { SeededLogo, seededTitleStyle, useLogoSwap } from '@/components/media/SeededLogo';
 import { RatingsBar, RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
 import { useImdbRatingsState } from '@/hooks/useImdbRatings';
@@ -213,7 +214,11 @@ export function CompactLayout(props: TvModalViewProps) {
   const heroTitleState = hero.seeded ? 'text' : titleState;
   // Seeded opens keep the tapped card's text title on frame 0; the clearlogo swaps in with the sharp backdrop.
   const seededLogo = hero.seeded ? (show?.clearLogoUrl ? withBase(show.clearLogoUrl) : null) || null : null;
-  const logoSwap = useLogoSwap(hero.seeded, seededLogo, backdropUpgrade(hero.seeded, show?.backdropUrl));
+  // ONE backdrop per open: the final (sharp, text-free when picked) image, latched once decoded and settled or at
+  // the cap, never swapped (useSheetBackdrop).
+  const sheetArt = useSheetBackdrop(finalBackdropUrl(show?.backdropSwapUrl ?? show?.backdropUrl), !!show && !show.backdropPending, props.openKey);
+  const posterFill = show && !show.backdropUrl && !sheetArt ? show.posterUrl : null;
+  const logoSwap = useLogoSwap(hero.seeded, seededLogo, sheetArt);
   const ultraBlurColors = hero.colors;
   const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
   useEffect(() => {
@@ -544,7 +549,7 @@ export function CompactLayout(props: TvModalViewProps) {
         >
           {/* Loading */}
           <SeedLayer show={shellShown.current} ready={hero.seeded ? detailsIn : composed} overlap={220} hero={hero.seeded ? {
-            art: <BackdropHero backdropUrl={hero.art} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
+            art: <BackdropHero backdropUrl={sheetArt} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
             wash: washEl, title: titleEl } : undefined} rows={
             <ReservedRows pillKept={seedOwned !== false} ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
               <div data-modal-actions="" style={{ display: 'flex', justifyContent: 'center', gap: '18px', padding: '20px 16px' }}>
@@ -589,9 +594,8 @@ export function CompactLayout(props: TvModalViewProps) {
             <>
               {/* Backdrop — Plex-like cover-cropped header via BackdropHero */}
               <BackdropHero
-                backdropUrl={hero.seeded ? hero.art : show.backdropUrl}
-                upgradeUrl={show.backdropSwapUrl ? (backdropHiRes(show.backdropSwapUrl) ?? show.backdropSwapUrl) : backdropUpgrade(hero.seeded, show.backdropUrl)}
-                posterUrl={hero.seeded ? null : show.posterUrl}
+                backdropUrl={sheetArt}
+                posterUrl={posterFill}
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}

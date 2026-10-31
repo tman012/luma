@@ -1,5 +1,5 @@
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
-import { BackdropSwap } from '@/components/media/BackdropSwap';
+import { useSheetBackdrop } from '@/hooks/useSheetBackdrop';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -21,7 +21,7 @@ import { useImdbRatings } from '@/hooks/useImdbRatings';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { TOKENS } from './expandedLayoutTokens';
 import { useTabletPerf } from '@/hooks/useTabletPerf';
-import { posterUrl } from '@/utils/image';
+import { posterUrl, finalBackdropUrl } from '@/utils/image';
 import { FullPlotModal } from '@/components/media/MovieDetailModal/FullPlotModal';
 import { PlaybackModal } from '@/components/media/PlaybackModal';
 import { AddToSonarrModal } from './AddToSonarrModal';
@@ -1171,6 +1171,8 @@ export function ExpandedLayout(props: TvModalViewProps) {
     onEpisodeClick,
   } = props;
   const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
+  // ONE backdrop per open (useSheetBackdrop): the text-free pick when it arrives before the latch, never swapped after.
+  const sheetArt = useSheetBackdrop(finalBackdropUrl(show?.backdropSwapUrl ?? show?.backdropUrl), !!show && !show.backdropPending, props.openKey);
 
   // Determine if we're in active episode-mode display
   const isEpisodeIntent = !showFullShow && !!episodeContext;
@@ -1379,12 +1381,12 @@ export function ExpandedLayout(props: TvModalViewProps) {
                 transition: 'opacity 0.4s ease-out',
               }}
             >
-              {show.backdropUrl ? (
+              {sheetArt ? (
                 <img
-                  key={show.backdropUrl}
-                  src={perf.limitBackdropResolution && show.backdropUrl.includes('/t/p/original')
-                    ? show.backdropUrl.replace('/t/p/original', '/t/p/w1280')
-                    : show.backdropUrl}
+                  key={sheetArt}
+                  src={perf.limitBackdropResolution && sheetArt.includes('/t/p/original')
+                    ? sheetArt.replace('/t/p/original', '/t/p/w1280')
+                    : sheetArt}
                   alt=""
                   style={{
                     ...revealStyle(titleState),
@@ -1395,12 +1397,8 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     ...(t.backdrop.imgFilter ? { filter: t.backdrop.imgFilter } : {}),
                   }}
                 />
-              ) : show.posterUrl ? (
+              ) : !show.backdropUrl && show.posterUrl ? (
                 <img key={show.posterUrl} src={show.posterUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: titleState === 'hold' ? 0 : 0.6, transition: 'opacity 0.45s ease-out' }} />
-              ) : null}
-              {show.backdropUrl && show.backdropSwapUrl && titleState !== 'hold' ? (
-                <BackdropSwap url={show.backdropSwapUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top',
-                  ...(t.backdrop.imgFilter ? { filter: t.backdrop.imgFilter } : {}) }} />
               ) : null}
               {show.backdropUrl && (
                 <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 30%, transparent 40%, rgba(0,0,0,0.2) 100%)', pointerEvents: 'none' }} />

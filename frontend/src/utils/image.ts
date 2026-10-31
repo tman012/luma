@@ -79,11 +79,10 @@ export function backdropHiRes(url: string | null | undefined): string | null {
   return up === url ? null : up;
 }
 
-/** The image a backdrop box upgrades to: over seeded art, the title's own backdrop (sharp size); over the
- *  backdrop itself, its sharp size when it was loaded small. */
-export function backdropUpgrade(seeded: boolean, url: string | null | undefined): string | null {
+/** The one backdrop a movie/TV sheet shows: the sharp size on phones (backdropHiRes), the URL as is elsewhere. */
+export function finalBackdropUrl(url: string | null | undefined): string | null {
   if (!url) return null;
-  return seeded ? backdropHiRes(url) ?? url : backdropHiRes(url);
+  return phoneMinimal() ? backdropHiRes(url) ?? url : url;
 }
 
 /** Minimal mode on a phone-width screen (the desktop popup keeps its sizes). */

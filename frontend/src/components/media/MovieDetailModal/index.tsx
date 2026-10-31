@@ -184,6 +184,7 @@ export function MovieDetailModal({
   // The layouts will pass these through to SourcesPanel/UpgradeModal
   const extendedProps = {
     ...viewProps,
+    openKey: `${ratingKey ?? ''}:${tmdbId ?? ''}`,
     onSourcesGrabbed: handleSourcesGrabbed,
     onUpgradeAdded: handleUpgradeAdded,
     onWatchlistRemoved: handleWatchlistRemoved,

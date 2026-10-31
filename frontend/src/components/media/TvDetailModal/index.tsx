@@ -293,6 +293,7 @@ export function TvDetailModal({
 
   const extendedProps = {
     ...viewProps,
+    openKey: `${ratingKey ?? ''}:${tmdbId ?? ''}`,
     setShowAddToSonarr: requestAddToWatchlist,
     onSourcesGrabbed: handleSourcesGrabbed,
     onSonarrAdded: handleSonarrAdded,

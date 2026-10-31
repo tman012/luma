@@ -30,12 +30,17 @@ const send = <T,>(url: string, method: string, body: unknown) =>
 /** Normalized for the "changed" check: trimmed, no trailing slash. */
 const normUrl = (u: string) => u.trim().replace(/\/+$/, '');
 
+/** A partial reply (older server) still gives the form strings to work with. */
+const withDefaults = (v: QbitView): QbitView => ({
+  ...v, username: v.username ?? '', category: v.category ?? '', password: v.password ?? { set: false },
+});
+
 /** bare: inside the Connectors modal (the modal shows the title). */
 export function QbitConnector({ onSaved, bare = false }: { onSaved: (text: string) => void; bare?: boolean }) {
   const [view, setView] = useState<QbitView | null>(null);
   useEffect(() => {
     let alive = true;
-    call<QbitView>(QBIT_API).then(r => { if (alive && r.ok && r.data && typeof r.data.url === 'string') setView(r.data); });
+    call<QbitView>(QBIT_API).then(r => { if (alive && r.ok && r.data && typeof r.data.url === 'string') setView(withDefaults(r.data)); });
     return () => { alive = false; };
   }, []);
   if (!view) return null;

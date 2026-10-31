@@ -234,6 +234,7 @@ export function useTvDetail(
             const plexParsed = parsePlexTvResponse(plexData);
             plexParsed.ratingKey = ratingKey;
             plexParsed.isOwned = true;
+            plexParsed.backdropPending = !!plexTmdbId;
             setShow(plexParsed);
             setLoading(false);
             const plexTvdbEarly = plexData.tvdb_id as number | null;
@@ -250,8 +251,8 @@ export function useTvDetail(
                 parsed.ratingKey = ratingKey;
                 parsed.tmdbId = plexTmdbId;
                 parsed.isOwned = true;
-                // Never swap a backdrop that's already on screen.
-                // Plex art can't be checked for baked-in title text: with a logo, bring in TMDb's text-free backdrop over it.
+                // Plex art can't be checked for baked-in title text: with a logo, TMDb's text-free backdrop is the pick
+                // (the sheet takes it only if its one backdrop hasn't shown yet; see useSheetBackdrop).
                 const swap = tmdbData.has_logo && tmdbData.backdrop_textless ? parsed.backdropUrl : null;
                 setShow((prev) => (plexBackdropShown && prev?.backdropUrl
                   ? { ...parsed, backdropUrl: prev.backdropUrl, backdropSwapUrl: swap && swap !== prev.backdropUrl ? swap : null }

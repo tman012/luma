@@ -7,6 +7,7 @@
 import { apiFetch } from '@/apiClient';
 import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import { colorsFromImage } from '@/utils/posterColors';
+import { finalBackdropUrl } from '@/utils/image';
 import { parsePlexResponse, parsePlexTvResponse } from '@/utils/modalParsers';
 import { getSeedColors, modalColors, prefetchModalColors, setSeedColors } from '@/services/modalColors';
 
@@ -110,7 +111,8 @@ export async function warmDetail(
   if (!images) return; // metadata only (rows further down the list)
   const path = tm?.backdrop_path as string | undefined;
   await Promise.all([
-    preloadImage(path ? tmdbBackdrop(path) : plexBackdrop),
+    // The sheet's one backdrop (finalBackdropUrl): decoding it from the tap overlaps the sheet's enter motion.
+    preloadImage(finalBackdropUrl(path ? tmdbBackdrop(path) : plexBackdrop)),
     preloadImage(logoImg((logo?.clearlogo_url as string | undefined) ?? null)),
     // With a poster-derived seed the palette never gates the reveal.
     getSeedColors(kind, ratingKey, tmdbId) ? Promise.resolve(null) : modalColors(kind, ratingKey, tmdbId),
@@ -182,6 +184,13 @@ export const REVEALED_EVENT = 'luma:detail-revealed';
 let pending = false;
 let tapAt = 0;
 const now = () => Date.now();
+
+/** ms since the tap that opened the popup (null when it wasn't opened through openWhenReady just now). */
+export function tapElapsed(): number | null {
+  if (!tapAt) return null;
+  const e = now() - tapAt;
+  return e > 5000 ? null : e;
+}
 
 /** Time left on the cap counted from the TAP (detail fetch included), or
  * `fallback` when the popup wasn't opened through openWhenReady just now. */

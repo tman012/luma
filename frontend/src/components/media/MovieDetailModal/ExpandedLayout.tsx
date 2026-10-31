@@ -3,7 +3,8 @@ import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { formatRuntime } from '@/utils/image';
+import { formatRuntime, finalBackdropUrl } from '@/utils/image';
+import { useSheetBackdrop } from '@/hooks/useSheetBackdrop';
 import {
   CARD_BG,
   PERSON_FALLBACK_SVG,
@@ -335,6 +336,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
     onSourcesGrabbed,
   } = props;
   const titleState = useTitleReveal(logoInput(detail), detail?.title, detail?.backdropUrl || detail?.posterUrl);
+  // ONE backdrop per open (useSheetBackdrop): latched once decoded or at the cap, never swapped after.
+  const sheetArt = useSheetBackdrop(finalBackdropUrl(detail?.backdropUrl), !!detail, props.openKey);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -736,10 +739,10 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               transition: 'opacity 0.4s ease-out',
             }}
           >
-            {detail.backdropUrl ? (
+            {sheetArt ? (
               <img
-                key={detail.backdropUrl}
-                src={detail.backdropUrl}
+                key={sheetArt}
+                src={sheetArt}
                 alt=""
                 style={{
                   ...revealStyle(titleState),
@@ -750,7 +753,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   ...(t.backdrop.imgFilter ? { filter: t.backdrop.imgFilter } : {}),
                 }}
               />
-            ) : detail.posterUrl ? (
+            ) : !detail.backdropUrl && detail.posterUrl ? (
               <img
                 key={detail.posterUrl}
                 src={detail.posterUrl}

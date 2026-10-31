@@ -63,8 +63,11 @@ export interface TvShowDetail {
   contentRating: string | null;
   rating: number | null;
   backdropUrl: string | null;
-  /** A text-free backdrop to crossfade over art already on screen (Plex art kept, title has a logo). */
+  /** TMDb's text-free backdrop when Plex art came first and the title has a logo: the sheet's pick if its backdrop
+   * hasn't shown yet (useSheetBackdrop). Never swapped over art already on screen. */
   backdropSwapUrl?: string | null;
+  /** True while a better backdrop (TMDb) may still arrive: the sheet waits for it, up to its cap. */
+  backdropPending?: boolean;
   posterUrl: string | null;
   clearLogoUrl: string | null;
   /** True once the logo lookup has finished (a null clearLogoUrl then means

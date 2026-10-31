@@ -3,7 +3,7 @@ import { render, act, fireEvent, cleanup } from '@testing-library/react';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { ContentReveal, FadeImg, readReserve } from '@/components/motion/ContentReveal';
-import { backdropHiRes, backdropUpgrade } from '@/utils/image';
+import { backdropHiRes } from '@/utils/image';
 import { MOTION } from '@/theme/motion';
 
 const src = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8');
@@ -110,12 +110,6 @@ describe('backdrop upgrade', () => {
     expect(backdropHiRes('https://image.tmdb.org/t/p/w780/x.jpg')).toBe('https://image.tmdb.org/t/p/w1280/x.jpg');
     expect(backdropHiRes('/api/img/plex?u=1&w=780&h=439')).toBe('/api/img/plex?u=1&w=1280&h=720');
     expect(backdropHiRes('https://image.tmdb.org/t/p/original/x.jpg')).toBeNull();
-    expect(backdropUpgrade(true, 'https://image.tmdb.org/t/p/original/x.jpg')).toBe('https://image.tmdb.org/t/p/original/x.jpg');
-    expect(backdropUpgrade(false, null)).toBeNull();
   });
 
-  it('both sheets pass the upgrade', () => {
-    expect(src('components/media/MovieDetailModal/CompactLayout.tsx').match(/upgradeUrl=\{backdropUpgrade\(hero\.seeded/g)).toHaveLength(2);
-    expect(src('components/media/TvDetailModal/CompactLayout.tsx')).toMatch(/: backdropUpgrade\(hero\.seeded, show\.backdropUrl\)\}/);
-  });
 });
