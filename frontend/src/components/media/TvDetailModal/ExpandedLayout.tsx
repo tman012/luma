@@ -1,5 +1,5 @@
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
-import { useSheetBackdrop } from '@/hooks/useSheetBackdrop';
+import { useSheetHero, HERO_FADE, HERO_ANIM } from '@/hooks/useSheetBackdrop';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -1172,7 +1172,8 @@ export function ExpandedLayout(props: TvModalViewProps) {
   } = props;
   const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
   // ONE backdrop per open (useSheetBackdrop): the text-free pick when it arrives before the latch, never swapped after.
-  const sheetArt = useSheetBackdrop(finalBackdropUrl(show?.backdropSwapUrl ?? show?.backdropUrl), !!show && !show.backdropPending, props.openKey);
+  const sheetHero = useSheetHero(finalBackdropUrl(show?.backdropTextlessUrl ?? show?.backdropUrl), !!show && !show.backdropPending, show?.clearLogoUrl, logoInput(show) !== undefined, props.openKey);
+  const sheetArt = sheetHero.art;
 
   // Determine if we're in active episode-mode display
   const isEpisodeIntent = !showFullShow && !!episodeContext;
@@ -1389,7 +1390,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     : sheetArt}
                   alt=""
                   style={{
-                    ...revealStyle(titleState),
+                    ...revealStyle(sheetHero.state), animation: HERO_ANIM,
                     width: '100%',
                     height: '100%',
                     objectFit: 'cover',
@@ -1490,12 +1491,13 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
+                    opacity: sheetHero.state === 'hold' ? 0 : 1,
+                    transition: `transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), ${HERO_FADE}`,
                     transform: shelfOpen ? 'translateY(-15vh)' : 'translateY(0)',
                   }}>
-                    {titleState === 'logo' && show.clearLogoUrl ? (
+                    {sheetHero.state === 'logo' && sheetHero.logo ? (
                       <img
-                        src={show.clearLogoUrl}
+                        src={sheetHero.logo}
                         alt={show.title}
                         style={{
                           maxWidth: '100%',
@@ -1512,7 +1514,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                       />
                     ) : null}
                     <h1 style={{
-                      ...titleTextStyle(titleState),
+                      ...titleTextStyle(sheetHero.state),
                       fontSize: t.titleFontSize,
                       fontWeight: 700,
                       color: '#fff',

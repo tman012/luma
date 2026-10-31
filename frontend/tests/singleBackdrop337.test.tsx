@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { renderHook, act, cleanup, render } from '@testing-library/react';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { useSheetBackdrop, BACKDROP_CAP_MS } from '@/hooks/useSheetBackdrop';
+import { useSheetHero, BACKDROP_CAP_MS, HERO_FADE } from '@/hooks/useSheetBackdrop';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 import { BackdropHero } from '@/components/media/BackdropHero';
 
@@ -21,7 +21,8 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 const decode = async (u: string) => { await act(async () => { decodes.get(u)!(); await Promise.resolve(); await Promise.resolve(); }); };
 
 type P = { c: string | null; s: boolean; k: string };
-const mount = (p: P) => renderHook(({ c, s, k }: P) => useSheetBackdrop(c, s, k), { initialProps: p });
+// No logo (settled): the hero is the backdrop alone; `.art` is the one backdrop.
+const mount = (p: P) => renderHook(({ c, s, k }: P) => useSheetHero(c, s, null, true, k).art, { initialProps: p });
 
 describe('one backdrop per sheet open', () => {
   it('single reveal: nothing until the final image decodes, then that image, and it never changes', async () => {
@@ -84,12 +85,78 @@ describe('one backdrop per sheet open', () => {
       const c = src(`components/media/${k}/CompactLayout.tsx`);
       expect(c).not.toMatch(/backdropUrl=\{hero\.art\}|hero\.seeded \? hero\.art/);
       expect(c).not.toMatch(/upgradeUrl=/);
-      expect(c).toMatch(/useSheetBackdrop\(/);
+      expect(c).toMatch(/useSheetHero\(/);
+      expect(c).not.toMatch(/SeededLogo|useLogoSwap/);
       expect(src(`components/media/${k}/ExpandedLayout.tsx`)).not.toMatch(/BackdropSwap/);
     }
     const { container } = render(<BackdropHero backdropUrl={null} posterUrl={null} effects={fx} phase="visible" instant />);
     expect(container.querySelectorAll('img')).toHaveLength(0);
     const r = render(<BackdropHero backdropUrl="/final.jpg" posterUrl={null} effects={fx} phase="visible" instant />);
     expect(r.container.querySelectorAll('img').length).toBe(1);
+  });
+
+  type Q = { a: string | null; l: string | null; ls: boolean; k: string };
+  const hero = (p: Q) => renderHook(({ a, l, ls, k }: Q) => useSheetHero(a, true, l, ls, k), { initialProps: p });
+
+  it('logo in time: backdrop and logo are decided and revealed together, as the logo', async () => {
+    const h = hero({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
+    await decode('/art.jpg');
+    expect(h.result.current.state).toBe('hold');
+    await decode('/logo.png');
+    expect(h.result.current).toEqual({ state: 'logo', art: '/art.jpg', logo: '/logo.png' });
+  });
+
+  it('logo late: the text title at the cap, and no later swap to the logo', async () => {
+    const h = hero({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
+    await decode('/art.jpg');
+    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
+    expect(h.result.current).toEqual({ state: 'text', art: '/art.jpg', logo: null });
+    expect(decodes.has('/logo.png')).toBe(true);
+    h.rerender({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
+    expect(h.result.current.state).toBe('text');
+    h.rerender({ a: '/art.jpg', l: '/logo2.png', ls: true, k: 'a' });
+    act(() => { vi.advanceTimersByTime(3000); });
+    expect(h.result.current).toEqual({ state: 'text', art: '/art.jpg', logo: null });
+  });
+
+  it('logo lookup still pending holds the hero (no text first) until the cap', async () => {
+    const h = hero({ a: '/art.jpg', l: null, ls: false, k: 'a' });
+    await decode('/art.jpg');
+    expect(h.result.current.state).toBe('hold');
+    h.rerender({ a: '/art.jpg', l: null, ls: true, k: 'a' });
+    expect(h.result.current.state).toBe('text');
+  });
+
+  it('a single combined fade: the title box and the backdrop share the one soft fade', () => {
+    expect(HERO_FADE).toBe('opacity 0.45s ease-out');
+    for (const k of ['MovieDetailModal', 'TvDetailModal']) {
+      const c = src(`components/media/${k}/CompactLayout.tsx`);
+      expect(c).toMatch(/data-hero-title=\{sheetHero\.state\}[\s\S]{0,200}opacity: sheetHero\.state === 'hold' \? 0 : 1, transition: reducedMotion\(\) \? 'none' : HERO_FADE/);
+      const e = src(`components/media/${k}/ExpandedLayout.tsx`);
+      expect(e).toMatch(/revealStyle\(sheetHero\.state\), animation: HERO_ANIM/);
+      expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \? 0 : 1,\s*transition: `transform [^`]*\$\{HERO_FADE\}`/);
+    }
+    expect(src('components/media/BackdropHero.tsx')).toMatch(/transition: reducedMotion\(\) \? 'none' : 'opacity 0\.45s ease-out'/);
+  });
+
+  it('empty hero is charcoal APP_BG until its image has loaded', () => {
+    const r = render(<BackdropHero backdropUrl={null} posterUrl={null} effects={fx} phase="visible" instant />);
+    expect((r.container.firstChild as HTMLElement).style.background).toMatch(/rgb\(17, 19, 24\)|#111318/);
+  });
+
+  it('pending decode: cleanup clears the image src', () => {
+    const h = mount({ c: '/x.jpg', s: true, k: 'a' });
+    h.unmount();
+    expect(decodes.has('/x.jpg')).toBe(true);
+    expect(src('hooks/useSheetBackdrop.ts')).toMatch(/im\.src = ''/);
+  });
+
+  it('the seed shows the tapped year in the meta row; the other rows stay reserved', async () => {
+    const { ReservedRows } = await import('@/components/media/sheetRows');
+    const r = render(<ReservedRows actions={null} meta="2021" />);
+    const m = r.container.querySelector('[data-seed-meta]') as HTMLElement;
+    expect(m.textContent).toBe('2021');
+    expect(m.style.opacity).toBe('');
+    expect(r.container.querySelector('[data-box="overview"]')!.closest('div[style*="opacity: 0"]')).not.toBeNull();
   });
 });

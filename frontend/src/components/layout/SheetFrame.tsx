@@ -76,7 +76,7 @@ export function useSeededHero(composed: boolean, colors: UltraBlurColors | null)
   const frozen = useRef<{ colors: UltraBlurColors | null } | null>(null);
   if (seeded.current && !frozen.current) frozen.current = { colors };
   const on = seeded.current === true;
-  return { go, seeded: on, art: on ? tap!.poster : null, title: on ? tap!.title : '', colors: on ? frozen.current!.colors : colors };
+  return { go, seeded: on, art: on ? tap!.poster : null, title: on ? tap!.title : '', year: on ? tap!.year ?? null : null, colors: on ? frozen.current!.colors : colors };
 }
 
 /** Seeded hero: the wash box has one fixed height in the seed and in the details (its blobs scale with the box),

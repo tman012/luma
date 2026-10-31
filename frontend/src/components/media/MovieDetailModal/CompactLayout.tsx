@@ -4,11 +4,11 @@ import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, useSeededHero, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
-import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
+import { useTitleReveal, logoInput } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { formatRuntime, finalBackdropUrl } from '@/utils/image';
-import { useSheetBackdrop } from '@/hooks/useSheetBackdrop';
-import { SeededLogo, seededTitleStyle, useLogoSwap } from '@/components/media/SeededLogo';
+import { useSheetHero, HERO_FADE } from '@/hooks/useSheetBackdrop';
+import { reducedMotion } from '@/theme/motion';
 import {
   PERSON_FALLBACK_SVG,
   getCastImageUrl,
@@ -146,13 +146,12 @@ export function CompactLayout(props: MovieModalViewProps) {
   // Past the open budget the sheet starts on the tapped card's own art, colors and title (useSeededHero).
   const hero = useSeededHero(composed, paletteColors);
   const heroHold = hero.seeded ? false : titleState === 'hold';
-  const heroTitleState = hero.seeded ? 'text' : titleState;
-  // Seeded opens keep the tapped card's text title on frame 0; the clearlogo swaps in with the sharp backdrop.
-  const seededLogo = hero.seeded ? (detail?.clearLogoUrl) || null : null;
   // ONE backdrop per open: the final (sharp) image, latched once decoded or at the cap, never swapped (useSheetBackdrop).
-  const sheetArt = useSheetBackdrop(finalBackdropUrl(detail?.backdropUrl), !!detail, props.openKey);
+  // The hero (backdrop + title) is ONE unit: logo vs. text and the backdrop are decided together before the reveal
+  // (1.2s cap from the tap), fade in once together, and never change for that open.
+  const sheetHero = useSheetHero(finalBackdropUrl(detail?.backdropUrl), !!detail, detail?.clearLogoUrl, logoInput(detail) !== undefined, props.openKey);
+  const sheetArt = sheetHero.art;
   const posterFill = detail && !detail.backdropUrl && !sheetArt ? detail.posterUrl : null;
-  const logoSwap = useLogoSwap(hero.seeded, seededLogo, sheetArt);
   // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
   const ultraBlurColors = hero.colors;
   const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
@@ -400,29 +399,14 @@ export function CompactLayout(props: MovieModalViewProps) {
                     overflow: 'visible',
                   }}
                 >
-                  {heroTitleState === 'logo' && detail?.clearLogoUrl ? (
-                    <img
-                      src={detail?.clearLogoUrl}
-                      alt={detail?.title}
-                      style={{
-                        maxWidth: 'calc(100% - 32px)',
-                        maxHeight: '200px',
-                        objectFit: 'contain',
-                        filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))',
-                      }}
-                      onError={(e) => {
-                        const img = e.target as HTMLImageElement;
-                        img.style.display = 'none';
-                        const fallback = img.nextElementSibling as HTMLElement | null;
-                        if (fallback) fallback.style.display = 'block';
-                      }}
-                    />
-                  ) : null}
-                  {logoSwap && seededLogo ? <SeededLogo url={seededLogo} alt={detail?.title} /> : null}
+                  <div data-hero-title={sheetHero.state} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+                    opacity: sheetHero.state === 'hold' ? 0 : 1, transition: reducedMotion() ? 'none' : HERO_FADE }}>
+                  {sheetHero.state === 'logo' && sheetHero.logo ? (
+                    <img data-hero-logo="" src={sheetHero.logo} alt={detail?.title}
+                        style={{ maxWidth: 'calc(100% - 32px)', maxHeight: '200px', objectFit: 'contain', filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }} />
+                  ) : (
                   <h1
                     style={{
-                      ...titleTextStyle(heroTitleState),
-                      ...(hero.seeded ? seededTitleStyle(logoSwap) : {}),
                       fontSize: '28px',
                       fontWeight: 700,
                       color: '#fff',
@@ -433,6 +417,8 @@ export function CompactLayout(props: MovieModalViewProps) {
                   >
                     {hero.seeded ? hero.title : detail?.title}
                   </h1>
+                  )}
+                  </div>
                 </div>
   </>);
   // Enter/exit motion, scrim, scroll lock and the app background live in SheetFrame (MOTION.md §1).
@@ -468,7 +454,7 @@ export function CompactLayout(props: MovieModalViewProps) {
           <SeedLayer show={shellShown.current} ready={hero.seeded ? detailsIn : composed} overlap={100} hero={hero.seeded ? {
             art: <BackdropHero backdropUrl={sheetArt} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
             wash: washEl, title: titleEl } : undefined} rows={
-            <ReservedRows ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
+            <ReservedRows meta={hero.seeded ? hero.year : null} ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
               <div data-action-row="" data-modal-actions="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', padding: '20px 16px', maxWidth: `${76 + 32}px`, margin: '0 auto', boxSizing: 'border-box' }}>
                 <ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} />
               </div>} />} />

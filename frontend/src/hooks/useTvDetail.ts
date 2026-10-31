@@ -253,9 +253,9 @@ export function useTvDetail(
                 parsed.isOwned = true;
                 // Plex art can't be checked for baked-in title text: with a logo, TMDb's text-free backdrop is the pick
                 // (the sheet takes it only if its one backdrop hasn't shown yet; see useSheetBackdrop).
-                const swap = tmdbData.has_logo && tmdbData.backdrop_textless ? parsed.backdropUrl : null;
+                const textless = tmdbData.has_logo && tmdbData.backdrop_textless ? parsed.backdropUrl : null;
                 setShow((prev) => (plexBackdropShown && prev?.backdropUrl
-                  ? { ...parsed, backdropUrl: prev.backdropUrl, backdropSwapUrl: swap && swap !== prev.backdropUrl ? swap : null }
+                  ? { ...parsed, backdropUrl: prev.backdropUrl, backdropTextlessUrl: textless && textless !== prev.backdropUrl ? textless : null }
                   : parsed));
                 setLoading(false);
                 if (parsed.tvdbId) setTvdbId(parsed.tvdbId);

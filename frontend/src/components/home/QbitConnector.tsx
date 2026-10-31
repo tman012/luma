@@ -32,7 +32,10 @@ const normUrl = (u: string) => u.trim().replace(/\/+$/, '');
 
 /** A partial reply (older server) still gives the form strings to work with. */
 const withDefaults = (v: QbitView): QbitView => ({
-  ...v, username: v.username ?? '', category: v.category ?? '', password: v.password ?? { set: false },
+  ...v,
+  username: typeof v.username === 'string' ? v.username : '',
+  category: typeof v.category === 'string' ? v.category : '',
+  password: v.password && typeof v.password === 'object' ? v.password : { set: false },
 });
 
 /** bare: inside the Connectors modal (the modal shows the title). */

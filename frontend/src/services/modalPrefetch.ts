@@ -204,7 +204,7 @@ export function remainingCap(fallback: number): number {
 /** What the tapped card/row already shows (title, poster), for the sheet's seed shell (MOTION.md §1.2). */
 /** `owned`: in the library (a Plex rating key, or the card's resolved ownership orb, data-owned); null when the
  *  card didn't know yet; `plex`: opened by a Plex rating key. The seed reserves the owned-only rows from them. */
-export interface TapShell { title: string; poster: string | null; at: number; owned: boolean | null; plex: boolean }
+export interface TapShell { title: string; year: string | null; poster: string | null; at: number; owned: boolean | null; plex: boolean }
 function tapOwned(card: HTMLElement | null, ratingKey: number | undefined): boolean | null {
   if (ratingKey) return true;
   const o = card?.closest('[data-owned]')?.getAttribute('data-owned') ?? card?.querySelector('[data-owned]')?.getAttribute('data-owned');
@@ -215,6 +215,11 @@ function tapTitle(card: HTMLElement): string {
   const t = card.getAttribute('aria-label') || card.querySelector('[data-testid="row-title"]')?.textContent
     || (card.innerText || card.textContent || '').split('\n')[0];
   return (t || '').trim();
+}
+/** The year the tapped card/row shows (a line that is just the year), for the seed's meta row. */
+function tapYear(card: HTMLElement): string | null {
+  const lines = (card.innerText || card.textContent || '').split('\n').map(l => l.trim());
+  return lines.find(l => /^(18|19|20)\d{2}$/.test(l)) ?? null;
 }
 /** The seed shell of the tap that is opening a sheet now (none after 5 s). */
 export function tapShell(): TapShell | null {
@@ -297,7 +302,7 @@ export async function openWhenReady(
   const img = card?.querySelector('img') ?? null;
   const seed = colorsFromImage(img);
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);
-  shell = card ? { title: tapTitle(card), poster: img?.currentSrc || img?.src || null, at: now(), owned: tapOwned(card, ratingKey), plex: !!ratingKey } : null;
+  shell = card ? { title: tapTitle(card), year: tapYear(card), poster: img?.currentSrc || img?.src || null, at: now(), owned: tapOwned(card, ratingKey), plex: !!ratingKey } : null;
   if (card) { if (pressed && pressed !== card) release(); pressed = card; card.setAttribute('data-pressed', 'true'); holdFor(card, SHEET_MOUNT_WAIT_MS); }
   let timer = 0;
   try {

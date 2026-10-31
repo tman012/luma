@@ -7,15 +7,15 @@ const src = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8')
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('text-free backdrop over Plex art', () => {
-  it('useTvDetail swaps in the TMDb text-free backdrop only when TMDb reports a logo and a text-free pick', () => {
+  it('useTvDetail offers the TMDb text-free backdrop (backdropTextlessUrl) only when TMDb reports a logo and a text-free pick', () => {
     const s = src('hooks/useTvDetail.ts');
     expect(s).toMatch(/tmdbData\.has_logo && tmdbData\.backdrop_textless \? parsed\.backdropUrl : null/);
-    expect(s).toMatch(/backdropSwapUrl: swap && swap !== prev\.backdropUrl \? swap : null/);
+    expect(s).toMatch(/backdropTextlessUrl: textless && textless !== prev\.backdropUrl \? textless : null/);
   });
 
   it('phone and desktop TV sheets pick the text-free backdrop as their one backdrop', () => {
     for (const f of ['CompactLayout', 'ExpandedLayout']) {
-      expect(src(`components/media/TvDetailModal/${f}.tsx`)).toMatch(/useSheetBackdrop\(finalBackdropUrl\(show\?\.backdropSwapUrl \?\? show\?\.backdropUrl\), !!show && !show\.backdropPending/);
+      expect(src(`components/media/TvDetailModal/${f}.tsx`)).toMatch(/useSheetHero\(finalBackdropUrl\(show\?\.backdropTextlessUrl \?\? show\?\.backdropUrl\), !!show && !show\.backdropPending/);
     }
   });
 });

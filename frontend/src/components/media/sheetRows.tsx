@@ -38,10 +38,14 @@ export const OVERVIEW_CLAMP: CSSProperties = {
 
 /** The seed's reserved rows: the same boxes as the real meta row, primary pill, action row and overview, empty
  *  and invisible (opacity 0, no fill). `actions` is the layout's own action row with one invisible button. */
-export function ReservedRows({ actions, pillKept = false, ratingsH = 0 }: { actions: ReactNode; pillKept?: boolean; ratingsH?: number }) {
+/** The seed's rows, in the details' boxes and sizes so nothing moves when they land. `meta`: what the tap
+ *  already knows for the meta row (the year), shown from frame 0; everything else is reserved, invisible. */
+export function ReservedRows({ actions, pillKept = false, ratingsH = 0, meta = null }: { actions: ReactNode; pillKept?: boolean; ratingsH?: number; meta?: string | null }) {
+  const hide = { opacity: 0 } as const;
   return (
-    <div data-seed-rows="" aria-hidden="true" style={{ opacity: 0, margin: `${TITLE_BLOCK_MB}px -16px 0`, textAlign: 'center', pointerEvents: 'none' }}>
-      <div data-box="meta" style={META_ROW}><span>{'\u00a0'}</span></div>
+    <div data-seed-rows="" aria-hidden="true" style={{ margin: `${TITLE_BLOCK_MB}px -16px 0`, textAlign: 'center', pointerEvents: 'none' }}>
+      <div data-box="meta" data-seed-meta={meta ? '' : undefined} style={{ ...META_ROW, ...(meta ? { color: 'rgba(255, 255, 255, 0.9)' } : hide) }}><span>{meta || '\u00a0'}</span></div>
+      <div style={hide}>
       {ratingsH > 0 && <div style={{ minHeight: `${ratingsH}px` }} />}
       {/* Same wrapper as the real pill, so the build's display rules (html.luma-minimal [data-modal-actions])
           treat the reserve exactly like the real row. */}
@@ -53,6 +57,7 @@ export function ReservedRows({ actions, pillKept = false, ratingsH = 0 }: { acti
       {actions}
       <div style={OVERVIEW_WRAP}>
         <p data-box="overview" style={{ ...OVERVIEW_TEXT, height: `calc(${OVERVIEW_TEXT.lineHeight}em * ${OVERVIEW_LINES})` }} />
+      </div>
       </div>
     </div>
   );

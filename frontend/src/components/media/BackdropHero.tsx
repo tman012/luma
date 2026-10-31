@@ -13,7 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import { useCallback, useMemo, useState } from 'react';
-import { reducedMotion } from '@/theme/motion';
+import { APP_BG, reducedMotion } from '@/theme/motion';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 
@@ -76,7 +76,7 @@ export function BackdropHero({
   // The one backdrop fades in softly when it paints (also on the composed phone sheet, `instant`); reduced motion: no fade.
   const fade: React.CSSProperties = { transition: reducedMotion() ? 'none' : 'opacity 0.45s ease-out' };
   return (
-    <div ref={containerRef} style={{ ...containerStyle, background: instant ? 'transparent' : '#111318' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
+    <div ref={containerRef} style={{ ...containerStyle, background: instant && loaded ? 'transparent' : APP_BG }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
       {backdropUrl ? (
         <img
           key={backdropUrl}

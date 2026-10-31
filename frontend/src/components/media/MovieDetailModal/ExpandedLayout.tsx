@@ -4,7 +4,7 @@ import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatRuntime, finalBackdropUrl } from '@/utils/image';
-import { useSheetBackdrop } from '@/hooks/useSheetBackdrop';
+import { useSheetHero, HERO_FADE, HERO_ANIM } from '@/hooks/useSheetBackdrop';
 import {
   CARD_BG,
   PERSON_FALLBACK_SVG,
@@ -337,7 +337,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   } = props;
   const titleState = useTitleReveal(logoInput(detail), detail?.title, detail?.backdropUrl || detail?.posterUrl);
   // ONE backdrop per open (useSheetBackdrop): latched once decoded or at the cap, never swapped after.
-  const sheetArt = useSheetBackdrop(finalBackdropUrl(detail?.backdropUrl), !!detail, props.openKey);
+  const sheetHero = useSheetHero(finalBackdropUrl(detail?.backdropUrl), !!detail, detail?.clearLogoUrl, logoInput(detail) !== undefined, props.openKey);
+  const sheetArt = sheetHero.art;
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -745,7 +746,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 src={sheetArt}
                 alt=""
                 style={{
-                  ...revealStyle(titleState),
+                  ...revealStyle(sheetHero.state), animation: HERO_ANIM,
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
@@ -909,12 +910,13 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
+                opacity: sheetHero.state === 'hold' ? 0 : 1,
+                    transition: `transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), ${HERO_FADE}`,
                 transform: showCastShelf ? 'translateY(-15vh)' : 'translateY(0)',
               }}>
-                {titleState === 'logo' && detail.clearLogoUrl ? (
+                {sheetHero.state === 'logo' && sheetHero.logo ? (
                   <img
-                    src={detail.clearLogoUrl}
+                    src={sheetHero.logo}
                     alt={detail.title}
                     style={{
                       maxWidth: '100%',
@@ -932,7 +934,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 ) : null}
                 <h1
                   style={{
-                    ...titleTextStyle(titleState),
+                    ...titleTextStyle(sheetHero.state),
                     fontSize: t.titleFontSize,
                     fontWeight: 700,
                     color: '#fff',
