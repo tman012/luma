@@ -10,7 +10,9 @@ export function RatingsSettle({ settle, size, reserve, style, barStyle }: {
 }) {
   return (
     <div data-ratings-slot="" data-ratings={settle.shown ? 'shown' : 'hold'}
-      style={{ minHeight: reserve ? `${reserve}px` : 0, ...style,
+      // flow-root: the bar's top margin stays inside the slot (no margin collapse), so the box is the same before and
+      // after the reveal. A caller's display (desktop: flex) wins.
+      style={{ display: 'flow-root', minHeight: reserve ? `${reserve}px` : 0, ...style,
         opacity: settle.shown ? 1 : 0,
         transition: reducedMotion() ? 'none' : `opacity ${MOTION.dur.contentFade}ms ${MOTION.ease.contentFade}` }}>
       {settle.ratings && <RatingsBar ratings={settle.ratings} size={size} style={barStyle} />}
