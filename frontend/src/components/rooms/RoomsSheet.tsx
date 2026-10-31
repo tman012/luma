@@ -381,6 +381,8 @@ interface RoomsSheetProps {
 /** The last device config (this session): a reopened sheet renders its rooms on frame 0. */
 let deviceCache: { map: Record<string, DeviceData[]>; hubs: Record<string, string> } | null = null;
 export function _clearRoomsCache() { deviceCache = null; }
+/** The most the sheet waits for rooms and devices before it reveals what it has (an empty list included). */
+export const ROOMS_WAIT_MS = 4000;
 
 export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
   const { rooms, roomsLoading, unmatchedSessions } = useNotificationsContext();
@@ -389,6 +391,13 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
   const [deviceMap, setDeviceMap] = useState<Record<string, DeviceData[]>>(() => deviceCache?.map ?? {});
   const [hubMap, setHubMap] = useState<Record<string, string>>(() => deviceCache?.hubs ?? {});
   const [devicesLoaded, setDevicesLoaded] = useState(() => !!deviceCache);
+  const [waitedOut, setWaitedOut] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    setWaitedOut(false);
+    const t = window.setTimeout(() => setWaitedOut(true), ROOMS_WAIT_MS);
+    return () => window.clearTimeout(t);
+  }, [open]);
   const [deviceNotice, setDeviceNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -562,7 +571,7 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
             style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
           >
             {/* One reveal once rooms and their devices are ready (no skeletons, no per-list pop-in). */}
-            <ContentReveal id="rooms-sheet" landMs={ENTER_DURATION} ready={!roomsLoading && devicesLoaded} testId="rooms-reveal">
+            <ContentReveal id="rooms-sheet" landMs={ENTER_DURATION} ready={(!roomsLoading && devicesLoaded) || waitedOut} testId="rooms-reveal">
             {rooms.length === 0 ? (
               <p className="text-center text-[15px] text-white/40 py-12">
                 No rooms configured
