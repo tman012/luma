@@ -487,7 +487,7 @@ export function CompactLayout(props: TvModalViewProps) {
                   <div data-hero-title={sheetHero.state} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
                     opacity: sheetHero.state === 'hold' ? 0 : 1, transition: reducedMotion() ? 'none' : HERO_FADE }}>
                   {sheetHero.state === 'logo' && sheetHero.logo ? (
-                    <img data-hero-logo="" src={sheetHero.logo} alt={show?.title}
+                    <img data-hero-logo="" src={sheetHero.logo} onError={sheetHero.logoFailed} alt={show?.title}
                         style={{ maxWidth: 'calc(100% - 32px)', maxHeight: '200px', objectFit: 'contain', filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }} />
                   ) : (
                   <h1

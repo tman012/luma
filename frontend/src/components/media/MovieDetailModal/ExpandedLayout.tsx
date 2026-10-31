@@ -924,12 +924,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                       objectFit: 'contain',
                       filter: t.logo.filter,
                     }}
-                    onError={(e) => {
-                      const img = e.target as HTMLImageElement;
-                      img.style.display = 'none';
-                      const fallback = img.nextElementSibling as HTMLElement | null;
-                      if (fallback) fallback.style.display = 'block';
-                    }}
+                    onError={sheetHero.logoFailed}
                   />
                 ) : null}
                 <h1

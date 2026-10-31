@@ -9,14 +9,15 @@ import { BackdropHero } from '@/components/media/BackdropHero';
 const fx = { headerImgStyle: {}, headerContainerMask: {} } as unknown as BackdropEffects;
 const src = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8');
 const decodes = new Map<string, () => void>();
+const fails = new Map<string, () => void>();
 class FakeImage {
   private s = '';
   onload: null | (() => void) = null; onerror: null | (() => void) = null;
   set src(v: string) { this.s = v; }
   get src() { return this.s; }
-  decode = () => new Promise<void>(r => { decodes.set(this.s, r); });
+  decode = () => new Promise<void>((r, j) => { decodes.set(this.s, r); fails.set(this.s, j); });
 }
-beforeEach(() => { decodes.clear(); vi.useFakeTimers(); vi.stubGlobal('Image', FakeImage); });
+beforeEach(() => { decodes.clear(); fails.clear(); vi.useFakeTimers(); vi.stubGlobal('Image', FakeImage); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 const decode = async (u: string) => { await act(async () => { decodes.get(u)!(); await Promise.resolve(); await Promise.resolve(); }); };
 
@@ -103,20 +104,20 @@ describe('one backdrop per sheet open', () => {
     await decode('/art.jpg');
     expect(h.result.current.state).toBe('hold');
     await decode('/logo.png');
-    expect(h.result.current).toEqual({ state: 'logo', art: '/art.jpg', logo: '/logo.png' });
+    expect(h.result.current).toMatchObject({ state: 'logo', art: '/art.jpg', logo: '/logo.png' });
   });
 
   it('logo late: the text title at the cap, and no later swap to the logo', async () => {
     const h = hero({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
     await decode('/art.jpg');
     act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
-    expect(h.result.current).toEqual({ state: 'text', art: '/art.jpg', logo: null });
+    expect(h.result.current).toMatchObject({ state: 'text', art: '/art.jpg', logo: null });
     expect(decodes.has('/logo.png')).toBe(true);
     h.rerender({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
     expect(h.result.current.state).toBe('text');
     h.rerender({ a: '/art.jpg', l: '/logo2.png', ls: true, k: 'a' });
     act(() => { vi.advanceTimersByTime(3000); });
-    expect(h.result.current).toEqual({ state: 'text', art: '/art.jpg', logo: null });
+    expect(h.result.current).toMatchObject({ state: 'text', art: '/art.jpg', logo: null });
   });
 
   it('logo lookup still pending holds the hero (no text first) until the cap', async () => {
@@ -158,5 +159,29 @@ describe('one backdrop per sheet open', () => {
     expect(m.textContent).toBe('2021');
     expect(m.style.opacity).toBe('');
     expect(r.container.querySelector('[data-box="overview"]')!.closest('div[style*="opacity: 0"]')).not.toBeNull();
+  });
+
+  it('logo decode error (404 / corrupt): the text title, decided before the reveal, no later swap', async () => {
+    const h = hero({ a: '/art.jpg', l: '/broken-logo.png', ls: true, k: 'a' });
+    await decode('/art.jpg');
+    expect(h.result.current.state).toBe('hold');
+    await act(async () => { fails.get('/broken-logo.png')!(); await Promise.resolve(); await Promise.resolve(); });
+    expect(h.result.current).toMatchObject({ state: 'text', art: '/art.jpg', logo: null });
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(h.result.current.state).toBe('text');
+  });
+
+  it('a chosen logo that fails to paint falls back to the text title (onError), never back to the logo', async () => {
+    const h = hero({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
+    await decode('/art.jpg'); await decode('/logo.png');
+    expect(h.result.current.state).toBe('logo');
+    act(() => { h.result.current.logoFailed(); });
+    expect(h.result.current).toMatchObject({ state: 'text', logo: null });
+    h.rerender({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
+    expect(h.result.current.state).toBe('text');
+    for (const k of ['MovieDetailModal', 'TvDetailModal']) {
+      expect(src(`components/media/${k}/CompactLayout.tsx`)).toMatch(/src=\{sheetHero\.logo\} onError=\{sheetHero\.logoFailed\}/);
+      expect(src(`components/media/${k}/ExpandedLayout.tsx`)).toMatch(/onError=\{sheetHero\.logoFailed\}/);
+    }
   });
 });

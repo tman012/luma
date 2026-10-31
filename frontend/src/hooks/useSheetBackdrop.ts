@@ -8,7 +8,7 @@
  * - At the cap the best available backdrop latches (the current pick, decoded or not; if there is none yet, the
  *   first one that arrives). Once latched nothing changes for that open (`openKey`): no backdrop swap, no
  *   text-to-logo jump. Nothing (no seed, no low-res, no title) paints before the latch. */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { tapElapsed } from '@/services/modalPrefetch';
 import type { TitleState } from '@/hooks/useTitleReveal';
 
@@ -16,16 +16,17 @@ export const BACKDROP_CAP_MS = 1200;
 /** The hero's one soft fade (backdrop and title/logo together). */
 export const HERO_FADE = 'opacity 0.45s ease-out';
 
-function useDecoded(url: string | null): string | null {
-  const [done, setDone] = useState<string | null>(null);
+/** The URL once its decode has finished, and whether it succeeded. */
+function useDecoded(url: string | null): { url: string | null; ok: boolean } {
+  const [done, setDone] = useState<{ url: string | null; ok: boolean }>({ url: null, ok: false });
   useEffect(() => {
     if (!url) return;
     let live = true;
     const im = new Image();
     im.src = url;
     const p = typeof im.decode === 'function' ? im.decode() : new Promise<void>((res, rej) => { im.onload = () => res(); im.onerror = () => rej(); });
-    // A decode error still settles this URL: the cap would show it anyway.
-    p.then(() => { if (live) setDone(url); }, () => { if (live) setDone(url); });
+    // A decode error settles this URL too (ok: false): a backdrop would show at the cap anyway; a logo falls back to text.
+    p.then(() => { if (live) setDone({ url, ok: true }); }, () => { if (live) setDone({ url, ok: false }); });
     // Drop the pending download too (a closed sheet or a new candidate), not just its result.
     return () => { live = false; im.onload = null; im.onerror = null; im.src = ''; };
   }, [url]);
@@ -37,7 +38,11 @@ export function capLeft(): number {
   return e == null ? BACKDROP_CAP_MS : Math.max(0, BACKDROP_CAP_MS - e);
 }
 
-export interface SheetHero { state: TitleState; art: string | null; logo: string | null }
+export interface SheetHero {
+  state: TitleState; art: string | null; logo: string | null;
+  /** The chosen logo failed to paint (img onError): show the text title instead. */
+  logoFailed: () => void;
+}
 interface St { key: unknown; capped: boolean; title: 'logo' | 'text' | null; logo: string | null; art: string | null; artDone: boolean }
 const fresh = (key: unknown): St => ({ key, capped: false, title: null, logo: null, art: null, artDone: false });
 
@@ -54,8 +59,10 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
   }, [openKey]);
   useEffect(() => {
     if (cur.title && cur.artDone) return;
-    const logoIn = !!logo && logoOk === logo;
-    const ready = artSettled && (art ? artOk === art : true) && (logo ? logoIn : logoSettled);
+    // Only a successful decode counts as the logo; a 404 or corrupt logo is settled as "no logo" (text title).
+    const logoIn = !!logo && logoOk.url === logo && logoOk.ok;
+    const logoBad = !!logo && logoOk.url === logo && !logoOk.ok;
+    const ready = artSettled && (art ? artOk.url === art : true) && (logo ? logoIn || logoBad : logoSettled);
     if (!cur.title) {
       if (!ready && !cur.capped) return;
       setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: art ?? null, artDone: !!art });
@@ -64,7 +71,8 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
       setSt({ ...cur, art, artDone: true });
     }
   }, [art, artOk, artSettled, logo, logoOk, logoSettled, cur, openKey]);
-  return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo };
+  const logoFailed = useCallback(() => setSt(s => (s.key === openKey && s.title === 'logo' ? { ...s, title: 'text', logo: null } : s)), [openKey]);
+  return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, logoFailed };
 }
 /** The same fade for an element that mounts at the latch (the desktop backdrop img). */
 export const HERO_ANIM = 'm-crossfade 0.45s ease-out both';
