@@ -12,7 +12,7 @@ import { FONT } from '@/components/start/StartUI';
 import { HomeChevron, homeChevCss } from '@/components/home/HomeChevron';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import {
-  openResult, warmResult, warmResults,
+  openResult, warmResult, warmResults, resultWarmKey,
   performSearch, getPosterUrl, getProfileUrl, getTitle, getYear, TMDB_BUSY_TEXT,
   type SearchMovie, type SearchPerson, type SearchResults,
 } from '@/services/searchApi';
@@ -327,7 +327,7 @@ function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: (el: HTML
   const [broken, setBroken] = useState<string | null>(null);   // the URL that failed
   return (
     <div className="r3-cardw">
-      <button type="button" className="r3-card" data-testid="r3-card" data-owned={item.isOwned ? 'true' : 'false'} onClick={(e) => onOpen(e.currentTarget)}
+      <button type="button" className="r3-card" data-testid="r3-card" data-warm-key={resultWarmKey(item)} data-owned={item.isOwned ? 'true' : 'false'} onClick={(e) => onOpen(e.currentTarget)}
         onPointerEnter={() => { void warmResult(item); }} onPointerDown={() => { void warmResult(item); }} onFocus={() => { void warmResult(item); }} aria-label={title}>
         <span className="r3-po">
           {img && broken !== img ? <img key={img} src={img} alt="" loading="lazy" onError={() => setBroken(img)} />

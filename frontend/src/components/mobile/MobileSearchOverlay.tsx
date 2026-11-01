@@ -10,6 +10,7 @@ import {
   openResult,
   warmResult,
   warmResults,
+  resultWarmKey,
   getTitle,
   getYear,
   TMDB_BUSY_TEXT,
@@ -18,6 +19,7 @@ import {
   type SearchResults,
   type PersonCredit,
 } from '@/services/searchApi';
+import { openWhenReady } from '@/services/modalPrefetch';
 import { mediaKey } from '@/services/ownership';
 import { withBase } from '@/urlHelpers';
 import { sizedPlexImg, tmdbImg } from '@/utils/image';
@@ -289,7 +291,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
   };
 
   // Handle filmography credit click
-  const handleCreditClick = (credit: PersonCredit) => {
+  const handleCreditClick = (credit: PersonCredit, el?: HTMLElement | null) => {
     const opts = {
       ratingKey: (credit.isOwned && credit.rating_key) ? credit.rating_key : undefined,
       tmdbId: credit.tmdb_id ?? undefined,
@@ -297,11 +299,10 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
       onPersonSearch: handlePersonSearch,
     };
     if (!opts.ratingKey && !opts.tmdbId) return;
-    if (credit.media_type === 'tv') {
-      openTv(opts);
-    } else {
-      openMovie(opts);
-    }
+    // Same open as a Home card tap.
+    const kind = credit.media_type === 'tv' ? 'tv' : 'movie';
+    void openWhenReady(kind, opts.ratingKey ? Number(opts.ratingKey) : undefined, opts.tmdbId ? Number(opts.tmdbId) : undefined,
+      el ?? null, () => (kind === 'tv' ? openTv(opts) : openMovie(opts)));
   };
 
   const handleClear = () => {
@@ -437,6 +438,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                   onTouchStart={() => { if (media) void warmResult(media); }}
                   className="luma-pressable relative flex h-[72px] w-full items-center gap-[12px] px-[16px] text-left active:bg-white/5"
                   data-testid="phone-search-row"
+                  data-warm-key={media ? resultWarmKey(media) : undefined}
                 >
                   <RowThumb src={isPerson ? getProfileUrl(person!) : sizedPlexImg(getPosterUrl(media!), 120, 180)} round={isPerson}
                     kind={media?.media_type === 'tv' ? 'tv' : 'movie'} />

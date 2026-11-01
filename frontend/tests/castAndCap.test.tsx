@@ -82,7 +82,11 @@ describe('phone search warms rows on screen', () => {
   it(`warms the top ${WARM_FULL_ROWS} fully and the next ones' details only`, () => {
     const spy = vi.spyOn(prefetch, 'scheduleWarm').mockImplementation(() => () => {});
     const items = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, title: `T${i}`, media_type: 'movie' as const }));
+    vi.useFakeTimers();
     warmResults(items as never);
+    expect(spy).not.toHaveBeenCalled();   // after the results settle (SEARCH_WARM_DEBOUNCE_MS)
+    vi.advanceTimersByTime(250);
+    vi.useRealTimers();
     const keys = spy.mock.calls.map((c) => c[0]);
     expect(keys.length).toBe(10);
     expect(keys.filter((k) => k.endsWith(':full')).length).toBe(WARM_FULL_ROWS);

@@ -9,6 +9,7 @@ import {
   performSearch,
   warmResult,
   warmResults,
+  resultWarmKey,
   getTitle,
   getYear,
   type SearchMovie,
@@ -329,6 +330,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
               key={`result-${i}`}
               type="button"
               data-testid="search-result"
+              data-warm-key={media ? resultWarmKey(media) : undefined}
               className={isPerson ? undefined : 'luma-pressable'}
               onPointerDown={media ? () => { void warmResult(media); } : undefined}
               onTouchStart={media ? () => { void warmResult(media); } : undefined}

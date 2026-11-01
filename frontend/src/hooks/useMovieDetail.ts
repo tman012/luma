@@ -11,7 +11,7 @@ import {
   type UltraBlurColors,
 } from '@/utils/modalParsers';
 import { apiFetch } from '../apiClient';
-import { detailFetch, remainingCap } from '@/services/modalPrefetch';
+import { detailFetch, plexRatingsPath, remainingCap, titleRatingsPath } from '@/services/modalPrefetch';
 import { useModalColors } from './useModalColors';
 
 // ---------------------------------------------------------------------------
@@ -240,16 +240,14 @@ export function useMovieDetail(
     async function fetchAllRatings() {
       // Fire Plex + OMDb in parallel
       const plexPromise: Promise<Record<string, unknown> | null> = ratingKey
-        ? apiFetch(`/api/plex/ratings/${ratingKey}`, { signal: controller.signal })
+        ? detailFetch(plexRatingsPath(ratingKey), { signal: controller.signal })
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null)
         : Promise.resolve(null);
 
-      const params = new URLSearchParams();
-      if (movieYear) params.set('year', String(movieYear));
       // Minimal builds skip OMDb (no OMDb connector on test); the RT fill below runs, as prod 1b4ea74.
-      const omdbPromise: Promise<Record<string, unknown> | null> = isMinimal() ? Promise.resolve(null) : apiFetch(
-        `/api/ratings/${encodeURIComponent(movieTitle!)}?${params}`,
+      const omdbPromise: Promise<Record<string, unknown> | null> = isMinimal() ? Promise.resolve(null) : detailFetch(
+        titleRatingsPath(movieTitle!, movieYear),
         { signal: controller.signal },
       )
         .then((r) => (r.ok ? r.json() : null))

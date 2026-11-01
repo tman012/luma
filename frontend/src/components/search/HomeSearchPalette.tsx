@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import {
-  openResult, warmResult, warmResults,
+  openResult, warmResult, warmResults, resultWarmKey,
   performSearch, getPosterUrl, getProfileUrl, getTitle, getYear, TMDB_BUSY_TEXT,
   type SearchMovie, type SearchPerson, type SearchResults,
 } from '@/services/searchApi';
@@ -286,7 +286,7 @@ export function HomeSearchPalette() {
                   const title = r.kind === 'person' ? r.item.name : getTitle(r.item);
                   const img = r.kind === 'person' ? getProfileUrl(r.item) : sizedPlexImg(getPosterUrl(r.item), 68, 100);
                   return (
-                    <div key={i} id={`lsp-row-${i}`} data-row={i} role="option" aria-selected={i === hi}
+                    <div key={i} id={`lsp-row-${i}`} data-row={i} data-warm-key={r.kind === 'person' ? undefined : resultWarmKey(r.item)} role="option" aria-selected={i === hi}
                       className="lsp-row" data-hi={i === hi ? 'true' : 'false'}
                       onMouseEnter={() => { setHi(i); if (r.kind !== 'person') void warmResult(r.item); }} onClick={(e) => choose(r, e.currentTarget)}>
                       {r.kind === 'person'

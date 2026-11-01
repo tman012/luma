@@ -89,7 +89,7 @@ export const TMDB_BUSY_TEXT = 'TMDB is busy. Try again in a minute.';
 // ---------------------------------------------------------------------------
 
 import { posterUrl as tmdbPosterUrl, tmdbImg } from '@/utils/image';
-import { openWhenReady, scheduleWarm, warmDetail } from '@/services/modalPrefetch';
+import { openWhenReady, resetWarmGroup, scheduleWarm, warmDetail } from '@/services/modalPrefetch';
 
 function titleKey(title: string, year: number | string | null | undefined): string {
   return `${(title || '').toLowerCase()}_${year || ''}`;
@@ -268,18 +268,45 @@ export function openResult(item: SearchMovie, el: HTMLElement | null | undefined
   return openWhenReady(kind, ratingKey, tmdbId, el ?? null, open, onClosed);
 }
 
-/** Phone search: warm what's on screen as soon as results land: the top rows
- *  fully (details, backdrop, logo), the next ones' details only, through the
- *  4-at-a-time queue. Returns a cancel for rows not started yet. */
+/** Search warms what's on screen once the results settle (SEARCH_WARM_DEBOUNCE_MS without a change): the top
+ *  rows in the viewport fully (details, ratings, backdrop, logo), the next ones' details only, through Home's
+ *  4-at-a-time queue. Returns a cancel: a new result set cancels the pending warm-ups. */
 export const WARM_FULL_ROWS = 4;
 export const WARM_META_ROWS = 10;
-function warmResults(items: SearchMovie[]): () => void {
-  const cancels = items.slice(0, WARM_META_ROWS).map((item, i) => {
-    const full = i < WARM_FULL_ROWS;
-    const key = `search:${item.media_type}:${item.rating_key ?? ''}:${item.tmdb_id || item.id || ''}:${full ? 'full' : 'meta'}`;
-    return scheduleWarm(key, () => warmResult(item, { images: full }));
+export const SEARCH_WARM_DEBOUNCE_MS = 250;
+export const SEARCH_WARM_GROUP = 'search';
+
+/** The row attribute that lets the warm-up see which results are on screen. */
+export function resultWarmKey(item: SearchMovie): string {
+  const { kind, ratingKey, tmdbId } = resultIds(item);
+  return `${kind}:${ratingKey ?? ''}:${tmdbId ?? ''}`;
+}
+
+function onScreen(items: SearchMovie[]): SearchMovie[] {
+  if (typeof document === 'undefined') return items;
+  const vh = window.innerHeight, vw = window.innerWidth;
+  let marked = false;
+  const seen = items.filter((item) => {
+    const el = Array.from(document.querySelectorAll('[data-warm-key]')).find((e) => e.getAttribute('data-warm-key') === resultWarmKey(item));
+    if (!el) return false;
+    marked = true;
+    const r = el.getBoundingClientRect();
+    return r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw;
   });
-  return () => cancels.forEach((c) => c());
+  return marked ? seen : items;
+}
+
+function warmResults(items: SearchMovie[]): () => void {
+  let cancels: (() => void)[] = [];
+  const t = window.setTimeout(() => {
+    resetWarmGroup(SEARCH_WARM_GROUP);
+    cancels = onScreen(items.slice(0, WARM_META_ROWS)).map((item, i) => {
+      const full = i < WARM_FULL_ROWS;
+      const key = `search:${resultWarmKey(item)}:${full ? 'full' : 'meta'}`;
+      return scheduleWarm(key, () => warmResult(item, { images: full }), SEARCH_WARM_GROUP);
+    });
+  }, SEARCH_WARM_DEBOUNCE_MS);
+  return () => { window.clearTimeout(t); cancels.forEach((c) => c()); };
 }
 
 export { warmResult, warmResults, getPosterUrl, getProfileUrl, getTitle, getYear, titleKey };

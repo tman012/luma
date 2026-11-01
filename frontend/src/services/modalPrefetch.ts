@@ -10,6 +10,21 @@ import { colorsFromImage } from '@/utils/posterColors';
 import { finalBackdropUrl } from '@/utils/image';
 import { parsePlexResponse, parsePlexTvResponse } from '@/utils/modalParsers';
 import { getSeedColors, modalColors, prefetchModalColors, setSeedColors } from '@/services/modalColors';
+import { isMinimal } from '@/minimal';
+
+/** The sheet's ratings requests (the detail hooks read them through detailFetch, so a warm-up serves them). */
+export function plexRatingsPath(ratingKey: number | string): string {
+  return `/api/plex/ratings/${ratingKey}`;
+}
+export function titleRatingsPath(title: string, year?: number | string | null): string {
+  const params = new URLSearchParams();
+  if (year) params.set('year', String(year));
+  return `/api/ratings/${encodeURIComponent(title)}?${params}`;
+}
+function yearOf(d: unknown): number | null {
+  const y = typeof d === 'string' ? Number(d.slice(0, 4)) : NaN;
+  return Number.isFinite(y) && y > 0 ? y : null;
+}
 
 export const DETAIL_TTL_MS = 5 * 60 * 1000;
 const MAX_ENTRIES = 150;
@@ -104,10 +119,14 @@ export async function warmDetail(
     // server-side tmdb_id type check the popup waits on.
     void json(kind === 'movie' ? `/api/plex/movie/${ratingKey}` : `/api/plex/tv/${ratingKey}`);
   }
+  if (kind === 'movie' && ratingKey) void json(plexRatingsPath(ratingKey));
   const [tm, logo] = await Promise.all([
     tid ? json(kind === 'movie' ? `/api/movie/${tid}` : `/api/tv/${tid}`) : Promise.resolve(null),
     tid ? json(clearlogoPath(kind, tid)) : Promise.resolve(null),
   ]);
+  // Ratings with the details: the title-based ratings the sheet asks for (none in the minimal build).
+  const title = (tm?.title ?? tm?.name) as string | undefined;
+  if (title && !isMinimal()) void json(titleRatingsPath(title, yearOf(tm?.release_date ?? tm?.first_air_date)));
   if (!images) return; // metadata only (rows further down the list)
   const path = tm?.backdrop_path as string | undefined;
   await Promise.all([
@@ -149,20 +168,43 @@ function pump(): void {
   }
 }
 
-/** Background prefetch is off when the user asked to save data or the link
- *  is 2G (a tap still warms its own card). */
+type Connection = { saveData?: boolean; effectiveType?: string; type?: string; metered?: boolean };
+function connection(): Connection | null | undefined {
+  if (typeof navigator === 'undefined') return undefined;
+  return (navigator as Navigator & { connection?: Connection }).connection ?? null;
+}
+
+/** Background prefetch is off when the user asked to save data, the link is 2G, or it is metered or cellular
+ *  (a tap still warms its own card). */
 export function canPrefetch(): boolean {
-  if (typeof navigator === 'undefined') return true;
-  const c = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  const c = connection();
   if (!c) return true;
-  if (c.saveData) return false;
+  if (c.saveData || c.metered) return false;
+  if (c.type === 'cellular') return false;
   return c.effectiveType !== '2g' && c.effectiveType !== 'slow-2g';
 }
 
+/** Without a Network Information API (iOS) the link can't be checked, so each surface warms at most this many
+ *  titles in the background: the first screen's worth (two batches of the queue). */
+export const UNKNOWN_LINK_CAP = WARM_CONCURRENCY * 2;
+const groupCount = new Map<string, number>();
+function groupAllows(group: string | undefined): boolean {
+  if (!group || connection() !== null) return true;
+  const n = groupCount.get(group) ?? 0;
+  if (n >= UNKNOWN_LINK_CAP) return false;
+  groupCount.set(group, n + 1);
+  return true;
+}
+/** A new surface batch (a new search query): its background cap starts over. */
+export function resetWarmGroup(group: string): void {
+  groupCount.delete(group);
+}
+
 /** Queue a warm-up; returns a cancel that drops it if it hasn't started. */
-export function scheduleWarm(key: string, run: () => Promise<void>): () => void {
+export function scheduleWarm(key: string, run: () => Promise<void>, group?: string): () => void {
   if (!canPrefetch()) return () => {};
   if (started.has(key) || queue.some((j) => j.key === key)) return () => {};
+  if (!groupAllows(group)) return () => {};
   const job = { key, run };
   queue.push(job);
   pump();
@@ -330,6 +372,7 @@ export function _resetModalPrefetch(): void {
   loading.clear();
   queue.length = 0;
   started.clear();
+  groupCount.clear();
   gen += 1;
   active = 0;
   pending = false;
