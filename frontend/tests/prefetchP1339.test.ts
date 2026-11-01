@@ -85,3 +85,26 @@ describe('where ratings warm', () => {
     expect(src('components/mobile/MobileSearchOverlay.tsx')).toMatch(/onClick=\{\(el\) => handleCreditClick\(credit, el\)\}/);
   });
 });
+
+describe('search ratings warm-ups', () => {
+  it('at most SEARCH_RATINGS_WARMS (4) per query, flagged, counted against the same load cap', async () => {
+    const { SEARCH_RATINGS_WARMS, startSearchWarms } = await import('@/services/modalPrefetch');
+    startWarmLoad();
+    for (let i = 1; i <= 6; i++) await warmDetail('movie', undefined, i, { images: false, ratings: true, search: true });
+    await settle();
+    expect(SEARCH_RATINGS_WARMS).toBe(4);
+    expect(ratingCalls().length).toBe(4);
+    expect(ratingCalls().every((c) => !!c.warm)).toBe(true);
+    // A new query gets 4 more, and the load cap still holds across Home and search.
+    startSearchWarms();
+    for (let i = 11; i <= 16; i++) await warmDetail('movie', undefined, i, { images: false, ratings: true, search: true });
+    for (let i = 21; i <= 30; i++) await warmDetail('movie', undefined, i, { images: false, ratings: true });
+    await settle();
+    expect(ratingCalls().length).toBe(RATINGS_WARMS_PER_LOAD);
+  });
+  it('the search warm-up asks for ratings only through the capped, flagged path', () => {
+    const s = src('services/searchApi.ts');
+    expect(s).toMatch(/startSearchWarms\(\);/);
+    expect(s).toMatch(/warmResult\(item, \{ images: full, ratings: full, search: true \}\)/);
+  });
+});

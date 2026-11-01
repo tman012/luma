@@ -89,7 +89,7 @@ export const TMDB_BUSY_TEXT = 'TMDB is busy. Try again in a minute.';
 // ---------------------------------------------------------------------------
 
 import { posterUrl as tmdbPosterUrl, tmdbImg } from '@/utils/image';
-import { openWhenReady, resetWarmGroup, scheduleWarm, warmDetail } from '@/services/modalPrefetch';
+import { openWhenReady, resetWarmGroup, scheduleWarm, startSearchWarms, warmDetail } from '@/services/modalPrefetch';
 
 function titleKey(title: string, year: number | string | null | undefined): string {
   return `${(title || '').toLowerCase()}_${year || ''}`;
@@ -253,7 +253,7 @@ export function resultIds(item: SearchMovie): { kind: 'movie' | 'tv'; ratingKey?
   return { kind: item.media_type === 'tv' ? 'tv' : 'movie', ratingKey: rk, tmdbId: tmdb ? Number(tmdb) : undefined };
 }
 
-function warmResult(item: SearchMovie, opts?: { images?: boolean; ratings?: boolean }): Promise<void> {
+function warmResult(item: SearchMovie, opts?: { images?: boolean; ratings?: boolean; search?: boolean }): Promise<void> {
   const { kind, ratingKey, tmdbId } = resultIds(item);
   return warmDetail(kind, ratingKey, tmdbId, opts).catch(() => {});
 }
@@ -300,10 +300,11 @@ function warmResults(items: SearchMovie[]): () => void {
   let cancels: (() => void)[] = [];
   const t = window.setTimeout(() => {
     resetWarmGroup(SEARCH_WARM_GROUP);
+    startSearchWarms();
     cancels = onScreen(items.slice(0, WARM_META_ROWS)).map((item, i) => {
       const full = i < WARM_FULL_ROWS;
       const key = `search:${resultWarmKey(item)}:${full ? 'full' : 'meta'}`;
-      return scheduleWarm(key, () => warmResult(item, { images: full, ratings: full }), SEARCH_WARM_GROUP);
+      return scheduleWarm(key, () => warmResult(item, { images: full, ratings: full, search: true }), SEARCH_WARM_GROUP);
     });
   }, SEARCH_WARM_DEBOUNCE_MS);
   return () => { window.clearTimeout(t); cancels.forEach((c) => c()); };
