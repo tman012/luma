@@ -564,6 +564,8 @@ def _prefix_image_urls(response):
 
 
 _REDACT_BODY_MAX = 262144
+# Movie/TV detail replies (credits, videos and inline ratings) can pass 256 KB; they are always checked.
+_REDACT_BODY_MAX_DETAIL = 4 * 1024 * 1024
 _REDACT_HINTS = ('KEY=', 'TOKEN=', 'AUTHORIZATION', 'API-KEY', 'PLEX-TOKEN')
 
 
@@ -578,7 +580,8 @@ def _redact_api_error_bodies(response):
                 or response.direct_passthrough or response.mimetype != 'application/json'):
             return response
         length = response.calculate_content_length()
-        if length is None or length > _REDACT_BODY_MAX:
+        cap = _REDACT_BODY_MAX_DETAIL if (request.endpoint or '') in _INLINE_RATINGS_ROUTES else _REDACT_BODY_MAX
+        if length is None or length > cap:
             return response
         body = response.get_data(as_text=True)
         upper = body.upper()
@@ -11179,7 +11182,9 @@ _INLINE_RATINGS_ROUTES = {
 
 @app.after_request
 def _detail_ratings_inline(response):
-    """Adds `ratings` (and `ratings_partial` / `ratings_skipped`) to a successful detail reply."""
+    """Adds `ratings` (and `ratings_partial` / `ratings_skipped`) to a successful detail reply.
+    Registered after the redaction backstop, so Flask (last registered runs first) adds the ratings before the
+    backstop checks the final body."""
     spec = _INLINE_RATINGS_ROUTES.get(request.endpoint or '')
     if not spec or response.status_code != 200 or not response.is_json or response.direct_passthrough:
         return response

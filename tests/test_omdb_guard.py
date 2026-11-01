@@ -247,3 +247,58 @@ def test_pool_queue_drops_oldest_warms_never_taps():
     assert w3.cancelled()
     gate.set()
     assert [f.result(timeout=2) for f in (t1, t2, t3, t4)] == ['t1', 't2', 't3', 't4']
+
+
+def _detail_chain(monkeypatch, ratings):
+    monkeypatch.setattr(app.main, 'inline_ratings', lambda *a, **k: (ratings, False, False))
+    with app.main.app.test_request_context('/api/tv/1396'):
+        from flask import jsonify, request
+        assert request.endpoint == 'tv_details'
+        resp = app.main.app.process_response(jsonify({'name': 'Breaking Bad', 'first_air_date': '2008-01-20'}))
+        return resp.get_data(as_text=True)
+
+
+def test_inline_ratings_run_before_the_redaction_backstop():
+    funcs = [f.__name__ for f in app.main.app.after_request_funcs[None]]
+    # Flask runs after_request handlers last-registered first: the ratings are added, then the backstop checks them.
+    assert funcs.index('_detail_ratings_inline') > funcs.index('_redact_api_error_bodies')
+
+
+def test_detail_reply_with_inline_ratings_passes_the_backstop_unchanged(monkeypatch):
+    import json
+    r = {'imdb': {'score': 8.0}, 'rotten_tomatoes_critic': None, 'rotten_tomatoes_audience': None, 'metacritic': None, 'tmdb': None}
+    monkeypatch.setattr(app.main, 'inline_ratings', lambda *a, **k: (r, False, False))
+    with app.main.app.test_request_context('/api/tv/1396'):
+        from flask import jsonify
+        after_inline = app.main._detail_ratings_inline(jsonify({'name': 'Breaking Bad', 'first_air_date': '2008-01-20'}))
+        before = after_inline.get_data()
+        out = app.main._redact_api_error_bodies(after_inline)
+        assert out.get_data() == before                   # byte for byte
+    assert json.loads(before)['ratings'] == r
+    assert _detail_chain(monkeypatch, r).strip() == before.decode().strip()   # the whole chain too
+
+
+def test_a_secret_in_inline_ratings_is_redacted_and_json_stays_valid(monkeypatch):
+    import json
+    body = _detail_chain(monkeypatch, {'imdb': {'score': 8.0, 'src': 'https://x/?apikey=SECRET123'}})
+    assert 'SECRET123' not in body
+    assert json.loads(body)['ratings']['imdb']['score'] == 8.0
+
+
+def test_large_detail_replies_are_still_checked(monkeypatch):
+    big = {'imdb': {'score': 8.0, 'src': '?apikey=SECRET123'}, 'pad': 'x' * (300 * 1024)}
+    assert 'SECRET123' not in _detail_chain(monkeypatch, big)
+
+
+def test_budget_write_happens_outside_the_lock(tmp_path, monkeypatch):
+    monkeypatch.setattr(omdb, '_BUDGET_PATH_OVERRIDE', str(tmp_path / 'b.db'))
+    held = []
+    real = omdb._budget_db
+    monkeypatch.setattr(omdb, '_budget_db', lambda fn: held.append(omdb._guard_lock.locked()) or real(fn))
+    omdb._reset_guard()
+    omdb._today_calls()
+    held.clear()
+    omdb.count_call()
+    assert held == [False]
+    assert omdb.BUDGET_DB_TIMEOUT_S <= 0.1
+    omdb._reset_guard()

@@ -245,13 +245,16 @@ def _budget_path() -> Optional[str]:
         return None
 
 
+BUDGET_DB_TIMEOUT_S = 0.1
+
+
 def _budget_db(fn):
     path = _budget_path()
     if not path:
         return None
     import sqlite3
     try:
-        conn = sqlite3.connect(path, timeout=2)
+        conn = sqlite3.connect(path, timeout=BUDGET_DB_TIMEOUT_S)
         try:
             conn.execute('CREATE TABLE IF NOT EXISTS omdb_budget (date TEXT PRIMARY KEY, calls INTEGER NOT NULL)')
             out = fn(conn)
@@ -278,11 +281,12 @@ def count_call() -> None:
         _day['calls'] += 1
         today, n = _day['date'], _day['calls']
 
-        def save(c):
-            c.execute('INSERT INTO omdb_budget (date, calls) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET calls = '
-                      'MAX(calls + 1, excluded.calls)', (today, n))
-            c.execute('DELETE FROM omdb_budget WHERE date < ?', ((datetime.strptime(today, '%Y-%m-%d') - timedelta(days=7)).strftime('%Y-%m-%d'),))
-        _budget_db(save)
+    # The write happens outside the lock (BUDGET_DB_TIMEOUT_S at most), so a busy DB never stalls other lookups.
+    def save(c):
+        c.execute('INSERT INTO omdb_budget (date, calls) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET calls = '
+                  'MAX(calls + 1, excluded.calls)', (today, n))
+        c.execute('DELETE FROM omdb_budget WHERE date < ?', ((datetime.strptime(today, '%Y-%m-%d') - timedelta(days=7)).strftime('%Y-%m-%d'),))
+    _budget_db(save)
 
 
 def warm_allowed(load_id: str, source: str = 'omdb') -> bool:
