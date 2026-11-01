@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const batch = vi.fn();
 vi.mock('@/services/searchApi', () => ({ batchCheckOwnership: (...a: unknown[]) => batch(...a) }));
-vi.mock('@/services/modalPrefetch', () => ({ scheduleWarm: () => () => {}, warmDetail: () => Promise.resolve() }));
+vi.mock('@/services/modalPrefetch', () => ({ scheduleWarm: () => () => {}, warmDetail: () => Promise.resolve(), startWarmLoad: () => {} }));
 
 import { HomeRails } from '@/components/home/Rails';
 import { cardOrb, plexOwned } from '@/components/home/railOwnership';

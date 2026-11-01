@@ -70,7 +70,8 @@ describe('details + ratings warmed together, in memory', () => {
   it('a warm-up fetches the title ratings the sheet will ask for', async () => {
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (u: string) => { calls.push(String(u)); return String(u).includes('/api/movie/') ? json({ title: 'Arrival', release_date: '2016-11-11' }) : json({}); }));
-    await warmDetail('movie', 5003, 329865, { images: false });
+    await warmDetail('movie', 5003, 329865, { images: false, ratings: true });
+    await new Promise((r) => setTimeout(r, 0));
     expect(calls.some((u) => u.includes('/api/movie/329865'))).toBe(true);
     expect(calls.some((u) => u.includes('/api/plex/ratings/5003'))).toBe(true);
     expect(calls.some((u) => u.includes('/api/ratings/Arrival?year=2016'))).toBe(true);

@@ -21,6 +21,23 @@ export function titleRatingsPath(title: string, year?: number | string | null): 
   if (year) params.set('year', String(year));
   return `/api/ratings/${encodeURIComponent(title)}?${params}`;
 }
+/** Background ratings warm-ups per Home load (every platform): the server counts them too, by WARM_HEADER, and
+ *  also stops them near its daily OMDb budget. A user's open is never counted or capped. */
+export const RATINGS_WARMS_PER_LOAD = 12;
+export const WARM_HEADER = 'X-Luma-Warm';
+let warmLoad = '';
+let ratingsWarms = 0;
+/** A new Home load: a fresh warm id and ratings count. */
+export function startWarmLoad(): void {
+  warmLoad = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  ratingsWarms = 0;
+}
+function takeRatingsWarm(): Record<string, string> | null {
+  if (ratingsWarms >= RATINGS_WARMS_PER_LOAD) return null;
+  if (!warmLoad) startWarmLoad();
+  ratingsWarms += 1;
+  return { [WARM_HEADER]: warmLoad };
+}
 function yearOf(d: unknown): number | null {
   const y = typeof d === 'string' ? Number(d.slice(0, 4)) : NaN;
   return Number.isFinite(y) && y > 0 ? y : null;
@@ -29,15 +46,16 @@ function yearOf(d: unknown): number | null {
 export const DETAIL_TTL_MS = 5 * 60 * 1000;
 const MAX_ENTRIES = 150;
 
-interface Cached { ok: boolean; status: number; body: string; type: string }
+interface Cached { ok: boolean; status: number; body: string; type: string; warm?: boolean }
 const cache = new Map<string, { at: number; p: Promise<Cached> }>();
 const preloaded = new Map<string, HTMLImageElement>();
 
-function load(url: string): Promise<Cached> {
+function load(url: string, warmHeaders?: Record<string, string>): Promise<Cached> {
   const hit = cache.get(url);
   if (hit && Date.now() - hit.at < DETAIL_TTL_MS) return hit.p;
-  const p = apiFetch(url).then(async (r) => ({
+  const p = apiFetch(url, warmHeaders ? { headers: warmHeaders } : undefined).then(async (r) => ({
     ok: r.ok, status: r.status, body: await r.text(), type: r.headers?.get?.('Content-Type') || 'application/json',
+    warm: !!warmHeaders,
   }));
   cache.set(url, { at: Date.now(), p });
   if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value as string);
@@ -49,7 +67,8 @@ function load(url: string): Promise<Cached> {
 /** apiFetch for the popup's read-only metadata, served from the shared cache. */
 export function detailFetch(url: string, init?: { signal?: AbortSignal }): Promise<Response> {
   const signal = init?.signal;
-  const res = load(url).then((c) => new Response(c.body, { status: c.status || 500, headers: { 'Content-Type': c.type } }));
+  // A warm-up the server skipped (quota guard) is no answer for an open: ask again as the open.
+  const res = load(url).then((c) => (c.warm && !c.ok ? (cache.delete(url), load(url)) : c)).then((c) => new Response(c.body, { status: c.status || 500, headers: { 'Content-Type': c.type } }));
   if (!signal) return res;
   if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
   return new Promise((resolve, reject) => {
@@ -60,9 +79,9 @@ export function detailFetch(url: string, init?: { signal?: AbortSignal }): Promi
   });
 }
 
-async function json(url: string): Promise<Record<string, unknown> | null> {
+async function json(url: string, warmHeaders?: Record<string, string>): Promise<Record<string, unknown> | null> {
   try {
-    const c = await load(url);
+    const c = await load(url, warmHeaders);
     return c.ok ? (JSON.parse(c.body) as Record<string, unknown>) : null;
   } catch {
     return null;
@@ -99,25 +118,37 @@ export function clearlogoPath(kind: 'movie' | 'tv', tmdbId: number): string {
 }
 
 /** Warm everything a movie/TV popup opened with these ids will need. */
+/** `ratings`: also warm the title ratings (background warm-ups: capped per load, flagged for the server's
+ *  budget guard); `open`: a user's open, which fetches them unflagged and uncapped. */
 export async function warmDetail(
-  kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number, opts: { images?: boolean } = {},
+  kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number, opts: { images?: boolean; ratings?: boolean; open?: boolean } = {},
 ): Promise<void> {
   if (!ratingKey && !tmdbId) return;
   const images = opts.images !== false;
   prefetchModalColors(kind, ratingKey, tmdbId);
   let tid = tmdbId;
   let plexBackdrop: string | null = null;
-  if (ratingKey && !tmdbId) {
-    const plex = await json(kind === 'movie' ? `/api/plex/movie/${ratingKey}` : `/api/plex/tv/${ratingKey}`);
-    if (plex) {
-      const parsed = kind === 'movie' ? parsePlexResponse(plex) : parsePlexTvResponse(plex);
+  // Owned titles: the sheet asks for ratings by the Plex title and year, so the warm-up does too.
+  let plexTitle: { title: string; year: number | null } | null = null;
+  const plexPath = ratingKey ? (kind === 'movie' ? `/api/plex/movie/${ratingKey}` : `/api/plex/tv/${ratingKey}`) : null;
+  const readPlex = (plex: Record<string, unknown> | null) => {
+    if (!plex) return null;
+    const parsed = kind === 'movie' ? parsePlexResponse(plex) : parsePlexTvResponse(plex);
+    if (parsed.title) plexTitle = { title: parsed.title, year: parsed.year ?? null };
+    return parsed;
+  };
+  let plexDone: Promise<unknown> = Promise.resolve();
+  if (plexPath && !tmdbId) {
+    const plex = await json(plexPath);
+    const parsed = readPlex(plex);
+    if (parsed && plex) {
       tid = (parsed.tmdbId as number | undefined) || (plex.tmdb_id as number | undefined) || undefined;
       plexBackdrop = parsed.backdropUrl || parsed.posterUrl || null;
     }
-  } else if (ratingKey) {
+  } else if (plexPath) {
     // Both ids (owned search results): warm Plex too, which runs the
     // server-side tmdb_id type check the popup waits on.
-    void json(kind === 'movie' ? `/api/plex/movie/${ratingKey}` : `/api/plex/tv/${ratingKey}`);
+    plexDone = json(plexPath).then(readPlex);
   }
   if (kind === 'movie' && ratingKey) void json(plexRatingsPath(ratingKey));
   const [tm, logo] = await Promise.all([
@@ -125,8 +156,19 @@ export async function warmDetail(
     tid ? json(clearlogoPath(kind, tid)) : Promise.resolve(null),
   ]);
   // Ratings with the details: the title-based ratings the sheet asks for (none in the minimal build).
-  const title = (tm?.title ?? tm?.name) as string | undefined;
-  if (title && !isMinimal()) void json(titleRatingsPath(title, yearOf(tm?.release_date ?? tm?.first_air_date)));
+  if ((opts.ratings || opts.open) && !isMinimal()) {
+    void plexDone.then(() => {
+      const named = plexTitle as { title: string; year: number | null } | null;
+      const title = named?.title ?? ((tm?.title ?? tm?.name) as string | undefined);
+      if (!title) return;
+      const year = named ? named.year : yearOf(tm?.release_date ?? tm?.first_air_date);
+      const url = titleRatingsPath(title, year);
+      if (opts.open) { void json(url); return; }
+      if (cache.has(url)) return;
+      const hdr = takeRatingsWarm();
+      if (hdr) void json(url, hdr);
+    });
+  }
   if (!images) return; // metadata only (rows further down the list)
   const path = tm?.backdrop_path as string | undefined;
   await Promise.all([
@@ -349,7 +391,7 @@ export async function openWhenReady(
   let timer = 0;
   try {
     await Promise.race([
-      warmDetail(kind, ratingKey, tmdbId).catch(() => {}),
+      warmDetail(kind, ratingKey, tmdbId, { open: true }).catch(() => {}),
       new Promise<void>((res) => { timer = window.setTimeout(res, OPEN_WAIT_MS); }),
     ]);
   } finally {
@@ -373,6 +415,8 @@ export function _resetModalPrefetch(): void {
   queue.length = 0;
   started.clear();
   groupCount.clear();
+  warmLoad = '';
+  ratingsWarms = 0;
   gen += 1;
   active = 0;
   pending = false;

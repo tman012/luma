@@ -101,7 +101,7 @@ def _lookup_one(item: Dict[str, Any], omdb_key: str) -> Dict[str, Any]:
         return empty
 
     try:
-        resp = requests.get('http://www.omdbapi.com/', params=params, timeout=5)
+        resp = requests.get('https://www.omdbapi.com/', params=params, timeout=5)
         if not resp.ok:
             return empty
         data = resp.json() or {}
@@ -236,7 +236,7 @@ def lookup_by_tmdb_id(
 
     try:
         o = requests.get(
-            "http://www.omdbapi.com/",
+            "https://www.omdbapi.com/",
             params={"apikey": omdb_key, "i": imdb_id},
             timeout=15,
         )

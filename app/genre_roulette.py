@@ -1090,7 +1090,7 @@ def _imdb_lookup(tmdb_id: int, tmdb_key: str,
         return {'r': None, 'v': None, 'at': today}
 
     try:
-        o = requests.get('http://www.omdbapi.com/',
+        o = requests.get('https://www.omdbapi.com/',
                          params={'apikey': omdb_key, 'i': imdb_id}, timeout=15)
         o.raise_for_status()
         body = o.json() or {}
