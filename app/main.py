@@ -10831,7 +10831,8 @@ def _omdb_title_ratings(title, year='', warm=None):
             return cached[1], 200
 
         from app import omdb as _omdb
-        if _omdb.negative_hit(cache_key):
+        # A not-found blocks everyone for NEG_TTL_S; a recent error only holds back warm-ups (a tap asks again).
+        if _omdb.negative_hit(cache_key, warm=bool(warm)):
             return {'error': 'Movie not found'}, 404
         # Query OMDB API (settings → env var fallback)
         omdb_key = _omdb.api_key()
@@ -10847,7 +10848,7 @@ def _omdb_title_ratings(title, year='', warm=None):
         try:
             response = requests.get(_omdb.OMDB_URL, params=params, timeout=5)
         except Exception:
-            _omdb.remember_miss(cache_key)
+            _omdb.remember_miss(cache_key, error=True)
             raise
 
         if response.ok:
@@ -10891,17 +10892,23 @@ def _omdb_title_ratings(title, year='', warm=None):
                     del _omdb_ratings_cache[oldest_key]
                 _omdb_ratings_cache[cache_key] = (now, ratings_data)
 
+                _omdb.forget_miss(cache_key)
                 return ratings_data, 200
-            else:
+            elif _omdb.is_not_found(data):
                 _omdb.remember_miss(cache_key)
                 return {'error': 'Movie not found'}, 404
+            else:
+                # Request limit reached, invalid key, or anything else that isn't OMDb's verdict on the title.
+                _omdb.remember_miss(cache_key, error=True)
+                return {'error': 'Failed to fetch ratings'}, 500
         else:
-            _omdb.remember_miss(cache_key)
+            _omdb.remember_miss(cache_key, error=True)
             return {'error': 'Failed to fetch ratings'}, 500
 
     except Exception as e:
+        # The exception text can hold the request URL (apikey included): never in the reply, redacted in the log.
         logger.error(f"Error fetching ratings from OMDB: {type(e).__name__}: {_redact_secrets(e)}")
-        return {'error': _public_error(e)}, 500
+        return {'error': 'Failed to fetch ratings'}, 500
 
 
 @app.route('/api/ratings/<title>')
@@ -11036,12 +11043,60 @@ _ratings_pool = None
 _ratings_pool_lock = threading.Lock()
 
 
+RATINGS_POOL_WORKERS = 8
+RATINGS_QUEUE_MAX = 64
+
+
+class _RatingsPool:
+    """The inline ratings workers with a bounded wait queue: when it is full the oldest queued warm-up is dropped
+    (its future is cancelled); a user's open is never dropped."""
+
+    def __init__(self, workers=RATINGS_POOL_WORKERS, max_queue=RATINGS_QUEUE_MAX):
+        import collections
+        self._q = collections.deque()
+        self._cv = threading.Condition()
+        self._max = max_queue
+        for i in range(workers):
+            threading.Thread(target=self._run, name=f'ratings-{i}', daemon=True).start()
+
+    def submit(self, fn, *args, warm=False):
+        from concurrent.futures import Future
+        fut = Future()
+        with self._cv:
+            while len(self._q) >= self._max:
+                idx = next((i for i, j in enumerate(self._q) if j[3]), None)
+                if idx is None:
+                    break                     # only taps queued: a tap always gets in
+                dropped = self._q[idx]
+                del self._q[idx]
+                dropped[0].cancel()
+            self._q.append((fut, fn, args, warm))
+            self._cv.notify()
+        return fut
+
+    def queued(self):
+        with self._cv:
+            return len(self._q)
+
+    def _run(self):
+        while True:
+            with self._cv:
+                while not self._q:
+                    self._cv.wait()
+                fut, fn, args, _ = self._q.popleft()
+            if not fut.set_running_or_notify_cancel():
+                continue
+            try:
+                fut.set_result(fn(*args))
+            except BaseException as e:      # noqa: BLE001 - delivered through the future
+                fut.set_exception(e)
+
+
 def _ratings_executor():
     global _ratings_pool
     with _ratings_pool_lock:
         if _ratings_pool is None:
-            from concurrent.futures import ThreadPoolExecutor
-            _ratings_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix='ratings')
+            _ratings_pool = _RatingsPool()
         return _ratings_pool
 
 
@@ -11059,7 +11114,16 @@ def _plex_ratings_cached(rating_key):
     return data
 
 
-def _rt_scores(title, year, media_type):
+def _rt_scores(title, year, media_type, warm=None):
+    # A background warm-up scrapes RT only when the answer isn't cached and the warm cap/budget allow it.
+    if warm:
+        try:
+            cached = rt_scraper._get_cached(f"{media_type}_{str(title).lower()}_{year}_1")
+        except Exception:
+            cached = None
+        from app import omdb as _omdb
+        if cached is None and not _omdb.warm_allowed(warm, source='rt'):
+            return None
     r = rt_scraper.get_reviews(title, year, 1, media_type) or {}
     return {'critic': r.get('critic_score'), 'audience': r.get('audience_score')} if r.get('success', True) else None
 
@@ -11074,10 +11138,10 @@ def inline_ratings(kind, title, year, rating_key=None, warm=None, budget=None):
     pool = _ratings_executor()
     jobs = {}
     if rating_key:
-        jobs['plex'] = pool.submit(_plex_ratings_cached, rating_key)
+        jobs['plex'] = pool.submit(_plex_ratings_cached, rating_key, warm=bool(warm))
     if title:
-        jobs['omdb'] = pool.submit(_omdb_title_ratings, title, str(year or ''), warm)
-        jobs['rt'] = pool.submit(_rt_scores, title, year, 'tv' if kind == 'tv' else 'movie')
+        jobs['omdb'] = pool.submit(_omdb_title_ratings, title, str(year or ''), warm, warm=bool(warm))
+        jobs['rt'] = pool.submit(_rt_scores, title, year, 'tv' if kind == 'tv' else 'movie', warm, warm=bool(warm))
     done, _ = wait(list(jobs.values()), timeout=RATINGS_BUDGET_S if budget is None else budget)
     partial = any(f not in done for f in jobs.values())
 

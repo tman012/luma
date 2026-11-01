@@ -142,12 +142,15 @@ def forget() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Quota protection for title lookups (/api/ratings): a negative cache for misses and errors, a daily call
-# budget that background warm-ups may only use up to WARM_BUDGET_SHARE of, and a per-load warm cap. All in
-# server memory.
+# Quota protection for title lookups (/api/ratings and inline detail ratings):
+# - a negative cache: a real OMDb "not found" for NEG_TTL_S; an error (network, 5xx, 429, bad key, request limit)
+#   for ERR_TTL_S and only for background warm-ups, so a user's open always asks again;
+# - a daily call budget (UTC date, persisted in the data dir) that warm-ups may only use up to WARM_BUDGET_SHARE of;
+# - a per-load / per-query warm cap, per source (OMDb and the RT scrape count separately).
 # ---------------------------------------------------------------------------
 
 NEG_TTL_S = 6 * 3600
+ERR_TTL_S = 90
 NEG_MAX = 5000
 DEFAULT_DAILY_QUOTA = 1000
 WARM_BUDGET_SHARE = 0.7
@@ -156,10 +159,11 @@ WARMS_PER_QUERY = 4                 # a search query's warm id is '<load>/<query
 WARM_LOADS_MAX = 500
 WARM_HEADER = 'X-Luma-Warm'
 
-_neg: Dict[str, float] = {}
+_neg: Dict[str, tuple] = {}          # key -> (at, ttl, is_error)
 _day = {'date': '', 'calls': 0}
 _warm_loads: Dict[str, int] = {}
 _guard_lock = threading.Lock()
+_BUDGET_PATH_OVERRIDE: Optional[str] = None
 
 
 def _now() -> float:
@@ -167,23 +171,36 @@ def _now() -> float:
     return time.time()
 
 
-def negative_hit(key: str) -> bool:
-    """True when this lookup missed or failed within NEG_TTL_S."""
+def is_not_found(body: Any) -> bool:
+    """OMDb's own verdict that the title doesn't exist (Response False, Error '... not found!')."""
+    return isinstance(body, dict) and body.get('Response') == 'False' and 'not found' in str(body.get('Error') or '').lower()
+
+
+def negative_hit(key: str, warm: bool = True) -> bool:
+    """True when this lookup should not be asked again yet: a not-found within NEG_TTL_S, or (warm-ups only) an
+    error within ERR_TTL_S."""
     with _guard_lock:
-        at = _neg.get(key)
-        if at is None:
+        hit = _neg.get(key)
+        if hit is None:
             return False
-        if _now() - at >= NEG_TTL_S:
+        at, ttl, err = hit
+        if _now() - at >= ttl:
             del _neg[key]
             return False
-        return True
+        return warm or not err
 
 
-def remember_miss(key: str) -> None:
+def remember_miss(key: str, error: bool = False) -> None:
+    """A not-found (NEG_TTL_S) or, with `error`, a failed ask (ERR_TTL_S; never blocks a user's open)."""
     with _guard_lock:
         if len(_neg) >= NEG_MAX:
-            del _neg[min(_neg, key=_neg.get)]
-        _neg[key] = _now()
+            del _neg[min(_neg, key=lambda k: _neg[k][0])]
+        _neg[key] = (_now(), ERR_TTL_S if error else NEG_TTL_S, error)
+
+
+def forget_miss(key: str) -> None:
+    with _guard_lock:
+        _neg.pop(key, None)
 
 
 def daily_quota() -> int:
@@ -207,10 +224,51 @@ def daily_quota() -> int:
     return n if n > 0 else DEFAULT_DAILY_QUOTA
 
 
+def _utc_today() -> str:
+    from datetime import timezone
+    return datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
+
+def _budget_path() -> Optional[str]:
+    """The budget DB (data dir / omdb_budget.db); None under pytest unless a test sets the override."""
+    if _BUDGET_PATH_OVERRIDE:
+        return _BUDGET_PATH_OVERRIDE
+    import os
+    if 'PYTEST_CURRENT_TEST' in os.environ:
+        return None
+    try:
+        from app.canon_index import _data_dir
+        d = _data_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        return str(d / 'omdb_budget.db')
+    except Exception:                  # noqa: BLE001
+        return None
+
+
+def _budget_db(fn):
+    path = _budget_path()
+    if not path:
+        return None
+    import sqlite3
+    try:
+        conn = sqlite3.connect(path, timeout=2)
+        try:
+            conn.execute('CREATE TABLE IF NOT EXISTS omdb_budget (date TEXT PRIMARY KEY, calls INTEGER NOT NULL)')
+            out = fn(conn)
+            conn.commit()
+            return out
+        finally:
+            conn.close()
+    except Exception as e:             # noqa: BLE001 - the budget falls back to memory
+        logger.warning('OMDb budget store unavailable: %s', type(e).__name__)
+        return None
+
+
 def _today_calls() -> int:
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = _utc_today()
     if _day['date'] != today:
-        _day['date'], _day['calls'] = today, 0
+        row = _budget_db(lambda c: c.execute('SELECT calls FROM omdb_budget WHERE date = ?', (today,)).fetchone())
+        _day['date'], _day['calls'] = today, int(row[0]) if row else 0
     return _day['calls']
 
 
@@ -218,20 +276,30 @@ def count_call() -> None:
     with _guard_lock:
         _today_calls()
         _day['calls'] += 1
+        today, n = _day['date'], _day['calls']
+
+        def save(c):
+            c.execute('INSERT INTO omdb_budget (date, calls) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET calls = '
+                      'MAX(calls + 1, excluded.calls)', (today, n))
+            c.execute('DELETE FROM omdb_budget WHERE date < ?', ((datetime.strptime(today, '%Y-%m-%d') - timedelta(days=7)).strftime('%Y-%m-%d'),))
+        _budget_db(save)
 
 
-def warm_allowed(load_id: str) -> bool:
-    """A background warm-up may call OMDb: under WARM_BUDGET_SHARE of today's quota and under WARMS_PER_LOAD
-    for its load. Counts the warm when allowed. User opens never go through this."""
+def warm_allowed(load_id: str, source: str = 'omdb') -> bool:
+    """A background warm-up may call `source`: under WARM_BUDGET_SHARE of today's OMDb quota and under
+    WARMS_PER_LOAD (WARMS_PER_QUERY for a search query) for its load, per source. Counts the warm when allowed.
+    User opens never go through this."""
     load, _, query = str(load_id).partition('/')
+    pre = '' if source == 'omdb' else f'{source}:'
+    load_k, query_k = pre + load, pre + str(load_id)
     with _guard_lock:
         if _today_calls() >= daily_quota() * WARM_BUDGET_SHARE:
             return False
-        if _warm_loads.get(load, 0) >= WARMS_PER_LOAD:
+        if _warm_loads.get(load_k, 0) >= WARMS_PER_LOAD:
             return False
-        if query and _warm_loads.get(load_id, 0) >= WARMS_PER_QUERY:
+        if query and _warm_loads.get(query_k, 0) >= WARMS_PER_QUERY:
             return False
-        for k in ([load, load_id] if query else [load]):
+        for k in ([load_k, query_k] if query else [load_k]):
             if k not in _warm_loads and len(_warm_loads) >= WARM_LOADS_MAX:
                 del _warm_loads[next(iter(_warm_loads))]
             _warm_loads[k] = _warm_loads.get(k, 0) + 1
