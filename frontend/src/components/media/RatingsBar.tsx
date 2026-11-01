@@ -14,9 +14,11 @@ interface RatingsBarProps {
   ratings: Ratings;
   size?: RatingsBarSize;
   style?: React.CSSProperties;
+  /** Each badge at 0.9 (default). Off when the container carries the dim (RatingsSettle). */
+  dim?: boolean;
 }
 
-export function RatingsBar({ ratings, size = 'md', style }: RatingsBarProps) {
+export function RatingsBar({ ratings, size = 'md', style, dim = true }: RatingsBarProps) {
   const items = buildRatingItems(ratings);
   if (items.length === 0) return null;
 
@@ -46,7 +48,7 @@ export function RatingsBar({ ratings, size = 'md', style }: RatingsBarProps) {
             display: 'flex',
             alignItems: 'center',
             gap: `${preset.itemGap}px`,
-            opacity: 0.9,
+            opacity: dim ? 0.9 : undefined,
           }}
         >
           <img
@@ -59,6 +61,9 @@ export function RatingsBar({ ratings, size = 'md', style }: RatingsBarProps) {
           <span
             style={{
               fontSize: `${preset.fontSize}px`,
+              // sm/lg (the sheets): the value line is exactly the icon height, so the bar is RATINGS_SLOT_SM / _LG tall
+              // (the reserved row).
+              ...(size === 'lg' || size === 'sm' ? { lineHeight: `${preset.iconHeight}px` } : {}),
               fontWeight: 600,
               color: '#fff',
             }}
@@ -75,3 +80,5 @@ export function RatingsBar({ ratings, size = 'md', style }: RatingsBarProps) {
 /** Height the sm bar takes (margin + icon row), reserved on the phone sheet
  *  while ratings are still loading so their arrival doesn't push content. */
 export const RATINGS_SLOT_SM = 12 + sizePresets.sm.iconHeight;
+/** Same for the lg bar (desktop sheets). */
+export const RATINGS_SLOT_LG = 14 + sizePresets.lg.iconHeight;

@@ -1,19 +1,38 @@
 import type { Ratings } from '@/utils/modalParsers';
-import { assetUrl } from '@/urlHelpers';
 
-/** Cache-bust version — bump when icon files change on disk */
-const V = '?v=3';
+import imdbLogo from '@/assets/ratings/imdb-logo.png?no-inline';
+import rtLogo from '@/assets/ratings/rotten-tomatoes-logo.png?no-inline';
+import rtSplat from '@/assets/ratings/rotten-tomatoes-splat.png?no-inline';
+import rtPopcornGood from '@/assets/ratings/rotten-tomatoes-popcorn-good.png?no-inline';
+import rtPopcornBad from '@/assets/ratings/rotten-tomatoes-popcorn-bad.png?no-inline';
+import metacriticLogo from '@/assets/ratings/metacritic.png?no-inline';
+import tmdbLogo from '@/assets/ratings/tmdb-logo-short.svg?no-inline';
+import { isDecoded, loadImage } from '@/loading/imageLoader';
 
-/** Static asset paths for rating service icons */
+/** Rating service icons, bundled with the app (content-hashed /assets URLs). */
 export const RATING_ICONS = {
-  imdb: assetUrl(`/static/images/imdb-logo.png${V}`),
-  rtCriticFresh: assetUrl(`/static/images/rotten-tomatoes-logo.png${V}`),
-  rtCriticRotten: assetUrl(`/static/images/rotten-tomatoes-splat.png${V}`),
-  rtAudienceGood: assetUrl(`/static/images/rotten-tomatoes-popcorn-good.png${V}`),
-  rtAudienceBad: assetUrl(`/static/images/rotten-tomatoes-popcorn-bad.png${V}`),
-  metacritic: assetUrl(`/static/images/metacritic.png${V}`),
-  tmdb: assetUrl(`/static/images/tmdb-logo-short.svg${V}`),
+  imdb: imdbLogo,
+  rtCriticFresh: rtLogo,
+  rtCriticRotten: rtSplat,
+  rtAudienceGood: rtPopcornGood,
+  rtAudienceBad: rtPopcornBad,
+  metacritic: metacriticLogo,
+  tmdb: tmdbLogo,
 } as const;
+
+/** Decodes one rating icon through the image loader (once per session, kept in memory). */
+export function decodeRatingIcon(url: string): Promise<void> {
+  return loadImage(url);
+}
+
+export function ratingIconDecoded(url: string): boolean {
+  return isDecoded(url);
+}
+
+/** Boot: decode every rating icon ahead of the first sheet. */
+export function preloadRatingIcons(): Promise<void> {
+  return Promise.all(Object.values(RATING_ICONS).map(decodeRatingIcon)).then(() => {});
+}
 
 /** Width / height of each icon file, so the bar can size every icon before it
  *  loads (no layout shift when the files arrive). */

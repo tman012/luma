@@ -27,21 +27,35 @@ export const img = (p: string | null | undefined) => tmdbImg(p);
  *  `src` stays the URL the server sent, so 1x screens load exactly what they did before. Null when the URL is not a
  *  sized TMDb or Plex image. */
 const TMDB_STEPS: Record<string, string[]> = { w342: ['w342', 'w500', 'w780'], w300: ['w300', 'w780', 'w1280'], w780: ['w780', 'w1280'] };
-export function cardSrcSet(src: string | null | undefined, kind: 'poster' | 'wide' = 'poster'): string | undefined {
+export const CARD_SIZES = { poster: 'clamp(112px, 30vw, 160px)', wide: 'clamp(240px, 72vw, 320px)', watchlist: '116px' } as const;
+export type CardKind = keyof typeof CARD_SIZES;
+/** Highest density a card fetches: a 3x screen gets the 2x candidate (sharp, a fraction of the bytes). */
+export const CARD_MAX_DENSITY = 2;
+
+/** Candidates up to the first one that covers the card's largest box at CARD_MAX_DENSITY. */
+function capWidths(widths: number[], kind: CardKind): number[] {
+  const box = Math.max(...(CARD_SIZES[kind].match(/\d+(?=px)/g) ?? ['0']).map(Number));
+  const need = box * CARD_MAX_DENSITY;
+  const i = widths.findIndex(w => w >= need);
+  return i < 0 ? widths : widths.slice(0, i + 1);
+}
+
+export function cardSrcSet(src: string | null | undefined, kind: CardKind = 'poster'): string | undefined {
   if (!src) return undefined;
   const t = /([?&]size=|\/t\/p\/)(w\d+)(?=[&/]|$)/.exec(src);
   if (t) {
     const steps = TMDB_STEPS[t[2]!]; if (!steps) return undefined;
-    return steps.map(w => `${src.replace(t[0], t[1] + w)} ${w.slice(1)}w`).join(', ');
+    const keep = new Set(capWidths(steps.map(w => Number(w.slice(1))), kind));
+    return steps.filter(w => keep.has(Number(w.slice(1)))).map(w => `${src.replace(t[0], t[1] + w)} ${w.slice(1)}w`).join(', ');
   }
   const p = /\/api\/img\/plex\?[^#]*[?&]w=(\d+)/.exec(src);
   if (p) {
     const base = Number(p[1]); const steps = kind === 'wide' ? [base, base * 2, Math.round(base * 2.75)] : [base, 500, 780];
-    return [...new Set(steps)].filter(w => w >= base).map(w => `${src.replace(/([?&])w=\d+/, `$1w=${w}`)} ${w}w`).join(', ');
+    const widths = capWidths([...new Set(steps)].filter(w => w >= base), kind);
+    return widths.map(w => `${src.replace(/([?&])w=\d+/, `$1w=${w}`)} ${w}w`).join(', ');
   }
   return undefined;
 }
-export const CARD_SIZES = { poster: 'clamp(112px, 30vw, 160px)', wide: 'clamp(240px, 72vw, 320px)', watchlist: '116px' } as const;
 
 export async function fetchHome(): Promise<HomeData> {
   const res = await apiFetch('/api/home');

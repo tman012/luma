@@ -43,15 +43,15 @@ describe('shared TV ratings hook', () => {
 describe('both TV layouts use it; the phone sheet renders the bar', () => {
   it('ExpandedLayout imports the shared hook (no private copy)', () => {
     const s = read('components/media/TvDetailModal/ExpandedLayout.tsx');
-    expect(s).toContain("import { useImdbRatings } from '@/hooks/useImdbRatings';");
+    expect(s).toContain("import { useImdbRatingsState, ratingsDone } from '@/hooks/useImdbRatings';");
     expect(s).not.toMatch(/function useImdbRatings\(/);
   });
   it('CompactLayout: RatingsBar sm in the reserved slot, after the meta line and before the actions (as the movie sheet)', () => {
     const s = read('components/media/TvDetailModal/CompactLayout.tsx');
     expect(s).toContain("useImdbRatingsState(show?.title, show?.year, show?.ratings)");
-    const slot = s.indexOf("<div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>");
+    const slot = s.indexOf('<RatingsSettle settle={ratingsSettle} size="sm" reserve={reserveRatings ? RATINGS_SLOT_SM : 0} />');   // v336: the settled row
     expect(slot).toBeGreaterThan(0);
-    expect(s.slice(slot, slot + 200)).toContain('{ratings && <RatingsBar ratings={ratings} size="sm" />}');
+    expect(s).toContain('useRatingsSettle(ratingsState.ratings');
     expect(s.lastIndexOf('metaItems.map', slot)).toBeGreaterThan(0);
     expect(s.indexOf('<div data-modal-actions>', slot)).toBeGreaterThan(slot);
     expect(s).toContain('if (composed && (ratingsLoading || hasRatings)) setReserveRatings(true);');

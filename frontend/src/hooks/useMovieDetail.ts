@@ -27,6 +27,8 @@ interface UseMovieDetailResult {
   ratings: Ratings | null;
   loading: boolean;
   ratingsLoading: boolean;
+  /** Every ratings source for this title has answered (or failed), the RT fill included. */
+  ratingsSettled: boolean;
   error: boolean;
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
@@ -47,6 +49,7 @@ export function useMovieDetail(
   const [ratings, setRatings] = useState<Ratings | null>(null);
   const [loading, setLoading] = useState(true);
   const [ratingsLoading, setRatingsLoading] = useState(true);
+  const [ratingsSettled, setRatingsSettled] = useState(false);
   const [error, setError] = useState(false);
   const [trailerKey, setTrailerKey] = useState<string | null | undefined>(undefined);
 
@@ -180,6 +183,7 @@ export function useMovieDetail(
         if (e?.name !== 'AbortError' && !cancelled) {
           setError(true);
           setRatingsLoading(false); // Don't block modal visibility on error
+          setRatingsSettled(true);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -239,11 +243,13 @@ export function useMovieDetail(
     if (inline !== undefined) {
       setRatings(hasAnyRating(inline) ? inline : null);
       setRatingsLoading(false);
+      setRatingsSettled(true);
       return;
     }
 
     const controller = new AbortController();
     let cancelled = false;
+    setRatingsSettled(false);
 
     async function fetchAllRatings() {
       // Fire Plex + OMDb in parallel
@@ -262,13 +268,9 @@ export function useMovieDetail(
         .then((d) => (d?.error ? null : d))
         .catch(() => null);
 
-      const [plexRaw, omdb] = await Promise.all([plexPromise, omdbPromise]);
-      if (cancelled) return;
-
-      const plex = plexRaw as (Ratings & { tmdb?: { score: number | null } }) | null;
-
+      type PlexRatings = (Ratings & { tmdb?: { score: number | null } }) | null;
       // Merge: Plex takes priority, OMDb fills gaps
-      const merged: Ratings = {
+      const mergeOf = (plex: PlexRatings, omdb: Record<string, unknown> | null): Ratings => ({
         imdb:
           plex?.imdb?.score != null
             ? plex.imdb
@@ -287,7 +289,15 @@ export function useMovieDetail(
             : (omdb?.metacritic as Ratings['metacritic']) ?? null,
         // Never surface TMDb vote_average as a rating badge.
         tmdb: null,
-      };
+      });
+      // Plex answers first (local): put its scores in hand right away, so a slow OMDb never holds them back
+      // (the sheet's settled row decides when they show, see useRatingsSettle).
+      plexPromise.then((p) => {
+        if (!cancelled && p) setRatings(mergeOf(p as unknown as PlexRatings, null));
+      });
+      const [plexRaw, omdb] = await Promise.all([plexPromise, omdbPromise]);
+      if (cancelled) return;
+      const merged = mergeOf(plexRaw as PlexRatings, omdb);
 
       setRatings(merged);
       setRatingsLoading(false);
@@ -314,7 +324,10 @@ export function useMovieDetail(
               return updated;
             });
           })
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => { if (!cancelled) setRatingsSettled(true); });
+      } else {
+        setRatingsSettled(true);
       }
     }
 
@@ -428,6 +441,7 @@ export function useMovieDetail(
     ratings,
     loading: loading || (!colorsSettled && !error),
     ratingsLoading,
+    ratingsSettled,
     error,
     trailerKey,
     ultraBlurColors,

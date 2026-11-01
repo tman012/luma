@@ -16,7 +16,10 @@ import {
 import { TrailerModal } from '@/components/media/TrailerModal';
 import { UltraBlurOverlay } from '@/components/media/UltraBlurOverlay';
 import { mergeRatings } from './effectiveRatings';
-import { RatingsBar } from '@/components/media/RatingsBar';
+import { RATINGS_SLOT_LG } from '@/components/media/RatingsBar';
+import { ratingsExpectedAtTap } from '@/components/media/sheetRows';
+import { useRatingsSettle } from '@/hooks/useRatingsSettle';
+import { RatingsSettle } from '@/components/media/RatingsSettle';
 import { PlaybackModal } from '@/components/media/PlaybackModal';
 import { FullPlotModal } from './FullPlotModal';
 import {
@@ -397,6 +400,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
 
   // Effective ratings: Plex ratings augmented with RT scores from reviews (shared with the phone layout)
   const effectiveRatings = useMemo<Ratings | null>(() => mergeRatings(ratings, reviewData), [ratings, reviewData]);
+  // ONE settled row, faded in once; the Info shelf's later reviews don't add badges to it for this open.
+  const ratingsSettle = useRatingsSettle(effectiveRatings, !!detail && !props.ratingsLoading && props.ratingsSettled !== false, props.openKey, !!detail);
+  const ratingsRow = useRef(ratingsExpectedAtTap(true)).current || !!ratingsSettle.ratings;
 
 
   // ---------------------------------------------------------------------------
@@ -976,7 +982,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                         fontSize: '26px',
                         fontWeight: 500,
                         color: 'rgba(255,255,255,0.85)',
-                        marginBottom: effectiveRatings ? '12px' : '20px',
+                        marginBottom: ratingsRow ? '12px' : '20px',
                         textShadow: '0 1px 4px rgba(0,0,0,0.5)',
                       }}
                     >
@@ -990,10 +996,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   )}
 
                   {/* Ratings */}
-                  {effectiveRatings && (
-                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '18px' }}>
-                      <RatingsBar ratings={effectiveRatings} size="lg" />
-                    </div>
+                  {ratingsRow && (
+                    <RatingsSettle settle={ratingsSettle} size="lg" reserve={RATINGS_SLOT_LG}
+                      style={{ display: 'flex', justifyContent: 'center', marginBottom: '18px' }} />
                   )}
 
                   {/* Plot — full text, wide */}

@@ -33,9 +33,10 @@ import type { PlexSeason } from '@/services/playbackApi';
 import { posterUrl, finalBackdropUrl } from '@/utils/image';
 import { useSheetHero, HERO_FADE } from '@/hooks/useSheetBackdrop';
 import { reducedMotion } from '@/theme/motion';
-import { RatingsBar, RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
-import { useImdbRatingsState } from '@/hooks/useImdbRatings';
-import { buildRatingItems } from '@/utils/ratingIcons';
+import { RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
+import { useImdbRatingsState, ratingsDone } from '@/hooks/useImdbRatings';
+import { useRatingsSettle } from '@/hooks/useRatingsSettle';
+import { RatingsSettle } from '@/components/media/RatingsSettle';
 import type { TvModalViewProps } from './types';
 import { useAuth } from '@/contexts/AuthContext';
 import { seasonTitle, seasonEyebrow, seasonShortLabel, sourcesTargetName } from './seasonLabels';
@@ -225,8 +226,11 @@ export function CompactLayout(props: TvModalViewProps) {
   }, [composed]);
   // Ratings (shared with ExpandedLayout) arrive after the details: as on the movie
   // sheet, keep their row reserved once the sheet shows so nothing below moves.
-  const { ratings, loading: ratingsLoading } = useImdbRatingsState(show?.title, show?.year, show?.ratings);
-  const hasRatings = !!ratings && buildRatingItems(ratings).length > 0;
+  const ratingsState = useImdbRatingsState(show?.title, show?.year, show?.ratings);
+  const ratingsLoading = ratingsState.loading;
+  // The row settles once and fades in together (useRatingsSettle); a later answer is dropped for this open.
+  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey, !!show);
+  const hasRatings = !!ratingsSettle.ratings;
     // Known at tap time: outside minimal builds the ratings row has a source (OMDb/RT); the seed reserves it and the
   // row keeps that box, so a late ratings fetch never moves the rows below.
   const ratingsExpected = useRef(ratingsExpectedAtTap(false)).current;
@@ -704,9 +708,7 @@ export function CompactLayout(props: TvModalViewProps) {
                     )}
 
                     {/* Ratings bar — centered icons (same slot as the movie sheet) */}
-                    <div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>
-                      {ratings && <RatingsBar ratings={ratings} size="sm" />}
-                    </div>
+                    <RatingsSettle settle={ratingsSettle} size="sm" reserve={reserveRatings ? RATINGS_SLOT_SM : 0} />
 
                     {activeSeasonData ? (
                       <div style={{ marginTop: '10px' }}>

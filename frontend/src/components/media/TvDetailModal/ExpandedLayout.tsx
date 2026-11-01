@@ -16,8 +16,11 @@ import {
   autoSearchSeason,
 } from '@/services/sonarrApi';
 import { UltraBlurOverlay } from '@/components/media/UltraBlurOverlay';
-import { RatingsBar } from '@/components/media/RatingsBar';
-import { useImdbRatings } from '@/hooks/useImdbRatings';
+import { RATINGS_SLOT_LG } from '@/components/media/RatingsBar';
+import { useImdbRatingsState, ratingsDone } from '@/hooks/useImdbRatings';
+import { ratingsExpectedAtTap } from '@/components/media/sheetRows';
+import { useRatingsSettle } from '@/hooks/useRatingsSettle';
+import { RatingsSettle } from '@/components/media/RatingsSettle';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { TOKENS } from './expandedLayoutTokens';
 import { useTabletPerf } from '@/hooks/useTabletPerf';
@@ -44,6 +47,12 @@ import { EpisodeMark, LumaMonitorContext, SearchMark, SeasonMark, SeriesMark, us
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** The season view's ratings row key: the show's own id and the season number (a season switch, or a show
+ *  re-matched to another id, is a new row). */
+function seasonRatingsKey(show: { tmdbId?: number | null; ratingKey?: number | null; title: string }, season: { season_number: number }): string {
+  return `${show.tmdbId ?? show.ratingKey ?? show.title}:${season.season_number}`;
+}
 
 function episodeKey(season: number, episode: number): string {
   return `s${season}e${episode}`;
@@ -793,7 +802,12 @@ function SeasonDetailModal({
   if (show.contentRating) metaItems.push(show.contentRating);
 
   // Season rating — IMDb via OMDb (never TMDb vote_average)
-  const effectiveRatings = useImdbRatings(show.title, show.year, show.ratings);
+  const seasonRatingsState = useImdbRatingsState(show.title, show.year, show.ratings);
+  // Keyed by the show and the season's own id: a season switch is a new row, never the previous season's.
+  const seasonRatings = useRatingsSettle(seasonRatingsState.ratings, ratingsDone(seasonRatingsState, show.title),
+    seasonRatingsKey(show, season));
+  // The row keeps its height while a source is out; it only goes when the settled answer is empty.
+  const seasonRatingsRow = !seasonRatings.shown || !!seasonRatings.ratings;
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -963,7 +977,7 @@ function SeasonDetailModal({
                     gap: t.meta.gap, flexWrap: 'wrap',
                     fontSize: t.meta.fontSize, fontWeight: 500,
                     color: 'rgba(255,255,255,0.85)',
-                    marginBottom: effectiveRatings ? '12px' : '20px',
+                    marginBottom: seasonRatingsRow ? '12px' : '20px',
                     textShadow: '0 1px 4px rgba(0,0,0,0.5)',
                   }}>
                     {metaItems.map((item, i) => (
@@ -984,11 +998,8 @@ function SeasonDetailModal({
                 </div>
 
                 {/* Ratings */}
-                {effectiveRatings && (
-                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '18px' }}>
-                    <RatingsBar ratings={effectiveRatings} size="lg" />
-                  </div>
-                )}
+                <RatingsSettle settle={seasonRatings} size="lg" reserve={seasonRatingsRow ? RATINGS_SLOT_LG : 0}
+                  style={{ display: 'flex', justifyContent: 'center', marginBottom: seasonRatingsRow ? '18px' : 0 }} />
 
                 {/* Season plot */}
                 {season.overview && (
@@ -1192,7 +1203,10 @@ export function ExpandedLayout(props: TvModalViewProps) {
   const logoRef = useRef<HTMLDivElement>(null);
 
   // Effective ratings — IMDb via OMDb (never TMDb vote_average)
-  const effectiveRatings = useImdbRatings(show?.title, show?.year, show?.ratings);
+  const ratingsState = useImdbRatingsState(show?.title, show?.year, show?.ratings);
+  // ONE settled row, faded in once (useRatingsSettle); a later answer is dropped for this open.
+  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey, !!show);
+  const ratingsRow = useRef(ratingsExpectedAtTap(false)).current || !!ratingsSettle.ratings;
 
   // Trigger reviews fetch when detail loads
   useEffect(() => {
@@ -1588,7 +1602,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                               fontSize: t.meta.fontSize,
                               fontWeight: 500,
                               color: 'rgba(255,255,255,0.85)',
-                              marginBottom: effectiveRatings ? '12px' : '20px',
+                              marginBottom: ratingsRow ? '12px' : '20px',
                               textShadow: '0 1px 4px rgba(0,0,0,0.5)',
                             }}>
                               {metaItems.map((item, i) => (
@@ -1604,10 +1618,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
                           </div>
 
                           {/* Ratings */}
-                          {effectiveRatings && (
-                            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '18px' }}>
-                              <RatingsBar ratings={effectiveRatings} size="lg" />
-                            </div>
+                          {ratingsRow && (
+                            <RatingsSettle settle={ratingsSettle} size="lg" reserve={RATINGS_SLOT_LG}
+                              style={{ display: 'flex', justifyContent: 'center', marginBottom: '18px' }} />
                           )}
 
                           {/* Plot */}

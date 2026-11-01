@@ -1,3 +1,4 @@
+import { _resetImageLoader, loadImage } from '@/loading/imageLoader';
 /** First open like the second: the detail popup's metadata (Plex and TMDb
  * detail, the clearlogo lookup) is fetched through a short-lived shared cache,
  * and a card hover, focus or tap warms it, resolves the final backdrop and
@@ -65,7 +66,6 @@ const MAX_ENTRIES = 150;
 
 interface Cached { ok: boolean; status: number; body: string; type: string; warm?: boolean }
 const cache = new Map<string, { at: number; p: Promise<Cached> }>();
-const preloaded = new Map<string, HTMLImageElement>();
 
 function load(url: string, warmHeaders?: Record<string, string>): Promise<Cached> {
   const hit = cache.get(url);
@@ -79,6 +79,11 @@ function load(url: string, warmHeaders?: Record<string, string>): Promise<Cached
   // Errors aren't kept: the next open retries.
   p.then((c) => { if (!c.ok) cache.delete(url); }, () => cache.delete(url));
   return p;
+}
+
+/** Drops every cached detail/ratings answer (in memory), e.g. after Fix Match moved an item to another title. */
+export function invalidateDetails(): void {
+  cache.clear();
 }
 
 /** apiFetch for the popup's read-only metadata, served from the shared cache. */
@@ -105,29 +110,9 @@ async function json(url: string, warmHeaders?: Record<string, string>): Promise<
   }
 }
 
-/** Load and decode an image (kept referenced); resolves when ready or failed. */
-const loading = new Map<string, Promise<void>>();
+/** Load and decode an image through the app's memory-only image loader; resolves when ready or failed. */
 export function preloadImage(url: string | null | undefined): Promise<void> {
-  if (!url || typeof Image === 'undefined') return Promise.resolve();
-  const hit = loading.get(url);
-  if (hit) return hit;
-  const img = new Image();
-  img.decoding = 'async';
-  const p = new Promise<void>((resolve) => {
-    img.onload = () => {
-      const d = typeof img.decode === 'function' ? img.decode() : Promise.resolve();
-      d.then(() => resolve(), () => resolve());
-    };
-    img.onerror = () => { loading.delete(url); resolve(); };
-  });
-  img.src = url;
-  preloaded.set(url, img);
-  loading.set(url, p);
-  if (preloaded.size > MAX_ENTRIES) {
-    const k = preloaded.keys().next().value as string;
-    preloaded.delete(k); loading.delete(k);
-  }
-  return p;
+  return loadImage(url);
 }
 
 export function clearlogoPath(kind: 'movie' | 'tv', tmdbId: number): string {
@@ -430,8 +415,7 @@ export async function openWhenReady(
 
 export function _resetModalPrefetch(): void {
   cache.clear();
-  preloaded.clear();
-  loading.clear();
+  _resetImageLoader();
   queue.length = 0;
   started.clear();
   groupCount.clear();
