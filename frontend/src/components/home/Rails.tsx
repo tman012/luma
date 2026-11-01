@@ -33,6 +33,9 @@ export function warmCard(c: Card): Promise<void> {
   return warmDetail(kind, ratingKey, tmdbId).catch(() => {});
 }
 
+/** Home's background warm-ups share one cap where the link can't be checked (UNKNOWN_LINK_CAP). */
+export const HOME_WARM_GROUP = 'home';
+
 /** One warm-up per title (the same title in two rails shares it). */
 export function warmKey(c: Card): string {
   const { kind, ratingKey, tmdbId } = cardIds(c);
@@ -51,7 +54,7 @@ function useWarmWhenVisible(ref: React.RefObject<HTMLElement | null>, card: Card
     const io = new IntersectionObserver((entries) => {
       const e = entries[entries.length - 1];
       cancel();
-      cancel = e?.isIntersecting ? scheduleWarm(warmKey(card), () => warmCard(card)) : () => {};
+      cancel = e?.isIntersecting ? scheduleWarm(warmKey(card), () => warmCard(card), HOME_WARM_GROUP) : () => {};
     }, { rootMargin: '150px' });
     io.observe(el);
     return () => { io.disconnect(); cancel(); };

@@ -25,6 +25,7 @@ import {
   getPosterUrl,
   getProfileUrl,
   warmResult,
+  openResult,
   getTitle,
   getYear,
   TMDB_BUSY_TEXT,
@@ -623,7 +624,8 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
       onAdded={() => { const id = (wlAdd.tmdb_id || wlAdd.id)!; setWlIds(p => new Set([...(p ?? []), id])); setWlAdd(null); }} />
   ) : null;
 
-  const handleResultClick = (item: SearchMovie) => {
+  // Same open as a Home card tap (openWhenReady through openResult).
+  const handleResultClick = (item: SearchMovie, el?: HTMLElement | null) => {
     const rk = item.rating_key;
     const tmdbId = item.tmdb_id || item.id;
     const opts = {
@@ -633,11 +635,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
       onPersonSearch: handlePersonSearch,
     };
     if (!opts.ratingKey && !opts.tmdbId) return;
-    if (item.media_type === 'tv') {
-      openTv(opts);
-    } else {
-      openMovie(opts);
-    }
+    void openResult(item, el, () => { if (item.media_type === 'tv') openTv(opts); else openMovie(opts); });
   };
 
   // ---------------------------------------------------------------------------
@@ -876,11 +874,11 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                   <button
                     key={`suggestion-${i}`}
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
                       if (isPerson) {
                         handlePersonClick(person!);
                       } else {
-                        handleResultClick(media!);
+                        handleResultClick(media!, e.currentTarget);
                       }
                     }}
                     onPointerDown={() => { if (media) warmResult(media); }}
