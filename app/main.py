@@ -96,10 +96,26 @@ logger = logging.getLogger(__name__)
 _SECRET_QS = re.compile(r'((?:api_?key|access_token|token|apikey|passkey)=)[^&\s\'"]+', re.I)
 
 
+_SECRET_AUTH = re.compile(r'((?:authorization|x-plex-token|x-api-key)[\'"]?\s*[:=]\s*[\'"]?(?:bearer\s+|basic\s+)?)[^\s\'",&}]+', re.I)
+
+
 def _redact_secrets(value) -> str:
     """Text for a log line with credential query params masked (requests puts
     the full URL, api_key included, in HTTPError messages)."""
-    return _SECRET_QS.sub(r'\1***', str(value))
+    return _SECRET_AUTH.sub(r'\1***', _SECRET_QS.sub(r'\1***', str(value)))
+
+
+_PUBLIC_ERROR = 'Something went wrong'
+
+
+def _public_error(exc, message: str = _PUBLIC_ERROR) -> str:
+    """Fixed text for an API error body. The exception detail (secrets redacted)
+    goes to the server log only, never to the client."""
+    try:
+        logger.warning("API error (%s): %s", type(exc).__name__, _redact_secrets(exc))
+    except Exception:
+        pass
+    return message
 
 
 class _RedactSecretsFilter(logging.Filter):
@@ -543,6 +559,29 @@ def _prefix_image_urls(response):
     except ValueError:
         return response
     response.set_data(json.dumps(_with_base_img(payload, base), separators=(',', ':')))
+    return response
+
+
+@app.after_request
+def _redact_api_error_bodies(response):
+    """Backstop: an /api error reply never carries a credential, whatever text a
+    helper put in it (HTTP >= 400, or a JSON body with ok/success false)."""
+    try:
+        if (not request.path.startswith('/api/') or response.is_streamed
+                or response.mimetype != 'application/json'):
+            return response
+        body = response.get_data(as_text=True)
+        if len(body) > 262144:
+            return response
+        if response.status_code < 400:
+            if '"ok": false' not in body and '"success": false' not in body \
+                    and '"ok":false' not in body and '"success":false' not in body:
+                return response
+        red = _redact_secrets(body)
+        if red != body:
+            response.set_data(red)
+    except Exception:
+        pass
     return response
 
 
@@ -1916,7 +1955,7 @@ def get_radarr_quality_profiles():
         return jsonify(profiles if profiles else [])
     except Exception as e:
         logger.error(f"Error fetching Radarr quality profiles: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/radarr/upgrade-profiles', methods=['GET'])
 def get_radarr_upgrade_profiles():
@@ -1934,7 +1973,7 @@ def get_radarr_upgrade_profiles():
         return jsonify([{'id': p['id'], 'name': p['name']} for p in (profiles or [])])
     except Exception as e:
         logger.error(f"Error fetching Radarr upgrade profiles: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/radarr/root-folders', methods=['GET'])
 def get_radarr_root_folders():
@@ -1947,7 +1986,7 @@ def get_radarr_root_folders():
         return jsonify(folders if folders else [])
     except Exception as e:
         logger.error(f"Error fetching Radarr root folders: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 _radarr_wl_cache: Dict[str, tuple] = {}  # key → (timestamp, data)
 _RADARR_WL_TTL = 120  # 2 minutes
@@ -2177,7 +2216,7 @@ def radarr_movie_releases():
         logger.error(f"Error searching Radarr releases: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 def _indexer_viewer_denied():
     """None when this request may make Luma search trackers or indexers;
@@ -2344,7 +2383,7 @@ def indexer_browse():
         logger.error(f"Error in indexer_browse: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # In-memory cache for raw "View all results" indexer searches.
@@ -2735,7 +2774,7 @@ def tmdb_match_search():
         logger.error(f"Error in tmdb_match_search: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # Module-level caches for /api/indexer/latest.
@@ -3199,7 +3238,7 @@ def indexer_latest():
         logger.error(f"Error in indexer_latest: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/indexer/grab', methods=['POST'])
@@ -3436,7 +3475,7 @@ def indexer_grab():
         logger.error(f"Error in indexer_grab: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/radarr/movie/grab', methods=['POST'])
@@ -3484,7 +3523,7 @@ def radarr_movie_grab():
 
     except Exception as e:
         logger.error(f"Error grabbing release via Radarr: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 # Cache qBit torrent data to avoid hammering qBit on rapid 1s polls
 import threading
@@ -3809,7 +3848,7 @@ def get_watchlist():
         logger.error(f"Error fetching Radarr watchlist: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 _tv_watchlist_cache = {'ts': 0.0, 'data': None}
 _TV_WATCHLIST_TTL = 120  # 2 minutes — matches the Sonarr watchlist-IDs cache
@@ -3898,7 +3937,7 @@ def get_tv_watchlist():
 
     except Exception as e:
         logger.error(f"Error fetching Sonarr TV watchlist: {e}")
-        return jsonify({'enabled': True, 'series': [], 'error': str(e)}), 200
+        return jsonify({'enabled': True, 'series': [], 'error': _public_error(e)}), 200
 
 
 @app.route('/api/canon/build', methods=['POST'])
@@ -3913,7 +3952,7 @@ def canon_build():
         return jsonify(canon_index.build_index(api_key, force=force))
     except Exception as e:
         logger.error(f'Canon build failed: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/canon')
@@ -3954,7 +3993,7 @@ def movie_night_preview():
         return jsonify(movie_night.preview())
     except Exception as e:
         logger.error(f'Movie Night preview failed: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/movie-night/status')
@@ -4015,7 +4054,7 @@ def taste_pending():
         })
     except Exception as e:
         logger.error(f'Taste pending failed: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/taste/film/<int:tmdb_id>')
@@ -4043,7 +4082,7 @@ def taste_film(tmdb_id):
         return jsonify(payload)
     except Exception as e:
         logger.error(f'Taste film failed: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/taste/rate', methods=['POST'])
@@ -4073,7 +4112,7 @@ def taste_rate():
         return jsonify(res)
     except Exception as e:
         logger.error(f'Taste rate failed: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/taste/grab', methods=['POST'])
@@ -4091,7 +4130,7 @@ def taste_grab():
             account_id=_taste_account_id(), settings=settings))
     except Exception as e:
         logger.error(f'Taste grab failed: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/taste/dismiss', methods=['POST'])
@@ -4142,7 +4181,7 @@ def taste_prompt():
                         'reason': None if ok else 'push dispatch failed'})
     except Exception as e:
         logger.error(f'Taste prompt failed: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/genre-roulette/genres')
@@ -4180,7 +4219,7 @@ def genre_roulette_preview():
         return jsonify(genre_roulette.preview())
     except Exception as e:
         logger.error(f'Genre Roulette preview failed: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/genre-roulette/status')
@@ -4208,7 +4247,7 @@ def franchise_completer_preview():
         return jsonify(franchise_completer.preview())
     except Exception as e:
         logger.error(f'Franchise Completer preview failed: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/franchise-completer/status')
@@ -4395,7 +4434,7 @@ def add_to_watchlist():
         logger.error(f"[watchlist] unhandled error: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 def _grab_season_pack_bg(sonarr_inst, series_id: int, season: int, title: str) -> None:
     """Background thread: try explicit season pack grab before falling back to SeasonSearch.
@@ -4621,7 +4660,7 @@ def add_tv_to_watchlist():
         logger.error(f"[tv-watchlist] error: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/watchlist/<int:tmdb_id>', methods=['DELETE'])
@@ -4668,7 +4707,7 @@ def remove_from_watchlist(tmdb_id):
         logger.error(f"Error removing from watchlist: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/watchlist/<int:tmdb_id>/check', methods=['GET'])
 def check_watchlist(tmdb_id):
@@ -4698,7 +4737,7 @@ def check_watchlist(tmdb_id):
 
     except Exception as e:
         logger.error(f"Error checking Radarr: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/watchlist/<int:tmdb_id>/search', methods=['POST'])
 def trigger_watchlist_search(tmdb_id):
@@ -4724,7 +4763,7 @@ def trigger_watchlist_search(tmdb_id):
         logger.error(f"Error triggering Radarr search: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/watchlist/<int:tmdb_id>/quality-profile', methods=['PUT'])
 def update_watchlist_quality_profile(tmdb_id):
@@ -4791,7 +4830,7 @@ def update_watchlist_quality_profile(tmdb_id):
         logger.error(f"Error updating quality profile for tmdb={tmdb_id}: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/storage/downloads')
@@ -4808,7 +4847,7 @@ def get_downloads_storage():
         return jsonify(data)
     except Exception as e:
         logger.error(f"Error reading downloads storage: {e}")
-        return jsonify({'available': False, 'error': str(e)}), 500
+        return jsonify({'available': False, 'error': _public_error(e)}), 500
 
 
 @app.route('/api/storage/downloads/cleanup', methods=['POST'])
@@ -4849,7 +4888,7 @@ def cleanup_downloads_storage():
         logger.error(f"Error cleaning up downloads storage: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _public_error(e)}), 500
 
 
 def _dg_read_guard():
@@ -4892,7 +4931,7 @@ def downloads_guard_trackers():
         return jsonify(tracker_files.summarise(storage_cleanup.fetch_torrents))
     except Exception as e:
         logger.error(f'Downloads Guard tracker summary failed: {e}', exc_info=True)
-        return jsonify({'available': False, 'trackers': [], 'error': str(e)}), 500
+        return jsonify({'available': False, 'trackers': [], 'error': _public_error(e)}), 500
 
 
 @app.route('/api/downloads-guard/preview')
@@ -4906,7 +4945,7 @@ def downloads_guard_preview():
         return jsonify(downloads_guard.preview())
     except Exception as e:
         logger.error(f'Downloads Guard preview failed: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/downloads-guard/run', methods=['POST'])
@@ -5664,7 +5703,7 @@ Be specific and accurate with titles and years. Quality over quantity — every 
             return jsonify({'error': 'OpenAI rate limit reached. Please try again shortly.'}), 502
         if 'timeout' in err_msg.lower():
             return jsonify({'error': 'OpenAI request timed out. Please try again.'}), 502
-        return jsonify({'error': f'AI processing failed: {err_msg}'}), 502
+        return jsonify({'error': _public_error(e, 'AI processing failed')}), 502
 
     recommendations = parsed.get('recommendations', [])
     genres = parsed.get('genres', [])[:3]
@@ -5880,7 +5919,7 @@ def _resolve_playback_target(rating_key: int, room_id: str,
                 return resp.get_json()
         return {'success': True, 'message': f'Playing in {room_name}'}
     except Exception as e:
-        return {'success': False, 'error': str(e)}
+        return {'success': False, 'error': _public_error(e)}
 
 
 @app.route('/api/voice/command', methods=['POST'])
@@ -6079,7 +6118,7 @@ def elevenlabs_voices():
         return jsonify({'voices': voices})
     except Exception as e:
         logger.error('ElevenLabs voices fetch failed: %s', e)
-        return jsonify({'voices': [], 'error': str(e)}), 500
+        return jsonify({'voices': [], 'error': _public_error(e)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -6766,7 +6805,7 @@ def plex_tv_seasons(rating_key):
         return jsonify({'seasons': seasons})
     except Exception as e:
         logger.error(f"Error fetching Plex TV seasons for {rating_key}: {e}")
-        return jsonify({'error': str(e), 'seasons': []}), 500
+        return jsonify({'error': _public_error(e), 'seasons': []}), 500
 
 
 @app.route('/api/plex/tv/<int:rating_key>')
@@ -6839,7 +6878,7 @@ def plex_tv_metadata(rating_key):
         return jsonify(data)
     except Exception as e:
         logger.error(f"Error fetching Plex TV metadata for {rating_key}: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -6909,7 +6948,7 @@ def plex_episode_metadata(rating_key):
 
     except Exception as e:
         logger.error(f"Error fetching Plex episode metadata for {rating_key}: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/popular')
@@ -7095,7 +7134,7 @@ def trakt_trending_shows():
         return jsonify({'shows': [], 'enabled': True, 'error': 'Could not connect to Trakt'}), 502
     except Exception as e:
         logger.error(f"Trakt trending error: {e}")
-        return jsonify({'shows': [], 'enabled': True, 'error': str(e)}), 500
+        return jsonify({'shows': [], 'enabled': True, 'error': _public_error(e)}), 500
 
 
 # v254: What you're missing's routes live in app/automation/wym_routes.py (registered below).
@@ -7113,7 +7152,7 @@ def collections_incomplete():
         return jsonify({
             'collections': [],
             'building': False,
-            'error': str(e),
+            'error': _public_error(e),
         }), 500
 
 
@@ -7128,7 +7167,7 @@ def collections_detail(collection_id: int):
         return jsonify(detail)
     except Exception as e:
         logger.error(f"collections detail error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/collections/refresh', methods=['POST'])
@@ -7148,7 +7187,7 @@ def collections_refresh():
         return jsonify({'ok': True, 'started': True})
     except Exception as e:
         logger.error(f"collections refresh error: {e}")
-        return jsonify({'ok': False, 'error': str(e)}), 500
+        return jsonify({'ok': False, 'error': _public_error(e)}), 500
 
 @app.route('/api/trakt/movies/trending')
 def trakt_trending_movies():
@@ -7270,7 +7309,7 @@ def trakt_trending_movies():
         return jsonify({'movies': [], 'enabled': True, 'error': 'Could not connect to Trakt'}), 502
     except Exception as e:
         logger.error(f"Trakt trending movies error: {e}")
-        return jsonify({'movies': [], 'enabled': True, 'error': str(e)}), 500
+        return jsonify({'movies': [], 'enabled': True, 'error': _public_error(e)}), 500
 
 
 def _fetch_trakt_anticipated(media):
@@ -7399,7 +7438,7 @@ def _fetch_trakt_anticipated(media):
         return {key: [], 'enabled': True, 'error': 'Could not connect to Trakt'}, 502
     except Exception as e:
         logger.error(f"Trakt anticipated {media} error: {e}")
-        return {key: [], 'enabled': True, 'error': str(e)}, 500
+        return {key: [], 'enabled': True, 'error': _public_error(e)}, 500
 
 
 @app.route('/api/trakt/movies/anticipated')
@@ -7597,7 +7636,7 @@ def get_cached_explore_movies():
 
     except Exception as e:
         logger.error(f"Error getting cached explore movies: {e}")
-        return jsonify({'error': str(e), 'movies': []}), 500
+        return jsonify({'error': _public_error(e), 'movies': []}), 500
 
 @app.route('/api/explore/top')
 def get_top_explore_movies():
@@ -7644,7 +7683,7 @@ def get_top_explore_movies():
 
     except Exception as e:
         logger.error(f"Error in /api/explore/top: {e}")
-        return jsonify({'error': str(e), 'movies': []}), 500
+        return jsonify({'error': _public_error(e), 'movies': []}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -7669,7 +7708,7 @@ def get_upgrade_sections():
         return jsonify({'sections': sections})
     except Exception as e:
         logger.error(f"Error in /api/upgrades/sections: {e}")
-        return jsonify({'error': str(e), 'sections': []}), 500
+        return jsonify({'error': _public_error(e), 'sections': []}), 500
 
 
 @app.route('/api/upgrades/list')
@@ -7693,7 +7732,7 @@ def list_upgrades():
 
     except Exception as e:
         logger.error(f"Error in /api/upgrades/list: {e}")
-        return jsonify({'error': str(e), 'upgrades': []}), 500
+        return jsonify({'error': _public_error(e), 'upgrades': []}), 500
 
 
 @app.route('/api/upgrades/sync', methods=['POST'])
@@ -7707,7 +7746,7 @@ def sync_library_section():
 
     except Exception as e:
         logger.error(f"Error in /api/upgrades/sync: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/upgrades/batch', methods=['POST'])
@@ -7736,7 +7775,7 @@ def run_upgrade_batch():
 
     except Exception as e:
         logger.error(f"Error in /api/upgrades/batch: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/upgrades/progress')
@@ -7747,7 +7786,7 @@ def upgrade_progress():
         return jsonify(finder.get_progress())
     except Exception as e:
         logger.error(f"Error in /api/upgrades/progress: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/upgrades/new/scan', methods=['POST'])
@@ -7773,7 +7812,7 @@ def scan_new_releases():
 
     except Exception as e:
         logger.error(f"Error in /api/upgrades/new/scan: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/upgrades/new/list')
@@ -7786,7 +7825,7 @@ def list_new_upgrades():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error in /api/upgrades/new/list: {e}")
-        return jsonify({'error': str(e), 'upgrades': []}), 500
+        return jsonify({'error': _public_error(e), 'upgrades': []}), 500
 
 
 @app.route('/api/upgrades/mark-grabbed', methods=['POST'])
@@ -7802,7 +7841,7 @@ def mark_upgrade_grabbed():
         return jsonify({'ok': True, 'updated': updated})
     except Exception as e:
         logger.error(f"Error marking upgrade grabbed: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/upgrades/dismiss', methods=['POST'])
@@ -7818,7 +7857,7 @@ def dismiss_upgrade():
         return jsonify({'ok': True, 'updated': updated})
     except Exception as e:
         logger.error(f"Error dismissing upgrade: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/upgrades/enrich-ratings', methods=['POST'])
@@ -7841,7 +7880,7 @@ def enrich_upgrade_ratings():
         return jsonify({'status': 'started', 'batch_limit': limit})
     except Exception as e:
         logger.error(f"Error in /api/upgrades/enrich-ratings: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/upgrades/top-rated')
@@ -7864,7 +7903,7 @@ def top_rated_upgrades():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error in /api/upgrades/top-rated: {e}")
-        return jsonify({'error': str(e), 'upgrades': []}), 500
+        return jsonify({'error': _public_error(e), 'upgrades': []}), 500
 
 
 @app.route('/api/upgrades/auto-grab', methods=['POST'])
@@ -7964,7 +8003,7 @@ def auto_grab_upgrades():
 
     except Exception as e:
         logger.error(f"Error in /api/upgrades/auto-grab: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/upgrades/scheduler/status')
@@ -7978,7 +8017,7 @@ def upgrade_scheduler_status():
         })
     except Exception as e:
         logger.error(f"Error in /api/upgrades/scheduler/status: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/upgrades/scheduler/trigger', methods=['POST'])
@@ -7990,7 +8029,7 @@ def trigger_upgrade_scheduler():
         return jsonify({'status': 'started'})
     except Exception as e:
         logger.error(f"Error triggering upgrade scheduler: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 _in_theaters_cache: Dict[str, tuple] = {}  # key → (timestamp, data)
@@ -8056,7 +8095,7 @@ def get_in_theaters():
 
     except Exception as e:
         logger.error(f"Error getting in-theaters movies: {e}")
-        return jsonify({'error': str(e), 'movies': []}), 500
+        return jsonify({'error': _public_error(e), 'movies': []}), 500
 
 @app.route('/api/library/stats')
 def library_stats():
@@ -8066,7 +8105,7 @@ def library_stats():
         return jsonify(stats)
     except Exception as e:
         logger.error(f"Error getting library stats: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/library/stats/cached')
@@ -8100,7 +8139,7 @@ def library_stats_cached():
 
     except Exception as e:
         logger.error(f"Error getting cached library stats: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/library/browse/cached')
@@ -8252,7 +8291,7 @@ def library_browse():
 
     except Exception as e:
         logger.error(f"Error browsing library '{library_name}': {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -8474,7 +8513,7 @@ def library_vibe_engine():
 
     except Exception as e:
         logger.error(f"Vibe Engine error: {e}")
-        return jsonify({'error': str(e), 'items': [], 'total': 0}), 500
+        return jsonify({'error': _public_error(e), 'items': [], 'total': 0}), 500
 
 
 @app.route('/api/library/recent/cached')
@@ -8572,7 +8611,7 @@ def library_recent():
 
     except Exception as e:
         logger.error(f"Error fetching recent movies: {e}")
-        return jsonify({'error': str(e), 'movies': []}), 500
+        return jsonify({'error': _public_error(e), 'movies': []}), 500
 
 @app.route('/api/library/episodes')
 def library_recent_episodes():
@@ -8596,7 +8635,7 @@ def library_recent_episodes():
 
     except Exception as e:
         logger.error(f"Error fetching recent TV episodes: {e}")
-        return jsonify({'error': str(e), 'episodes': []}), 500
+        return jsonify({'error': _public_error(e), 'episodes': []}), 500
 
 
 @app.route('/api/library/episodes/cached')
@@ -8622,7 +8661,7 @@ def library_recent_episodes_cached():
 
     except Exception as e:
         logger.error(f"Error getting cached recent TV episodes: {e}")
-        return jsonify({'error': str(e), 'episodes': []}), 500
+        return jsonify({'error': _public_error(e), 'episodes': []}), 500
 
 
 @app.route('/api/tmdb/person/<int:plex_actor_id>/credits')
@@ -8965,7 +9004,7 @@ def library_search_fast():
 
     except Exception as e:
         logger.error(f"Error in fast search: {e}")
-        return jsonify({'error': str(e), 'results': []}), 500
+        return jsonify({'error': _public_error(e), 'results': []}), 500
 
 
 @app.route('/api/library/search')
@@ -9108,7 +9147,7 @@ def library_search():
 
     except Exception as e:
         logger.error(f"Error searching library: {e}")
-        return jsonify({'error': str(e), 'movies': [], 'tv_shows': []}), 500
+        return jsonify({'error': _public_error(e), 'movies': [], 'tv_shows': []}), 500
 
 
 @app.route('/api/check-ownership')
@@ -9306,7 +9345,7 @@ def check_ownership():
 
     except Exception as e:
         logger.error(f"Error checking ownership: {e}")
-        return jsonify({'owned': False, 'error': str(e)})
+        return jsonify({'owned': False, 'error': _public_error(e)})
 
 
 @app.route('/api/check-ownership-batch', methods=['POST'])
@@ -9510,7 +9549,7 @@ def check_ownership_batch():
 
     except Exception as e:
         logger.error(f"Error in batch ownership check: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/health')
@@ -9577,7 +9616,7 @@ def auth_login():
 
     except Exception as e:
         logger.error(f"auth_login error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _public_error(e)}), 500
 
 
 def _signup_open() -> bool:
@@ -9639,7 +9678,7 @@ def auth_register():
 
     except Exception as e:
         logger.error(f"auth_register error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _public_error(e)}), 500
 
 
 def _public_app_url() -> str:
@@ -9877,7 +9916,7 @@ def auth_logout():
         return resp
     except Exception as e:
         logger.error(f"auth_logout error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/auth/me', methods=['GET'])
@@ -10134,7 +10173,7 @@ def user_plex_health():
         health = svc.health_check()
         return jsonify({'success': True, **health})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 200
+        return jsonify({'success': False, 'error': _public_error(e)}), 200
 
 
 @app.route('/api/user/test/plex', methods=['POST'])
@@ -10165,7 +10204,7 @@ def user_test_plex():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': 'Could not connect to Plex URL'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/user/test/radarr', methods=['POST'])
@@ -10194,7 +10233,7 @@ def user_test_radarr():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': 'Could not connect to Radarr URL'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/user/test/sonarr', methods=['POST'])
@@ -10223,7 +10262,7 @@ def user_test_sonarr():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': 'Could not connect to Sonarr URL'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/user/request-shared-plex', methods=['POST'])
@@ -10330,7 +10369,7 @@ def admin_list_users():
         return jsonify({'users': user_auth.list_users()})
     except Exception as e:
         logger.error(f"admin_list_users error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/admin/users', methods=['POST'])
@@ -10357,7 +10396,7 @@ def admin_create_user():
         return jsonify({'error': str(e)}), 409
     except Exception as e:
         logger.error(f"admin_create_user error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/admin/users/<int:user_id>/pin', methods=['PUT'])
@@ -10380,7 +10419,7 @@ def admin_reset_pin(user_id: int):
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"admin_reset_pin error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
@@ -10398,7 +10437,7 @@ def admin_delete_user(user_id: int):
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         logger.error(f"admin_delete_user error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/admin/users/status')
@@ -10845,7 +10884,7 @@ def get_ratings(title):
 
     except Exception as e:
         logger.error(f"Error fetching ratings from OMDB: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/imdb/votes', methods=['POST'])
 def get_imdb_votes_batch():
@@ -10957,7 +10996,7 @@ def get_plex_ratings(rating_key):
 
     except Exception as e:
         logger.error(f"Error fetching ratings from Plex API: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/plex/ratings/resolve')
@@ -11023,7 +11062,7 @@ def get_rt_reviews():
 
     except Exception as e:
         logger.error(f"Error fetching RT reviews: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _public_error(e)}), 500
 
 # ---------------------------------------------------------------------------
 # UltraBlurColors — 6-hour memory cache
@@ -12006,7 +12045,7 @@ def get_hero_content():
         })
     except Exception as e:
         logger.error(f"Error building hero content: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _public_error(e)}), 500
 
 
 # =============================================================================
@@ -12051,7 +12090,7 @@ def get_kiosk_settings():
         })
     except Exception as e:
         logger.error(f"Error getting kiosk settings: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/kiosk/settings', methods=['POST'])
 def update_kiosk_settings():
@@ -12152,7 +12191,7 @@ def update_kiosk_settings():
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error updating kiosk settings: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # =============================================================================
@@ -12279,7 +12318,7 @@ def get_weather():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Weather API error: {e}")
-        return jsonify({'error': str(e), 'configured': True}), 500
+        return jsonify({'error': _public_error(e), 'configured': True}), 500
 
 
 # =============================================================================
@@ -12793,7 +12832,7 @@ def get_sports():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Sports API error: {e}", exc_info=True)
-        return jsonify({'error': str(e), 'enabled': True}), 500
+        return jsonify({'error': _public_error(e), 'enabled': True}), 500
 
 
 # =============================================================================
@@ -12901,7 +12940,7 @@ def get_news():
         return jsonify(result)
     except Exception as e:
         logger.error(f"News API error: {e}")
-        return jsonify({'error': str(e), 'enabled': True}), 500
+        return jsonify({'error': _public_error(e), 'enabled': True}), 500
 
 
 # =============================================================================
@@ -12916,7 +12955,7 @@ def plex_health():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Plex health check failed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _public_error(e)}), 500
 
 
 _PLEX_IMG_PATH = re.compile(
@@ -13287,7 +13326,7 @@ def player_play():
         logger.error(f"Error triggering playback: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 def _arp_ip_for_mac(mac):
@@ -13446,7 +13485,7 @@ def _play_via_kodi(service, rating_key, resume_offset, room_name, device_ip, adb
 
     except Exception as e:
         logger.error(f"Kodi playback failed: {e}")
-        return jsonify({'success': False, 'message': f'Kodi playback error: {e}'}), 500
+        return jsonify({'success': False, 'message': _public_error(e, 'Kodi playback error')}), 500
 
 
 def _resolve_playqueue_start(play_queue_id, fallback_rating_key):
@@ -13574,7 +13613,7 @@ def _play_via_plex(service, rating_key, resume_offset, room_name, device_ip, adb
 
     except Exception as e:
         logger.error(f"Plex playback failed: {e}")
-        return jsonify({'success': False, 'message': f'Plex playback error: {e}'}), 500
+        return jsonify({'success': False, 'message': _public_error(e, 'Plex playback error')}), 500
 
 
 
@@ -14979,7 +15018,7 @@ def plex_playback_subtitles():
 
     except Exception as e:
         logger.error(f"Error toggling subtitles: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/plex/resume_info/<rating_key>')
@@ -15010,7 +15049,7 @@ def plex_resume_info(rating_key):
 
     except Exception as e:
         logger.error(f"Error getting resume info: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/plex/lookup')
 def plex_movie_lookup():
@@ -15213,7 +15252,7 @@ def plex_movie_metadata(rating_key):
 
     except Exception as e:
         logger.error(f"Error getting movie metadata for rating_key {rating_key}: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/plex/file-info/<int:rating_key>')
 def plex_file_info(rating_key):
@@ -15464,7 +15503,7 @@ def plex_show_metadata(rating_key):
 
     except Exception as e:
         logger.error(f"Error getting show metadata for rating_key {rating_key}: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/plex/episode_libraries/<int:rating_key>')
 def plex_episode_libraries(rating_key):
@@ -15505,7 +15544,7 @@ def plex_episode_libraries(rating_key):
 
     except Exception as e:
         logger.error(f"Error getting episode libraries for rating_key {rating_key}: {e}")
-        return jsonify({'error': str(e), 'owned': False}), 500
+        return jsonify({'error': _public_error(e), 'owned': False}), 500
 
 @app.route('/api/plex/continue_watching/cached')
 def plex_continue_watching_cached():
@@ -15557,7 +15596,7 @@ def plex_continue_watching():
 
     except Exception as e:
         logger.error(f"Error getting continue watching items: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # Recently Watched — Plex history, collapsed to one tile per title.
@@ -15685,7 +15724,7 @@ def plex_recently_watched():
 
     except Exception as e:
         logger.error(f"Error getting recently watched items: {e}")
-        return jsonify({'error': str(e), 'items': []}), 500
+        return jsonify({'error': _public_error(e), 'items': []}), 500
 
 
 # Download tracking endpoints
@@ -15709,7 +15748,7 @@ def track_download():
 
     except Exception as e:
         logger.error(f"Error tracking download: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/downloads/tracking')
 def get_tracking_status():
@@ -15735,7 +15774,7 @@ def get_tracking_status():
 
     except Exception as e:
         logger.error(f"Error getting tracking status: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 def _parse_torrent_name(name: str, category: str = '') -> dict:
     """Extract title, year, and media_type from a torrent filename."""
@@ -16001,7 +16040,7 @@ def get_download_history():
 
     except Exception as e:
         logger.error(f"Error getting download history: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 def _normalize_tracker_url(tracker_url: str) -> str | None:
     """Extract a short tracker name from a qBittorrent tracker URL."""
@@ -16466,7 +16505,7 @@ def add_pending_request():
 
     except Exception as e:
         logger.error(f"[pending-request] error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/notifications/unseen')
@@ -16597,7 +16636,7 @@ def mark_notifications_seen():
 
     except Exception as e:
         logger.error(f"Error marking notifications seen: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _public_error(e)}), 500
 
 # ---------------------------------------------------------------------------
 # Downloads
@@ -16699,7 +16738,7 @@ def remove_from_tracking(torrent_hash):
 
     except Exception as e:
         logger.error(f"Error removing download {torrent_hash}: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _public_error(e)}), 500
 
 def _bencode_element_end(data: bytes, idx: int) -> int:
     """Return the index just past the bencoded element starting at *idx*."""
@@ -17302,7 +17341,7 @@ def sonarr_add_series():
 
     except Exception as e:
         logger.error(f"Error adding series to Sonarr: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/sonarr/status/<int:tvdb_id>')
 def sonarr_series_status(tvdb_id):
@@ -17330,7 +17369,7 @@ def sonarr_series_status(tvdb_id):
 
     except Exception as e:
         logger.error(f"Error checking Sonarr status: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/sonarr/series-status')
 def sonarr_series_status_detail():
@@ -17371,7 +17410,7 @@ def sonarr_monitor_episodes():
     try:
         return jsonify({'success': True, **set_episodes_monitored(sonarr, series_id, episode_ids, monitored)})
     except MonitorError as e:
-        return jsonify({'success': False, 'error': str(e)}), 502
+        return jsonify({'success': False, 'error': _public_error(e)}), 502
     except Exception as e:
         logger.error(f"Episode monitor update failed: {e}")
         return jsonify({'success': False, 'error': 'Sonarr update failed'}), 502
@@ -17408,7 +17447,7 @@ def sonarr_monitor_series():
             result = set_series_monitor_mode(sonarr, series_id, mode, seasons)
         return jsonify({'success': True, **result})
     except MonitorError as e:
-        return jsonify({'success': False, 'error': str(e)}), 502
+        return jsonify({'success': False, 'error': _public_error(e)}), 502
     except Exception as e:
         logger.error(f"Series monitor update failed: {e}")
         return jsonify({'success': False, 'error': 'Sonarr update failed'}), 502
@@ -17432,7 +17471,7 @@ def sonarr_monitor_season():
     try:
         return jsonify({'success': True, **set_season_monitored(sonarr, series_id, season, monitored)})
     except MonitorError as e:
-        return jsonify({'success': False, 'error': str(e)}), 502
+        return jsonify({'success': False, 'error': _public_error(e)}), 502
     except Exception as e:
         logger.error(f"Season monitor update failed: {e}")
         return jsonify({'success': False, 'error': 'Sonarr update failed'}), 502
@@ -17451,7 +17490,7 @@ def sonarr_quality_profiles():
 
     except Exception as e:
         logger.error(f"Error getting quality profiles: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 # In-memory cache for Sonarr calendar. Kiosk polls every 15 min; cache evens
 # out bursts of client reloads without going out of date on the upcoming window.
@@ -17545,7 +17584,7 @@ def sonarr_calendar():
 
     except Exception as e:
         logger.error(f"Error fetching Sonarr calendar: {e}")
-        return jsonify({'enabled': True, 'episodes': [], 'error': str(e)}), 200
+        return jsonify({'enabled': True, 'episodes': [], 'error': _public_error(e)}), 200
 
 # ── Home Assistant: smart-home panel endpoints ────────────────────────────
 # Used by the kiosk smart-home modal. All endpoints gate on HA being
@@ -17572,7 +17611,7 @@ def ha_areas():
         return jsonify({'enabled': True, 'areas': list_areas(url, token)})
     except Exception as e:
         logger.error("HA areas fetch failed: %s", e)
-        return jsonify({'enabled': True, 'areas': [], 'error': str(e)}), 200
+        return jsonify({'enabled': True, 'areas': [], 'error': _public_error(e)}), 200
 
 
 @app.route('/api/ha/area/<area_id>/entities')
@@ -17586,7 +17625,7 @@ def ha_area_entities(area_id):
         return jsonify({'enabled': True, 'entities': get_area_entities(url, token, area_id)})
     except Exception as e:
         logger.error("HA area entities fetch failed (%s): %s", area_id, e)
-        return jsonify({'enabled': True, 'entities': [], 'error': str(e)}), 200
+        return jsonify({'enabled': True, 'entities': [], 'error': _public_error(e)}), 200
 
 
 @app.route('/api/ha/service', methods=['POST'])
@@ -17748,7 +17787,7 @@ def sonarr_search_episode():
 
     except Exception as e:
         logger.error(f"Error searching for episode: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/sonarr/episode/download', methods=['POST'])
 def sonarr_download_episode():
@@ -17814,7 +17853,7 @@ def sonarr_download_episode():
 
     except Exception as e:
         logger.error(f"Error downloading release: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 # ---------------------------------------------------------------------------
 # Web Push notification endpoints
@@ -17835,7 +17874,7 @@ def push_vapid_key():
         })
     except Exception as e:
         logger.error(f"Error getting VAPID key: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/push/subscribe', methods=['POST'])
 def push_subscribe():
@@ -17856,7 +17895,7 @@ def push_subscribe():
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error saving push subscription: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/push/unsubscribe', methods=['POST'])
 def push_unsubscribe():
@@ -17869,7 +17908,7 @@ def push_unsubscribe():
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error removing push subscription: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/push/test', methods=['POST'])
 def push_test():
@@ -17888,7 +17927,7 @@ def push_test():
         return jsonify({'success': sent, 'message': f'Sent to {count} subscriber(s)' if sent else 'Push disabled'})
     except Exception as e:
         logger.error(f"Error sending test push: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/sonarr/webhook', methods=['POST'])
 def sonarr_webhook():
@@ -18054,7 +18093,7 @@ def sonarr_webhook():
     except Exception as e:
         logger.error(f"Error processing Sonarr webhook: {e}")
         # Return 200 anyway so Sonarr doesn't think the webhook failed
-        return jsonify({'success': False, 'error': str(e)}), 200
+        return jsonify({'success': False, 'error': _public_error(e)}), 200
 
 @app.route('/api/radarr/webhook', methods=['POST'])
 def radarr_webhook():
@@ -18156,7 +18195,7 @@ def radarr_webhook():
 
     except Exception as e:
         logger.error(f"Error processing Radarr webhook: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 200
+        return jsonify({'success': False, 'error': _public_error(e)}), 200
 
 @app.route('/api/sonarr/season/search')
 def sonarr_search_season():
@@ -18223,7 +18262,7 @@ def sonarr_search_season():
 
     except Exception as e:
         logger.error(f"Error searching for season: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/sonarr/search/season', methods=['POST'])
 def sonarr_auto_search_season():
@@ -18297,7 +18336,7 @@ def sonarr_auto_search_season():
 
     except Exception as e:
         logger.error(f"Error in auto season search: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/sonarr/search/episode', methods=['POST'])
 def sonarr_auto_search_episode():
@@ -18377,7 +18416,7 @@ def sonarr_auto_search_episode():
 
     except Exception as e:
         logger.error(f"Error in auto episode search: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 # TV Show Endpoints
 _tv_seasons_cache: Dict[int, tuple] = {}   # tmdb_id → (timestamp, result)
@@ -18807,7 +18846,7 @@ def get_tv_seasons(tmdb_id):
 
     except Exception as e:
         logger.error(f"Error fetching TV seasons: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -18917,7 +18956,7 @@ def tmdb_episode_detail(tmdb_show_id, season, episode):
         return jsonify({'error': 'Failed to fetch episode data from TMDb'}), 502
     except Exception as e:
         logger.error(f"Error fetching TMDb episode {tmdb_show_id} S{season}E{episode}: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/tv/ownership/<int:tvdb_id>/cached')
@@ -19065,7 +19104,7 @@ def get_tv_ownership(tvdb_id):
 
     except Exception as e:
         logger.error(f"Error checking TV ownership: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/tv/show')
 def get_tv_show():
@@ -19101,7 +19140,7 @@ def get_tv_show():
 
     except Exception as e:
         logger.error(f"Error getting TV show: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 @app.route('/api/tv/episodes')
 def get_tv_episode():
@@ -19161,7 +19200,7 @@ def get_tv_episode():
 
     except Exception as e:
         logger.error(f"Error getting TV episode: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # ============================================================================
@@ -19232,7 +19271,7 @@ def plex_client_control():
         return jsonify(result), status_code
     except Exception as e:
         logger.error(f"Error controlling Plex client: {e}", exc_info=True)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _public_error(e)}), 500
 
 
 def _configured_device_hosts() -> set:
@@ -19525,7 +19564,7 @@ def adb_shield_activity():
         return jsonify({'error': 'ADB command timed out'}), 500
     except Exception as e:
         logger.error(f"Error getting Shield activity: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/adb/control', methods=['POST'])
@@ -19612,7 +19651,7 @@ def adb_control():
         return jsonify({'error': 'Command timed out'}), 500
     except Exception as e:
         logger.error(f"Error sending ADB command: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # =============================================================================
@@ -19672,7 +19711,7 @@ def get_screensaver_movies():
         })
     except Exception as e:
         logger.error(f"Screensaver API error: {e}")
-        return jsonify({'success': False, 'error': str(e), 'movies': []}), 500
+        return jsonify({'success': False, 'error': _public_error(e), 'movies': []}), 500
 
 
 @app.route('/api/screensaver/image-proxy')
@@ -19700,7 +19739,7 @@ def screensaver_image_proxy():
         return jsonify({'error': 'Failed to fetch image'}), response.status_code
     except Exception as e:
         logger.error(f"Image proxy error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # Static file serving — Flask's built-in handler at /static/ does the heavy
@@ -19825,7 +19864,7 @@ def get_settings():
         return jsonify(settings.get_all_masked())
     except Exception as e:
         logger.error(f"GET /api/settings error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 def _unbind_qbit_password_on_new_url(data: dict) -> None:
@@ -19946,7 +19985,7 @@ def update_settings():
         return jsonify({'success': True, 'settings': settings.get_all_masked()})
     except Exception as e:
         logger.error(f"PUT /api/settings error: {e}")
-        return jsonify({'success': False, 'errors': [str(e)]}), 500
+        return jsonify({'success': False, 'errors': [_public_error(e)]}), 500
 
 
 @app.route('/api/settings/schema', methods=['GET'])
@@ -19959,7 +19998,7 @@ def get_settings_schema():
         return jsonify(settings.get_schema())
     except Exception as e:
         logger.error(f"GET /api/settings/schema error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/settings/rooms', methods=['GET'])
@@ -20053,7 +20092,7 @@ def get_rooms():
                         'defaultRoomId': default_target['roomId']})
     except Exception as e:
         logger.error(f"GET /api/settings/rooms error: {e}")
-        return jsonify({'rooms': [], 'defaultPlaybackTarget': {}, 'error': str(e)}), 500
+        return jsonify({'rooms': [], 'defaultPlaybackTarget': {}, 'error': _public_error(e)}), 500
 
 
 def _public_settings_room(r, default_id):
@@ -20091,7 +20130,7 @@ def create_room():
         return jsonify({'room': room}), 201
     except Exception as e:
         logger.error(f"POST /api/settings/rooms error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/settings/rooms/<room_id>', methods=['PUT'])
@@ -20111,7 +20150,7 @@ def update_room_endpoint(room_id):
         return jsonify({'room': room})
     except Exception as e:
         logger.error(f"PUT /api/settings/rooms/{room_id} error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/settings/rooms/<room_id>', methods=['DELETE'])
@@ -20127,7 +20166,7 @@ def delete_room_endpoint(room_id):
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"DELETE /api/settings/rooms/{room_id} error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # --- Device CRUD ---
@@ -20175,7 +20214,7 @@ def create_device(room_id):
         return jsonify({'device': device}), 201
     except Exception as e:
         logger.error(f"POST /api/settings/rooms/{room_id}/devices error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/settings/rooms/<room_id>/devices/<device_id>', methods=['PUT'])
@@ -20198,7 +20237,7 @@ def update_device_endpoint(room_id, device_id):
         return jsonify({'device': device})
     except Exception as e:
         logger.error(f"PUT /api/settings/rooms/{room_id}/devices/{device_id} error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/settings/rooms/<room_id>/devices/<device_id>', methods=['DELETE'])
@@ -20214,7 +20253,7 @@ def delete_device_endpoint(room_id, device_id):
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"DELETE devices error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # --- Service CRUD ---
@@ -20248,7 +20287,7 @@ def create_service(room_id, device_id):
         return jsonify({'service': service}), 201
     except Exception as e:
         logger.error(f"POST services error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/settings/rooms/<room_id>/devices/<device_id>/services/<service_id>', methods=['PUT'])
@@ -20273,7 +20312,7 @@ def update_service_endpoint(room_id, device_id, service_id):
         return jsonify({'service': service})
     except Exception as e:
         logger.error(f"PUT services error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/settings/rooms/<room_id>/devices/<device_id>/services/<service_id>', methods=['DELETE'])
@@ -20289,7 +20328,7 @@ def delete_service_endpoint(room_id, device_id, service_id):
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"DELETE services error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # --- Default playback target ---
@@ -20311,7 +20350,7 @@ def set_default_target():
         return jsonify({'defaultPlaybackTarget': target})
     except Exception as e:
         logger.error(f"PUT /api/settings/rooms/default error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 # --- Device test & pair ---
@@ -20337,7 +20376,7 @@ def test_device_connection(room_id, device_id):
         return jsonify(result)
     except Exception as e:
         logger.error(f"POST device test error: {e}")
-        return jsonify({'ok': False, 'needsPairing': False, 'message': str(e), 'steps': []}), 500
+        return jsonify({'ok': False, 'needsPairing': False, 'message': _public_error(e), 'steps': []}), 500
 
 
 @app.route('/api/rooms/<room_id>/devices/<device_id>/pair', methods=['POST'])
@@ -20395,7 +20434,7 @@ def pair_device_endpoint(room_id, device_id):
         })
     except Exception as e:
         logger.error(f"POST device pair error: {e}")
-        return jsonify({'ok': False, 'needsPairing': True, 'hint': 'unknown', 'message': str(e), 'steps': []}), 500
+        return jsonify({'ok': False, 'needsPairing': True, 'hint': 'unknown', 'message': _public_error(e), 'steps': []}), 500
 
 
 # --- Legacy room-level test/pair (for backwards compat) ---
@@ -20426,7 +20465,7 @@ def test_room_connection_legacy(room_id):
         return jsonify(result)
     except Exception as e:
         logger.error(f"POST /api/rooms/{room_id}/test error: {e}")
-        return jsonify({'ok': False, 'needsPairing': False, 'message': str(e), 'steps': []}), 500
+        return jsonify({'ok': False, 'needsPairing': False, 'message': _public_error(e), 'steps': []}), 500
 
 
 @app.route('/api/rooms/<room_id>/pair', methods=['POST'])
@@ -20489,7 +20528,7 @@ def pair_room_legacy(room_id):
         })
     except Exception as e:
         logger.error(f"POST /api/rooms/{room_id}/pair error: {e}")
-        return jsonify({'ok': False, 'needsPairing': True, 'hint': 'unknown', 'message': str(e), 'steps': []}), 500
+        return jsonify({'ok': False, 'needsPairing': True, 'hint': 'unknown', 'message': _public_error(e), 'steps': []}), 500
 
 
 @app.route('/api/room/<room_id>/remote', methods=['POST'])
@@ -20736,7 +20775,7 @@ def room_remote(room_id):
         return jsonify(result)
     except Exception as e:
         logger.error(f"POST /api/room/{room_id}/remote error: {e}")
-        return jsonify({'ok': False, 'detail': str(e)}), 500
+        return jsonify({'ok': False, 'detail': _public_error(e)}), 500
 
 
 @app.route('/api/room/<room_id>/harmony/ensure', methods=['GET', 'POST'])
@@ -20761,7 +20800,7 @@ def room_harmony_ensure(room_id):
         return jsonify({'ok': ok, 'warmed': bool(ok)})
     except Exception as e:
         logger.error(f"/api/room/{room_id}/harmony/ensure error: {e}")
-        return jsonify({'ok': False, 'detail': str(e)}), 500
+        return jsonify({'ok': False, 'detail': _public_error(e)}), 500
 
 
 @app.route('/api/plex/playqueue', methods=['POST'])
@@ -20846,7 +20885,7 @@ def create_plex_playqueue():
 
     except Exception as e:
         logger.error(f"POST /api/plex/playqueue error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _public_error(e)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -20903,7 +20942,7 @@ def get_media_types_endpoint():
         return jsonify({'types': settings.get_media_types()})
     except Exception as e:
         logger.error(f"GET /api/settings/media/types error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': _public_error(e)}), 500
 
 
 @app.route('/api/settings/media/sync-from-plex', methods=['POST'])
@@ -20964,7 +21003,7 @@ def sync_media_paths_from_plex():
         return jsonify({'success': True, 'paths': settings.get('media.paths')})
     except Exception as e:
         logger.error(f"POST /api/settings/media/sync-from-plex error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': _public_error(e)}), 500
 
 
 @app.route('/api/settings/test/plex', methods=['POST'])
@@ -21018,7 +21057,7 @@ def test_plex_connection():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': 'Could not connect to Plex URL'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/settings/test/sonarr', methods=['POST'])
@@ -21048,7 +21087,7 @@ def test_sonarr_connection():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': 'Could not connect to Sonarr URL'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/settings/test/radarr', methods=['POST'])
@@ -21078,7 +21117,7 @@ def test_radarr_connection():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': 'Could not connect to Radarr URL'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/settings/test/qbittorrent', methods=['POST'])
@@ -21146,7 +21185,7 @@ def test_harmony_connection():
             'details': {'activities': activities, 'devices': devices, 'hub_ip': hub_ip},
         })
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/settings/test/tmdb', methods=['POST'])
@@ -21185,7 +21224,7 @@ def test_tmdb_connection():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': 'Could not connect to TMDb API'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/settings/test/indexer', methods=['POST'])
@@ -21218,7 +21257,7 @@ def test_shield_adb():
             'details': result,
         })
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/settings/test/trakt', methods=['POST'])
@@ -21252,7 +21291,7 @@ def test_trakt_connection():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': 'Could not connect to Trakt API'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/settings/test/homeassistant', methods=['POST'])
@@ -21278,7 +21317,7 @@ def test_homeassistant_connection():
             'message': result['detail'],
         })
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/settings/test/openai', methods=['POST'])
@@ -21307,7 +21346,7 @@ def test_openai_connection():
             return jsonify({'success': False, 'message': 'Invalid OpenAI API key'}), 200
         if 'NotFoundError' in type(e).__name__:
             return jsonify({'success': False, 'message': f'Model "{model}" not found or not accessible'}), 200
-        return jsonify({'success': False, 'message': err}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 @app.route('/api/settings/test/kodi', methods=['POST'])
@@ -21337,7 +21376,7 @@ def test_kodi_connection():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': f'Could not connect to {host}:{port}'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 # ---------------------------------------------------------------------------
@@ -21363,7 +21402,7 @@ def tunnel_toggle():
         return jsonify(result)
     except Exception as e:
         logger.error(f"POST /api/tunnel/toggle error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': _public_error(e)}), 500
 
 
 @app.route('/api/settings/test/tunnel', methods=['POST'])
@@ -21386,7 +21425,7 @@ def test_tunnel():
             msg += f' (tunnel running, PID {status["pid"]})'
         return jsonify({'success': True, 'message': msg})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': _public_error(e)}), 200
 
 
 # =============================================================================
