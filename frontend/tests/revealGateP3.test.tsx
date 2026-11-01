@@ -60,7 +60,7 @@ describe('P3 image loader and bundled icons', () => {
     for (const u of Object.values(RATING_ICONS)) expect(u).not.toMatch(/\/static\/images\//);
     expect(src('src/utils/ratingIcons.ts')).toMatch(/@\/assets\/ratings\/imdb-logo\.png/);
     expect(src('src/utils/ratingIcons.ts')).toMatch(/import \{ isDecoded, loadImage \} from '@\/loading\/imageLoader'/);
-    expect(src('src/services/modalPrefetch.ts')).toMatch(/return loadImage\(url\)/);
+    expect(src('src/services/modalPrefetch.ts')).toMatch(/return loadImage\(url(, priority)?\)/);
   });
 
   it('the row dim sits on the slot, so text and icons share one opacity', () => {

@@ -5,6 +5,7 @@ import { _resetImageLoader, loadImage } from '@/loading/imageLoader';
  * logo URLs and starts loading those images, plus the color blur. When the
  * popup opens it reads the same cached responses, so images are already on
  * their way instead of waiting on a metadata round-trip. */
+import { _resetSheetPriority, afterSheetPriority, beginSheetPriority, sheetOpening } from '@/loading/sheetPriority';
 import { apiFetch } from '@/apiClient';
 import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import { colorsFromImage } from '@/utils/posterColors';
@@ -67,14 +68,29 @@ const MAX_ENTRIES = 150;
 interface Cached { ok: boolean; status: number; body: string; type: string; warm?: boolean }
 const cache = new Map<string, { at: number; p: Promise<Cached> }>();
 
+/** Detail requests still on the wire, so an open can drop other titles' warm-ups (an HTTP/1.1 origin has 6
+ *  connections; slow TMDb warm-ups held them all and the sheet's backdrop waited behind them). */
+const inflight = new Map<string, AbortController>();
+/** Aborts in-flight detail requests that aren't for this title (they're forgotten, so a later open refetches). */
+function dropOtherWarms(ids: (number | undefined)[]): void {
+  const keep = ids.filter((x): x is number => !!x).map((x) => new RegExp(`/${x}(?:[/?&]|$)`));
+  for (const [url, ac] of Array.from(inflight)) {
+    if (keep.some((re) => re.test(url))) continue;
+    inflight.delete(url); cache.delete(url); ac.abort();
+  }
+}
+
 function load(url: string, warmHeaders?: Record<string, string>): Promise<Cached> {
   const hit = cache.get(url);
   if (hit && Date.now() - hit.at < DETAIL_TTL_MS) return hit.p;
-  const p = apiFetch(url, warmHeaders ? { headers: warmHeaders } : undefined).then(async (r) => ({
+  const ac = typeof AbortController === 'undefined' ? null : new AbortController();
+  const init: RequestInit | undefined = warmHeaders || ac ? { ...(warmHeaders ? { headers: warmHeaders } : {}), ...(ac ? { signal: ac.signal } : {}) } : undefined;
+  const p = apiFetch(url, init).then(async (r) => ({
     ok: r.ok, status: r.status, body: await r.text(), type: r.headers?.get?.('Content-Type') || 'application/json',
     warm: !!warmHeaders,
   }));
   cache.set(url, { at: Date.now(), p });
+  if (ac) { inflight.set(url, ac); const done = () => { if (inflight.get(url) === ac) inflight.delete(url); }; p.then(done, done); }
   if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value as string);
   // Errors aren't kept: the next open retries.
   p.then((c) => { if (!c.ok) cache.delete(url); }, () => cache.delete(url));
@@ -111,8 +127,8 @@ async function json(url: string, warmHeaders?: Record<string, string>): Promise<
 }
 
 /** Load and decode an image through the app's memory-only image loader; resolves when ready or failed. */
-export function preloadImage(url: string | null | undefined): Promise<void> {
-  return loadImage(url);
+export function preloadImage(url: string | null | undefined, priority?: 'high' | 'low'): Promise<void> {
+  return loadImage(url, priority);
 }
 
 export function clearlogoPath(kind: 'movie' | 'tv', tmdbId: number): string {
@@ -141,6 +157,9 @@ export async function warmDetail(
     if (parsed.title) plexTitle = { title: parsed.title, year: parsed.year ?? null };
     return parsed;
   };
+  // A user's open: the Plex art (the sheet's art while TMDb is still out) starts at high priority as soon as the Plex
+  // details name it, not after TMDb answers, so a slow TMDb never leaves the art deadline without a backdrop.
+  const earlyArt = (u: string | null) => { if (opts.open && images && u) void preloadImage(finalBackdropUrl(u), 'high'); };
   let plexDone: Promise<unknown> = Promise.resolve();
   if (plexPath && !tmdbId) {
     const plex = await json(plexPath, bg);
@@ -149,10 +168,11 @@ export async function warmDetail(
       tid = (parsed.tmdbId as number | undefined) || (plex.tmdb_id as number | undefined) || undefined;
       plexBackdrop = parsed.backdropUrl || parsed.posterUrl || null;
     }
+    earlyArt(plexBackdrop);
   } else if (plexPath) {
     // Both ids (owned search results): warm Plex too, which runs the
     // server-side tmdb_id type check the popup waits on.
-    plexDone = json(plexPath, bg).then(readPlex);
+    plexDone = json(plexPath, bg).then(readPlex).then((p) => { earlyArt((p?.backdropUrl as string | undefined) ?? null); return p; });
   }
   if (kind === 'movie' && ratingKey) void json(plexRatingsPath(ratingKey));
   const [tm, logo] = await Promise.all([
@@ -178,8 +198,8 @@ export async function warmDetail(
   const path = tm?.backdrop_path as string | undefined;
   await Promise.all([
     // The sheet's one backdrop (finalBackdropUrl): decoding it from the tap overlaps the sheet's enter motion.
-    preloadImage(finalBackdropUrl(path ? tmdbBackdrop(path) : plexBackdrop)),
-    preloadImage(logoImg((logo?.clearlogo_url as string | undefined) ?? null)),
+    preloadImage(finalBackdropUrl(path ? tmdbBackdrop(path) : plexBackdrop), opts.open ? 'high' : 'low'),
+    preloadImage(logoImg((logo?.clearlogo_url as string | undefined) ?? null), opts.open ? 'high' : 'low'),
     // With a poster-derived seed the palette never gates the reveal.
     getSeedColors(kind, ratingKey, tmdbId) ? Promise.resolve(null) : modalColors(kind, ratingKey, tmdbId),
   ]);
@@ -201,6 +221,8 @@ let active = 0;
 let gen = 0;
 
 function pump(): void {
+  // A sheet opening: warm-ups wait for its reveal (its art owns the connections).
+  if (sheetOpening()) { afterSheetPriority(pump); return; }
   while (active < WARM_CONCURRENCY && queue.length) {
     const job = queue.shift()!;
     started.add(job.key);
@@ -388,6 +410,8 @@ export async function openWhenReady(
   if (pending) return;
   pending = true;
   tapAt = now();
+  beginSheetPriority();
+  dropOtherWarms([ratingKey, tmdbId]);
   const img = card?.querySelector('img') ?? null;
   const seed = colorsFromImage(img);
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);
@@ -417,6 +441,8 @@ export function _resetModalPrefetch(): void {
   cache.clear();
   _resetImageLoader();
   queue.length = 0;
+  inflight.clear();
+  _resetSheetPriority();
   started.clear();
   groupCount.clear();
   warmLoad = '';

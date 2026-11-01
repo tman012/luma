@@ -84,3 +84,15 @@ describe('v341d: desktop keeps its sheet spinner until the one reveal (no blank 
     }
   });
 });
+describe('v341e: the logo is held to the title box; the ratings slot is final when the details land', () => {
+  it('logo fills the fixed box with object-fit contain, box clips, and the reserve is decided in the composing render', () => {
+    for (const k of ['MovieDetailModal', 'TvDetailModal']) {
+      const s = src(`components/media/${k}/CompactLayout.tsx`);
+      expect(s, k).toMatch(/data-hero-logo="" [^\n]*\n\s*width=\{300\} height=\{140\}/);
+      expect(s, k).toMatch(/height: '100%', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain'/);
+      expect(s, k).not.toMatch(/maxHeight: '200px'/);
+      expect(s, k).toMatch(/data-title-box=""[\s\S]{0,400}overflow: 'hidden'/);
+      expect(s, k).toMatch(/reserve=\{reserveRatings \|\| \(composed && \(/);
+    }
+  });
+});

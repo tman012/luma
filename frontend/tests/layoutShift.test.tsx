@@ -46,7 +46,7 @@ describe('no layout shift from late images', () => {
 
   it('the phone movie sheet reserves the ratings row while they load and never collapses it', () => {
     const s = read('components/media/MovieDetailModal/CompactLayout.tsx');
-    expect(s).toContain('<RatingsSettle settle={ratingsSettle} size="sm" reserve={reserveRatings ? RATINGS_SLOT_SM : 0} />');   // v336: the settled row (RatingsSettle) keeps the reserve
+    expect(s).toContain('<RatingsSettle settle={ratingsSettle} size="sm" reserve={reserveRatings || (composed && (ratingsLoading || !effRatings.settled || hasRatings)) ? RATINGS_SLOT_SM : 0} />');   // v336: the settled row (RatingsSettle) keeps the reserve
     expect(s).toContain('if (composed && (ratingsLoading || !effRatings.settled || hasRatings)) setReserveRatings(true);');
     expect(RATINGS_SLOT_SM).toBe(32);
     expect(read('components/media/MovieDetailModal/index.tsx')).toContain('    ratingsLoading,\n');

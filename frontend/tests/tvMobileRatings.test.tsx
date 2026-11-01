@@ -49,7 +49,7 @@ describe('both TV layouts use it; the phone sheet renders the bar', () => {
   it('CompactLayout: RatingsBar sm in the reserved slot, after the meta line and before the actions (as the movie sheet)', () => {
     const s = read('components/media/TvDetailModal/CompactLayout.tsx');
     expect(s).toContain("useImdbRatingsState(liveShow?.title, liveShow?.year, liveShow?.ratings)");
-    const slot = s.indexOf('<RatingsSettle settle={ratingsSettle} size="sm" reserve={reserveRatings ? RATINGS_SLOT_SM : 0} />');   // v336: the settled row
+    const slot = s.indexOf('<RatingsSettle settle={ratingsSettle} size="sm" reserve={reserveRatings || (composed && (ratingsLoading || hasRatings)) ? RATINGS_SLOT_SM : 0} />');   // v336: the settled row
     expect(slot).toBeGreaterThan(0);
     expect(s).toContain('useRatingsSettle(ratingsState.ratings');
     expect(s.lastIndexOf('metaItems.map', slot)).toBeGreaterThan(0);

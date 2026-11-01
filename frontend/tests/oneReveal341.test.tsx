@@ -41,7 +41,7 @@ describe('v341: one reveal for the whole sheet', () => {
   it('every header and body element sits behind the one gate and shares the one fade', () => {
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
       const c = src(`components/media/${k}/CompactLayout.tsx`);
-      expect(c).toMatch(/useOneReveal\(props\.openKey, !loading && !error && !!(liveDetail|liveShow), sheetHero\.state !== 'hold', ratingsSettle\.shown,\s*sheetHero\.deadline/);
+      expect(c).toMatch(/useOneReveal\(props\.openKey, !loading && !error && !!(liveDetail|liveShow), sheetHero\.state !== 'hold'( && artInFrame)?, ratingsSettle\.shown,\s*sheetHero\.deadline/);
       // title/logo
       expect(c).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1, transition: reducedMotion\(\) \? 'none' : HERO_FADE/);
       // backdrop

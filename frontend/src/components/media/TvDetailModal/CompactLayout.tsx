@@ -491,14 +491,16 @@ export function CompactLayout(props: TvModalViewProps) {
                     display: 'flex',
                     alignItems: 'flex-end',
                     justifyContent: 'center',
-                    overflow: 'visible',
+                    overflow: 'hidden',
                   }}
                 >
                   <div data-hero-title={sheetHero.state} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
                     opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1, transition: reducedMotion() ? 'none' : HERO_FADE }}>
                   {sheetHero.state === 'logo' && sheetHero.logo ? (
                     <img data-hero-logo="" src={sheetHero.logo} onError={sheetHero.logoFailed} alt={show?.title}
-                        style={{ maxWidth: 'calc(100% - 32px)', maxHeight: '200px', objectFit: 'contain', filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }} />
+                        width={300} height={140}
+                        // Held to the fixed title box: the logo's intrinsic size never drives layout (iOS grew the box).
+                        style={{ display: 'block', width: 'calc(100% - 32px)', height: '100%', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', objectPosition: 'center bottom', filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }} />
                   ) : (
                   <h1
                     style={{
@@ -721,7 +723,7 @@ export function CompactLayout(props: TvModalViewProps) {
                     )}
 
                     {/* Ratings bar — centered icons (same slot as the movie sheet) */}
-                    <RatingsSettle settle={ratingsSettle} size="sm" reserve={reserveRatings ? RATINGS_SLOT_SM : 0} />
+                    <RatingsSettle settle={ratingsSettle} size="sm" reserve={reserveRatings || (composed && (ratingsLoading || hasRatings)) ? RATINGS_SLOT_SM : 0} />
 
                     {activeSeasonData ? (
                       <div style={{ marginTop: '10px' }}>

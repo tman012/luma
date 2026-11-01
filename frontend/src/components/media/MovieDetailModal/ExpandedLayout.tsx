@@ -341,8 +341,17 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   } = props;
   const titleState = useTitleReveal(logoInput(liveDetail), liveDetail?.title, liveDetail?.backdropUrl || liveDetail?.posterUrl);
   // ONE backdrop per open (useSheetBackdrop): latched once decoded or at the cap, never swapped after.
-  const sheetHero = useSheetHero(finalBackdropUrl(liveDetail?.backdropUrl), !!liveDetail, liveDetail?.clearLogoUrl, logoInput(liveDetail) !== undefined, props.openKey);
+  const artCandidate = finalBackdropUrl(liveDetail?.backdropUrl);
+  const sheetHero = useSheetHero(artCandidate, !!liveDetail, liveDetail?.clearLogoUrl, logoInput(liveDetail) !== undefined, props.openKey);
   const sheetArt = sheetHero.art;
+  // The backdrop img mounts (hidden) as soon as its URL is known, so it has painted by the one reveal.
+  const artEl = sheetArt ?? (sheetHero.state === 'hold' ? artCandidate : null);
+  // The one reveal waits for that img element itself to have loaded (a warm open: the decoded art still needs its
+  // element's load), so the backdrop is in the reveal frame; an error settles it too.
+  // Per open: a reopen mounts a new img, so the last open's load doesn't count.
+  const [artPaintedAt, setArtPaintedAt] = useState<{ key: unknown; url: string } | null>(null);
+  const setArtPainted = (url: string) => setArtPaintedAt({ key: props.openKey, url });
+  const artInFrame = !sheetArt || (!!artPaintedAt && artPaintedAt.key === props.openKey && artPaintedAt.url === sheetArt);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -405,7 +414,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const ratingsSettle = useRatingsSettle(effectiveRatings, !!liveDetail && !props.ratingsLoading && props.ratingsSettled !== false, props.openKey, !!liveDetail);
   // ONE reveal (useOneReveal): backdrop, logo or title, meta, ratings and buttons together; the button set
   // (trailer, ownership) is decided at the reveal so the row never re-flows.
-  const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold', ratingsSettle.shown,
+  const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
     sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey), sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);
@@ -754,11 +763,11 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               transition: 'opacity 0.4s ease-out',
             }}
           >
-            {sheetArt ? (
+            {artEl ? (
               <img
-                key={sheetArt}
-                src={sheetArt}
-                alt=""
+                key={`${String(props.openKey)}|${artEl}`}
+                src={artEl}
+                alt="" fetchPriority="high" onLoad={() => setArtPainted(artEl)} onError={() => setArtPainted(artEl)}
                 style={{
                   ...revealStyle(reveal.revealed ? sheetHero.state : 'hold'), animation: reveal.revealed ? HERO_ANIM : 'none',
                   width: '100%',

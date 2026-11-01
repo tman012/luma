@@ -105,7 +105,7 @@ describe('one backdrop per sheet open', () => {
 
   it('preload at tap: the warm-up started by the tap downloads the same final image', () => {
     const s = src('services/modalPrefetch.ts');
-    expect(s).toMatch(/preloadImage\(finalBackdropUrl\(path \? tmdbBackdrop\(path\) : plexBackdrop\)\)/);
+    expect(s).toMatch(/preloadImage\(finalBackdropUrl\(path \? tmdbBackdrop\(path\) : plexBackdrop\), opts\.open \? 'high' : 'low'\)/);
     expect(s).toMatch(/tapAt = now\(\);[\s\S]*warmDetail\(kind, ratingKey, tmdbId, \{ open: true \}\)/);
   });
 

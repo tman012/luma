@@ -9,7 +9,7 @@
  *   pick is settled and a known backdrop has decoded (or failed, or BACKDROP_ART_DEADLINE_MS passed): a backdrop not decoded by then is dropped for that open (the
  *   no-art state), a logo not decoded is the text title. Once latched nothing changes for that open (`openKey`):
  *   no backdrop arrives later, no swap, no text-to-logo jump. Nothing paints before the latch. */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { tapElapsed } from '@/services/modalPrefetch';
 import type { TitleState } from '@/hooks/useTitleReveal';
 import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
@@ -30,6 +30,7 @@ function useDecoded(url: string | null): { url: string | null; ok: boolean } {
     if (!url) return;
     let live = true;
     const im = new Image();
+    (im as HTMLImageElement & { fetchPriority?: string }).fetchPriority = 'high';
     im.src = url;
     const p = typeof im.decode === 'function' ? im.decode() : new Promise<void>((res, rej) => { im.onload = () => res(); im.onerror = () => rej(); });
     // A decode error settles this URL too (ok: false): a backdrop would show at the cap anyway; a logo falls back to text.
@@ -63,6 +64,11 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
   const cur = st.key === openKey ? st : fresh(openKey);
   const artOk = useDecoded(cur.artDone ? null : art ?? null);
   const logoOk = useDecoded(cur.title ? null : logo ?? null);
+  // The last backdrop that decoded for this open (TV: the Plex art before a TMDb pick replaced the candidate), so the
+  // art deadline latches it rather than no art when the newer pick is still decoding.
+  const good = useRef<{ key: unknown; url: string | null }>({ key: openKey, url: null });
+  if (good.current.key !== openKey) good.current = { key: openKey, url: null };
+  if (artOk.ok && artOk.url && artOk.url === art) good.current.url = artOk.url;
   useEffect(() => {
     setSt(s => (s.key === openKey ? s : fresh(openKey)));
     const t = window.setTimeout(() => setSt(s => (s.key === openKey && !s.capped ? { ...s, capped: true } : s)), capLeft());
@@ -90,8 +96,12 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     const artWait = !!art && artOk.url !== art && !cur.artCapped;
     // At the art deadline a pick still pending (TMDb slow or failing) latches with what has decoded (the Plex art), or
     // no art: never a blank sheet past the cap, and nothing swaps in after.
-    if (!ready && !(cur.capped && artSettled && !artWait) && !(cur.artCapped && present)) return;
-    setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: artIn ? art! : null, artDone: true });
+    // Past the 1.0s deadline with the details in and their backdrop already decoded (TV: the Plex art while TMDb
+    // is still out): latch now; a better pick still on its way doesn't hold a sheet that has its art.
+    const artReady = cur.capped && present && artIn;
+    if (!ready && !(cur.capped && artSettled && !artWait) && !(cur.artCapped && present) && !artReady) return;
+    const fallback = cur.artCapped && present && !artIn ? good.current.url : null;
+    setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: artIn ? art! : fallback, artDone: true });
   }, [art, artOk, artSettled, present, logo, logoOk, logoSettled, cur, openKey]);
   const logoFailed = useCallback(() => setSt(s => (s.key === openKey && s.title === 'logo' ? { ...s, title: 'text', logo: null } : s)), [openKey]);
   return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, deadline: cur.capped, artDeadline: !!cur.artCapped, logoFailed };
