@@ -35,6 +35,7 @@ Self-contained: own state file (data/genre_roulette_state.json), own log, and a
 READ-ONLY ownership read via canon_index. Disabled by default.
 """
 
+from app.err_text import public as _err_public
 import json
 import logging
 import os
@@ -1709,8 +1710,8 @@ def _grab(film: Dict[str, Any], release: Dict[str, Any], radarr,
         logger.error(f"Genre Roulette grab failed for {film['title']}: {e}",
                      exc_info=True)
         if created or prior is not None:
-            _undo_failed_grab(radarr, existing, created, prior, film, str(e))
-        return False, str(e)
+            _undo_failed_grab(radarr, existing, created, prior, film, _err_public(e, 'Grab failed', 'genre_roulette'))
+        return False, 'Grab failed'
 
 
 # ── Cycle ─────────────────────────────────────────────────────────────────
@@ -2590,7 +2591,7 @@ def _guarded(dry_run: bool, scheduled: bool = False) -> None:
         result = run_cycle(dry_run=dry_run, scheduled=scheduled)
     except Exception as e:
         logger.error(f'Genre Roulette cycle error: {e}', exc_info=True)
-        result = {'error': f'Run failed: {e}', 'dry_run': dry_run}
+        result = {'error': _err_public(e, 'Run failed', 'genre_roulette'), 'dry_run': dry_run}
 
     # Stamp last_run (and clear running) in one locked section so a status poll
     # never sees idle-with-stale last_run after a finished cycle.

@@ -5,6 +5,7 @@ Uses OpenAI function calling to interpret voice commands and execute
 actions against Plex (search, playback, control) via existing services.
 """
 
+from app.err_text import public as _err_public
 import json
 import logging
 import time
@@ -383,7 +384,7 @@ def _execute_tool(tool_name: str, args: Dict[str, Any],
 
     except Exception as e:
         logger.error('Tool %s execution failed: %s', tool_name, e)
-        return {'error': str(e)}
+        return {'error': _err_public(e, 'Tool failed', 'voice')}
 
 
 def process_voice_command(
@@ -509,8 +510,8 @@ def process_voice_command(
         logger.error('Voice command failed (%s): %s', error_type, e)
 
         if 'quota' in str(e).lower() or 'billing' in str(e).lower():
-            return {'reply': 'OpenAI quota exceeded. Please check your billing.', 'actions_taken': [], 'error': str(e)}
+            return {'reply': 'OpenAI quota exceeded. Please check your billing.', 'actions_taken': [], 'error': _err_public(e, 'Voice command failed', 'voice')}
         if 'rate' in str(e).lower():
-            return {'reply': 'Too many requests. Please try again in a moment.', 'actions_taken': [], 'error': str(e)}
+            return {'reply': 'Too many requests. Please try again in a moment.', 'actions_taken': [], 'error': _err_public(e, 'Voice command failed', 'voice')}
 
-        return {'reply': f'Sorry, something went wrong: {error_type}', 'actions_taken': [], 'error': str(e)}
+        return {'reply': 'Sorry, something went wrong.', 'actions_taken': [], 'error': _err_public(e, 'Voice command failed', 'voice')}

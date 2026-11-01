@@ -5,6 +5,7 @@ Background daemon that periodically pulls movies from the explore cache
 (skipping Plex-owned and existing Radarr entries).
 """
 
+from app.err_text import public as _err_public
 import json
 import os
 import threading
@@ -223,7 +224,7 @@ def _do_cycle(settings, plex_service, RadarrAPI) -> Dict[str, Any]:
         cached = explore_cache.get_cached_movies(limit=500)
     except Exception as e:
         logger.error(f'Failed to read explore cache: {e}')
-        return {'error': f'Explore cache read failed: {e}', 'checked': 0, 'added': 0, 'skipped': 0, 'errors': []}
+        return {'error': _err_public(e, 'Explore cache read failed', 'now_available'), 'checked': 0, 'added': 0, 'skipped': 0, 'errors': []}
 
     if not cached:
         return {'error': 'Explore cache is empty', 'checked': 0, 'added': 0, 'skipped': 0, 'errors': []}
@@ -275,7 +276,7 @@ def _do_cycle(settings, plex_service, RadarrAPI) -> Dict[str, Any]:
         # would add films already in Plex. Skip the cycle instead — the next
         # one is minutes away and costs nothing to wait for.
         logger.warning(f'Could not build Plex ownership index: {e}')
-        return {'error': f'Plex ownership index unavailable ({e}) — cycle skipped',
+        return {'error': _err_public(e, 'Plex ownership index unavailable — cycle skipped', 'now_available'),
                 'checked': 0, 'added': 0, 'skipped': 0, 'errors': []}
     if not ownership.get('movies'):
         logger.warning('Plex ownership index is empty — skipping cycle rather '
@@ -341,7 +342,7 @@ def _do_cycle(settings, plex_service, RadarrAPI) -> Dict[str, Any]:
             else:
                 errors.append(f'{title} ({year}): Radarr add returned None')
         except Exception as e:
-            errors.append(f'{title} ({year}): {e}')
+            errors.append(f'{title} ({year}): ' + _err_public(e, 'failed', 'now_available'))
             logger.error(f'Now available watchlist: failed to add {title} ({year}): {e}')
 
     # ── Persist added movies to log file ──────────────────────────

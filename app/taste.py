@@ -21,6 +21,7 @@ Self-contained: own DB (data/taste.db), READ-ONLY reads of upgrade_library.db
 for ownership and the rating_key -> tmdb_id bridge.
 """
 
+from app.err_text import public as _err_public
 import json
 import logging
 import math
@@ -387,7 +388,7 @@ def film_brief(tmdb_id: int, settings=None) -> Dict[str, Any]:
                          params={'api_key': key}, timeout=20).json()
     except Exception as e:
         logger.warning(f'Taste: TMDb lookup failed for {tmdb_id}: {e}')
-        return {'tmdb_id': int(tmdb_id), 'title': '', 'error': str(e)}
+        return {'tmdb_id': int(tmdb_id), 'title': '', 'error': _err_public(e, 'Lookup failed', 'taste')}
     return {
         'tmdb_id': int(tmdb_id),
         'title': m.get('title') or '',

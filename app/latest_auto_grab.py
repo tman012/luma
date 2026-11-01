@@ -19,6 +19,7 @@ watchlist automations (trending, now_available) already skip movies that
 exist in Radarr, so cross-automation dedup happens automatically.
 """
 
+from app.err_text import public as _err_public
 import json
 import logging
 import os
@@ -390,7 +391,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
                 logger.warning(f'Latest auto-grab: fetch with {params} failed: {e}')
     except Exception as e:
         logger.error(f'Latest auto-grab: failed to fetch /api/indexer/latest: {e}')
-        return {'error': f'Latest fetch failed: {e}', 'checked': 0, 'grabbed': 0, 'skipped_in_plex': 0, 'skipped_rejected': 0, 'errors': []}
+        return {'error': _err_public(e, 'Latest fetch failed', 'latest_auto_grab'), 'checked': 0, 'grabbed': 0, 'skipped_in_plex': 0, 'skipped_rejected': 0, 'errors': []}
 
     if not items:
         return {'error': 'No items returned from either feed', 'checked': 0, 'grabbed': 0,
@@ -612,7 +613,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
                     f"rejected: {'; '.join(rejections) or push_result.get('error')}"
                 )
         except Exception as e:
-            errors.append(f'{title} ({year}): {e}')
+            errors.append(f'{title} ({year}): ' + _err_public(e, 'failed', 'latest_auto_grab'))
             logger.error(f'Latest auto-grab: failed on {title} ({year}): {e}', exc_info=True)
 
     # Persist new grabbed entries + state

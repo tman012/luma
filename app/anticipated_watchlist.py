@@ -7,6 +7,7 @@ download automatically once released and sources appear. Skips titles already
 owned in Plex or already present in Radarr/Sonarr.
 """
 
+from app.err_text import public as _err_public
 import json
 import os
 import threading
@@ -266,7 +267,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
         # An empty index makes every title look un-owned, so proceeding would
         # add things already in Plex. Skip the cycle instead.
         logger.warning(f'Could not build Plex ownership index: {e}')
-        return {'error': f'Plex ownership index unavailable ({e}) — cycle skipped',
+        return {'error': _err_public(e, 'Plex ownership index unavailable — cycle skipped', 'anticipated'),
                 'added': 0}
     if not ownership.get('movies') and not ownership.get('tv'):
         logger.warning('Plex ownership index is empty — skipping cycle rather '
@@ -325,7 +326,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
                         else:
                             result['errors'].append(f'{title} ({year}): Radarr add returned None')
                     except Exception as e:
-                        result['errors'].append(f'{title} ({year}): {e}')
+                        result['errors'].append(f'{title} ({year}): ' + _err_public(e, 'failed', 'anticipated'))
             else:
                 result['errors'].append('Radarr profile/root folder unavailable')
         else:
@@ -391,7 +392,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
                         else:
                             result['errors'].append(f'{title} ({year}): Sonarr add returned None')
                     except Exception as e:
-                        result['errors'].append(f'{title} ({year}): {e}')
+                        result['errors'].append(f'{title} ({year}): ' + _err_public(e, 'failed', 'anticipated'))
             else:
                 result['errors'].append('Sonarr profile/root folder unavailable')
         else:

@@ -93,16 +93,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-_SECRET_QS = re.compile(r'((?:api_?key|access_token|token|apikey|passkey)=)[^&\s\'"]+', re.I)
-
-
-_SECRET_AUTH = re.compile(r'((?:authorization|x-plex-token|x-api-key)[\'"]?\s*[:=]\s*[\'"]?(?:bearer\s+|basic\s+)?)[^\s\'",&}]+', re.I)
-
-
-def _redact_secrets(value) -> str:
-    """Text for a log line with credential query params masked (requests puts
-    the full URL, api_key included, in HTTPError messages)."""
-    return _SECRET_AUTH.sub(r'\1***', _SECRET_QS.sub(r'\1***', str(value)))
+from app.err_text import SECRET_QS as _SECRET_QS, SECRET_AUTH as _SECRET_AUTH, redact as _redact_secrets  # noqa: E402
 
 
 _PUBLIC_ERROR = 'Something went wrong'
@@ -115,6 +106,16 @@ def _public_error(exc, message: str = _PUBLIC_ERROR) -> str:
         logger.warning("API error (%s): %s", type(exc).__name__, _redact_secrets(exc))
     except Exception:
         pass
+    if message == _PUBLIC_ERROR:
+        try:
+            if request.path.startswith(('/api/settings/test/', '/api/user/test/')):
+                if isinstance(exc, requests.exceptions.SSLError):
+                    return 'SSL certificate problem'
+                if isinstance(exc, (requests.exceptions.InvalidURL, requests.exceptions.MissingSchema,
+                                    requests.exceptions.InvalidSchema)):
+                    return 'Invalid URL'
+        except Exception:
+            pass
     return message
 
 
@@ -562,10 +563,13 @@ def _prefix_image_urls(response):
     return response
 
 
+_ERRORISH_BODY = re.compile(r'"(?:ok|success)"\s*:\s*false|"(?:error|message|detail|errors)"\s*:')
+
+
 @app.after_request
 def _redact_api_error_bodies(response):
     """Backstop: an /api error reply never carries a credential, whatever text a
-    helper put in it (HTTP >= 400, or a JSON body with ok/success false)."""
+    helper put in it (HTTP >= 400, ok/success false, or any nested error/message/detail key, even on a 200)."""
     try:
         if (not request.path.startswith('/api/') or response.is_streamed
                 or response.mimetype != 'application/json'):
@@ -573,10 +577,8 @@ def _redact_api_error_bodies(response):
         body = response.get_data(as_text=True)
         if len(body) > 262144:
             return response
-        if response.status_code < 400:
-            if '"ok": false' not in body and '"success": false' not in body \
-                    and '"ok":false' not in body and '"success":false' not in body:
-                return response
+        if response.status_code < 400 and not _ERRORISH_BODY.search(body):
+            return response
         red = _redact_secrets(body)
         if red != body:
             response.set_data(red)
@@ -4330,7 +4332,7 @@ def add_to_watchlist():
                 else:
                     return jsonify({'error': f"Could not resolve tmdb_id for '{title}' — Radarr lookup failed"}), 502
             except Exception as _lookup_err:
-                return jsonify({'error': f"Could not resolve tmdb_id for '{title}': {_lookup_err}"}), 502
+                return jsonify({'error': _public_error(_lookup_err, f"Could not resolve tmdb_id for '{title}' — Radarr lookup failed")}), 502
         else:
             logger.info(f"[watchlist] using client-provided tmdb_id={tmdb_id} for '{title}'")
 

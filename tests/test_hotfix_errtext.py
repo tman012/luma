@@ -95,3 +95,100 @@ def test_redact_helper_covers_headers_and_params():
     red = app.main._redact_secrets(f'{BAD_URL}&api_key=k2 token=t3 X-Plex-Token: p4 Authorization: Bearer b5')
     for s in (SECRET, 'k2', 't3', 'p4', 'b5'):
         assert s not in red
+
+
+# ── r2 (Tester B1 + Reviewer F1-F4) ─────────────────────────────────
+def test_taste_film_unreachable_tmdb_returns_no_key(client, monkeypatch):
+    """Tester B1 repro: TMDb key set, TMDb unreachable, GET /api/taste/film/1 (a 200)."""
+    from app import taste
+    monkeypatch.setattr(taste, '_tmdb_key', lambda settings=None: SECRET)
+
+    def boom(url, params=None, **kw):
+        raise _rq.exceptions.ConnectionError(
+            f"HTTPSConnectionPool(host='api.themoviedb.org', port=443): Max retries exceeded with url: "
+            f"/3/movie/1?api_key={params['api_key']}")
+    monkeypatch.setattr(_rq, 'get', boom)
+    r = client.get('/api/taste/film/1')
+    body = r.get_data(as_text=True)
+    assert r.status_code == 200
+    for bad in (SECRET, 'api_key', 'HTTPSConnectionPool', 'Max retries'):
+        assert bad not in body, (bad, body)
+    assert r.get_json()['film']['error'] == 'Lookup failed'
+
+
+def test_backstop_redacts_nested_error_on_200(test_app):
+    from flask import jsonify
+    with test_app.test_request_context('/api/anything'):
+        resp = jsonify({'film': {'error': f'boom {BAD_URL}'}, 'items': [{'message': f'token={SECRET}'}]})
+        body = app.main._redact_api_error_bodies(resp).get_data(as_text=True)
+    assert resp.status_code == 200 and SECRET not in body
+
+
+def test_backstop_keeps_json_valid_with_escaped_quote(test_app):
+    import json
+    from flask import jsonify
+    with test_app.test_request_context('/api/anything'):
+        resp = jsonify({'error': 'x apikey=SEK" y', 'h': 'Authorization: Bearer SEK2"'}), 502
+        out = app.main._redact_api_error_bodies(test_app.make_response(resp))
+        data = json.loads(out.get_data(as_text=True))         # must still parse
+    assert 'SEK' not in json.dumps(data)
+
+
+def test_radarr_lookup_error_is_fixed_text():
+    src = open(app.main.__file__).read()
+    assert "{_lookup_err}" not in src
+
+
+def test_test_connection_catch_all_specific_messages(test_app):
+    with test_app.test_request_context('/api/settings/test/radarr'):
+        assert app.main._public_error(_rq.exceptions.SSLError(BAD_URL)) == 'SSL certificate problem'
+        assert app.main._public_error(_rq.exceptions.InvalidURL(BAD_URL)) == 'Invalid URL'
+        assert app.main._public_error(_rq.exceptions.MissingSchema(BAD_URL)) == 'Invalid URL'
+        assert app.main._public_error(RuntimeError(BAD_URL)) == 'Something went wrong'
+    with test_app.test_request_context('/api/ratings/x'):
+        assert app.main._public_error(_rq.exceptions.SSLError(BAD_URL)) == 'Something went wrong'
+
+
+def test_tmdb_test_connection_invalid_url(client, monkeypatch):
+    def boom(*a, **k): raise _rq.exceptions.InvalidURL(f'bad {BAD_URL}')
+    monkeypatch.setattr(app.main.requests, 'get', boom)
+    r = client.post('/api/settings/test/tmdb', json={'api_key': SECRET})
+    body = r.get_data(as_text=True)
+    if r.status_code == 200:
+        assert r.get_json()['message'] == 'Invalid URL'
+    assert SECRET not in body
+
+
+def test_static_no_jsonify_str_e():
+    """Reviewer F4: no jsonify(...) anywhere in app/ carries str(e)/f'{e}', outside the
+    app-authored validation replies."""
+    import re
+    from pathlib import Path
+    root = Path(app.main.__file__).parent
+    allowed = {"return jsonify({'error': str(e)}), 409", "return jsonify({'error': str(e)}), 400",
+               "return jsonify({'error': str(exc)}), exc.status",
+               "return _no_store(jsonify({'error': str(e)}), 502)",   # TmdbError: fixed constants
+               "isinstance(e, daily_missing.PoolError)"}
+    pat = re.compile(r"jsonify\(.*(str\((e|exc|err)\)|\{(e|exc|err|_\w*err)(!r)?\}|repr\((e|exc)\))")
+    bad = []
+    for p in root.rglob('*.py'):
+        for n, ln in enumerate(p.read_text().splitlines(), 1):
+            if pat.search(ln) and not any(a in ln for a in allowed):
+                bad.append(f'{p.name}:{n}: {ln.strip()}')
+    assert bad == [], '\n'.join(bad)
+
+
+def test_200_path_helpers_return_fixed_text(monkeypatch):
+    from app import voice_service
+
+    class Plex:
+        def hub_search(self, *a, **k): raise RuntimeError(BAD_URL)
+    assert voice_service._execute_tool('search_library', {'query': 'x'}, Plex(), None, None) == {'error': 'Tool failed'}
+    import inspect
+    from app import franchise_completer, genre_roulette, movie_night, latest_auto_grab, \
+        now_available_watchlist, anticipated_watchlist
+    for mod in (franchise_completer, genre_roulette, movie_night, latest_auto_grab,
+                now_available_watchlist, anticipated_watchlist, voice_service):
+        src = inspect.getsource(mod)
+        assert "Run failed: {e}" not in src and "'detail': str(e)" not in src and "'error': str(e)" not in src, mod
+        assert 'fetch failed: {e}' not in src and 'unavailable ({e})' not in src, mod

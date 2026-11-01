@@ -20,6 +20,7 @@ Log:   data/franchise_completer_log.json
 """
 
 from __future__ import annotations
+from app.err_text import public as _err_public
 
 import json
 import logging
@@ -320,7 +321,7 @@ def candidates(settings=None) -> Dict[str, Any]:
         collections = _load_collections()
     except Exception as e:
         logger.error('Franchise Completer: collections cache unavailable: %s', e)
-        return {'error': f'Collections cache unavailable: {e}', 'films': [],
+        return {'error': _err_public(e, 'Collections cache unavailable', 'franchise'), 'films': [],
                 'collections_considered': 0}
 
     if not collections:
@@ -621,8 +622,8 @@ def _grab(film: Dict[str, Any], settings) -> Dict[str, Any]:
         logger.error('Franchise Completer grab failed for %s: %s', title, e,
                      exc_info=True)
         if created and existing:
-            _undo_failed_grab(radarr, existing, created, prior, film, str(e))
-        return {'ok': False, 'detail': str(e)}
+            _undo_failed_grab(radarr, existing, created, prior, film, _err_public(e, 'Grab failed', 'franchise'))
+        return {'ok': False, 'detail': 'Grab failed'}
 
 
 
@@ -825,7 +826,7 @@ def _guarded(dry_run: bool, scheduled: bool = False) -> None:
         result = run_cycle(dry_run=dry_run, scheduled=scheduled)
     except Exception as e:
         logger.error('Franchise Completer cycle error: %s', e, exc_info=True)
-        result = {'error': f'Run failed: {e}', 'dry_run': dry_run, 'grabbed': 0, 'picks': []}
+        result = {'error': _err_public(e, 'Run failed', 'franchise'), 'dry_run': dry_run, 'grabbed': 0, 'picks': []}
 
     at = datetime.now(timezone.utc).isoformat()
     with _lock:

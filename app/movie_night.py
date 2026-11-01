@@ -28,6 +28,7 @@ Self-contained: own state file (data/movie_night_state.json), own DB reads
 (canon.db, plus upgrade_library.db READ-ONLY), disabled by default.
 """
 
+from app.err_text import public as _err_public
 import json
 import logging
 import os
@@ -840,7 +841,7 @@ def _grab(film: Dict[str, Any], release: Dict[str, Any], settings) -> tuple:
         return False, reason
     except Exception as e:
         logger.error(f'Movie Night grab failed for {film["title"]}: {e}', exc_info=True)
-        return False, str(e)
+        return False, _err_public(e, 'Grab failed', 'movie_night')
 
 
 # ── Cycle ─────────────────────────────────────────────────────────────────
@@ -1280,7 +1281,7 @@ def _guarded(dry_run: bool, scheduled: bool = False) -> None:
         logger.error(f'Movie Night cycle error: {e}', exc_info=True)
         # A crash is the one outcome the user most needs to see, so it gets
         # recorded like any other rather than leaving the status untouched.
-        result = {'error': f'Run failed: {e}', 'dry_run': dry_run}
+        result = {'error': _err_public(e, 'Run failed', 'movie_night'), 'dry_run': dry_run}
 
     # Stamp last_run (and clear running) in one locked section so a status poll
     # never sees idle-with-stale last_run after a finished cycle.
