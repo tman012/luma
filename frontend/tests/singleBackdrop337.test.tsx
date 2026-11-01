@@ -152,13 +152,32 @@ describe('one backdrop per sheet open', () => {
     expect(src('hooks/useSheetBackdrop.ts')).toMatch(/im\.src = ''/);
   });
 
-  it('the seed shows the tapped year in the meta row; the other rows stay reserved', async () => {
+  it('v340: nothing in the seeded sheet header (year included) is visible before the one reveal', async () => {
     const { ReservedRows } = await import('@/components/media/sheetRows');
-    const r = render(<ReservedRows actions={null} meta="2021" />);
-    const m = r.container.querySelector('[data-seed-meta]') as HTMLElement;
-    expect(m.textContent).toBe('2021');
-    expect(m.style.opacity).toBe('');
-    expect(r.container.querySelector('[data-box="overview"]')!.closest('div[style*="opacity: 0"]')).not.toBeNull();
+    const r = render(<ReservedRows actions={null} />);
+    // Every text-bearing node of the seed rows sits under an opacity-0 box: no year, no meta, no pill text.
+    const meta = r.container.querySelector('[data-box="meta"]') as HTMLElement;
+    expect(meta.style.opacity).toBe('0');
+    expect(meta.textContent!.trim()).toBe('');
+    expect(r.container.querySelector('[data-seed-meta]')).toBeNull();
+    for (const el of Array.from(r.container.querySelectorAll('span,p'))) {
+      expect((el as HTMLElement).closest('[style*="opacity: 0"]')).not.toBeNull();
+    }
+    // The tap's year never reaches the seed: useSeededHero has no year, no compact layout passes one.
+    expect(src('components/layout/SheetFrame.tsx')).not.toMatch(/tap!\.year/);
+    for (const k of ['MovieDetailModal', 'TvDetailModal']) {
+      const c = src(`components/media/${k}/CompactLayout.tsx`);
+      expect(c).not.toMatch(/hero\.year/);
+      expect(c).not.toMatch(/<ReservedRows[^>]*meta=/);
+      // The seeded title/logo box holds at opacity 0 until the hero is decided (one fade with the backdrop).
+      expect(c).toMatch(/opacity: sheetHero\.state === 'hold' \? 0 : 1/);
+    }
+    // The real meta row (in the gated details) still carries the year, unchanged.
+    expect(src('components/media/MovieDetailModal/CompactLayout.tsx')).toMatch(/if \(detail\?\.year\) metaItems\.push\(String\(detail\.year\)\)/);
+    expect(src('components/media/TvDetailModal/CompactLayout.tsx')).toMatch(/if \(show\?\.year\) metaItems\.push\(String\(show\.year\)\)/);
+    for (const k of ['MovieDetailModal', 'TvDetailModal']) {
+      expect(src(`components/media/${k}/CompactLayout.tsx`)).toMatch(/<div data-box="meta"/);
+    }
   });
 
   it('logo decode error (404 / corrupt): the text title, decided before the reveal, no later swap', async () => {

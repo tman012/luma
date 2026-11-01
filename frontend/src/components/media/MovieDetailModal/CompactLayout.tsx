@@ -459,7 +459,7 @@ export function CompactLayout(props: MovieModalViewProps) {
           <SeedLayer show={shellShown.current} ready={hero.seeded ? detailsIn : composed} overlap={100} hero={hero.seeded ? {
             art: <BackdropHero backdropUrl={sheetArt} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
             wash: washEl, title: titleEl } : undefined} rows={
-            <ReservedRows meta={hero.seeded ? hero.year : null} ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
+            <ReservedRows ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
               <div data-action-row="" data-modal-actions="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', padding: '20px 16px', maxWidth: `${76 + 32}px`, margin: '0 auto', boxSizing: 'border-box' }}>
                 <ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} />
               </div>} />} />

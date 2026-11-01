@@ -541,7 +541,7 @@ export function CompactLayout(props: TvModalViewProps) {
           <SeedLayer show={shellShown.current} ready={hero.seeded ? detailsIn : composed} overlap={220} hero={hero.seeded ? {
             art: <BackdropHero backdropUrl={sheetArt} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
             wash: washEl, title: titleEl } : undefined} rows={
-            <ReservedRows meta={hero.seeded ? hero.year : null} pillKept={seedOwned !== false} ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
+            <ReservedRows pillKept={seedOwned !== false} ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
               <div data-modal-actions="" style={{ display: 'flex', justifyContent: 'center', gap: '18px', padding: '20px 16px' }}>
                 <span data-modal-keep="" style={{ display: 'contents' }}><ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} /></span>
               </div>} />} />
