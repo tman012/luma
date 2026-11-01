@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { is_admin: true } }) }));
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => new Proxy({}, { get: () => () => () => {} }) }));
-vi.mock('@/hooks/useImdbRatings', () => ({ useImdbRatingsState: () => ({ ratings: null, loading: false }), useImdbRatings: () => null }));
+vi.mock('@/hooks/useImdbRatings', () => ({ useImdbRatingsState: () => ({ ratings: null, loading: false }), useImdbRatings: () => null, ratingsDone: () => true }));
 vi.mock('@/hooks/useTitleReveal', () => ({ useTitleReveal: () => 'text', logoInput: () => null, titleTextStyle: () => ({ display: 'block' }) }));
 vi.mock('@/services/modalPrefetch', async (orig) => ({
   ...(await orig<typeof import('@/services/modalPrefetch')>()),

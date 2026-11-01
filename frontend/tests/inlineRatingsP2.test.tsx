@@ -20,12 +20,12 @@ describe('ratings inline with details', () => {
   it('TV in the minimal build shows the inline ratings, without any ratings request', () => {
     const f = vi.fn(); vi.stubGlobal('fetch', f);
     const h = renderHook(() => useImdbRatingsState('Severance', 2022, R));
-    expect(h.result.current).toEqual({ ratings: R, loading: false });
+    expect(h.result.current).toEqual({ ratings: R, loading: false, doneFor: 'Severance' });
     expect(f).not.toHaveBeenCalled();
   });
   it('the movie sheet uses inline ratings and skips the Plex, OMDb and RT requests', () => {
     const s = src('hooks/useMovieDetail.ts');
-    expect(s).toMatch(/if \(inline !== undefined\) \{\s*setRatings\(hasAnyRating\(inline\) \? inline : null\);\s*setRatingsLoading\(false\);\s*return;/);
+    expect(s).toMatch(/if \(inline !== undefined\) \{\s*setRatings\(hasAnyRating\(inline\) \? inline : null\);\s*setRatingsLoading\(false\);\s*setRatingsSettled\(true\);\s*return;/);
     expect(src('components/media/MovieDetailModal/effectiveRatings.ts')).toMatch(/const needRt = !inline &&/);
     expect(src('components/media/MovieDetailModal/CompactLayout.tsx')).toMatch(/detail\?\.ratings !== undefined\)/);
   });

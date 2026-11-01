@@ -1,3 +1,4 @@
+import { invalidateDetails } from '@/services/modalPrefetch';
 import { isMinimal } from '@/minimal';
 import { SHEET_EXIT_MS, useCloseOnce } from '@/components/layout/SheetFrame';
 import { useState, useEffect, useCallback } from 'react';
@@ -28,10 +29,12 @@ export function MovieDetailModal({
   const [ids, setIds] = useState<{ ratingKey?: number; tmdbId?: number }>({ ratingKey, tmdbId });
   const [reloadNonce, setReloadNonce] = useState(0);
   const [matchToast, setMatchToast] = useState<string | null>(null);
-  const { detail, ratings, ratingsLoading, loading, error, trailerKey, ultraBlurColors, resolvedTmdbId } =
+  const { detail, ratings, ratingsLoading, ratingsSettled, loading, error, trailerKey, ultraBlurColors, resolvedTmdbId } =
     useMovieDetail(ids.ratingKey, ids.tmdbId, reloadNonce);
 
   const handleMatched = useCallback((r: FixMatchResult) => {
+    // The old title's details and ratings must not come back from the cache.
+    invalidateDetails();
     setIds((prev) => ({
       ratingKey: r.rating_key || prev.ratingKey,
       tmdbId: r.unmatched ? prev.tmdbId : r.tmdb_id ?? prev.tmdbId,
@@ -128,6 +131,7 @@ export function MovieDetailModal({
     detail,
     ratings,
     ratingsLoading,
+    ratingsSettled,
     trailerKey,
     ultraBlurColors,
     resolvedTmdbId,
@@ -184,7 +188,8 @@ export function MovieDetailModal({
   // The layouts will pass these through to SourcesPanel/UpgradeModal
   const extendedProps = {
     ...viewProps,
-    openKey: `${ratingKey ?? ''}:${tmdbId ?? ''}`,
+    // Keyed by the resolved ids and the match reload, so a Fix Match starts a new ratings row.
+    openKey: `${ids.ratingKey ?? ''}:${ids.tmdbId ?? ''}:${reloadNonce}`,
     onSourcesGrabbed: handleSourcesGrabbed,
     onUpgradeAdded: handleUpgradeAdded,
     onWatchlistRemoved: handleWatchlistRemoved,
