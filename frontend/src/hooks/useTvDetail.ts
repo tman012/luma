@@ -243,8 +243,10 @@ export function useTvDetail(
 
           if (plexTmdbId && !cancelled) {
             // We got a TMDb ID from Plex guids — fetch rich details from TMDb
-            const tmdbResp = earlyTmdb ?? await detailFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal });
-            if (tmdbResp.ok) {
+            // A TMDb network error falls back to the Plex details, as a TMDb error status does.
+            const tmdbResp = earlyTmdb ?? await detailFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal })
+              .catch((e: unknown) => { if ((e as { name?: string })?.name === 'AbortError') throw e; return null; });
+            if (tmdbResp?.ok) {
               const tmdbData = (await tmdbResp.json()) as Record<string, unknown>;
               if (!cancelled) {
                 const parsed = parseTmdbTvResponse(tmdbData);
@@ -270,6 +272,7 @@ export function useTvDetail(
               // TMDb fetch failed, fall back to Plex-only data
               const parsed = parsePlexTvResponse(plexData);
               parsed.ratingKey = ratingKey;
+              parsed.isOwned = true;
               setShow(parsed);
               setLoading(false);
               setTrailerKey(null);

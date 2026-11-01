@@ -165,7 +165,7 @@ describe('one backdrop per sheet open', () => {
       expect(e).toMatch(/revealStyle\(reveal\.revealed \? sheetHero\.state : 'hold'\), animation: reveal\.revealed \? HERO_ANIM : 'none'/);
       expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1,\s*transition: `transform [^`]*\$\{HERO_FADE\}`/);
     }
-    expect(src('components/media/BackdropHero.tsx')).toMatch(/transition: reducedMotion\(\) \|\| \(handoff && handoff === src\) \? 'none' : 'opacity 0\.45s ease-out'/);
+    expect(src('components/media/BackdropHero.tsx')).toMatch(/transition: reducedMotion\(\) \? 'none' : 'opacity 0\.45s ease-out'/);
   });
 
   it('empty hero is charcoal APP_BG until its image has loaded', () => {

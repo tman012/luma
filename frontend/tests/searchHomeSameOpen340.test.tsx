@@ -4,13 +4,13 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { resultIds, openIds } from '@/services/searchApi';
 import { openDetail } from '@/pages/MinimalHomePage';
-import { BackdropHero, _resetPaintedBackdrops } from '@/components/media/BackdropHero';
+import { BackdropHero } from '@/components/media/BackdropHero';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 import type { SearchMovie } from '@/services/searchApi';
 
 const src = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8');
 const fx = { headerImgStyle: {}, headerContainerMask: {} } as unknown as BackdropEffects;
-afterEach(() => { cleanup(); _resetPaintedBackdrops(); });
+afterEach(() => { cleanup(); });
 
 function homeCall(card: Record<string, unknown>) {
   const calls: { kind: string; o: Record<string, unknown> }[] = [];
@@ -44,22 +44,16 @@ describe('v340: search opens a title exactly like Home', () => {
     }
   });
 
-  it('one backdrop src; the seed-to-details handoff of the same src paints at once, with no fade-in', () => {
+  it('one backdrop src per hero, faded in once when it paints (v341: no seed handoff left, the hero mounts at the reveal)', () => {
     const a = render(<BackdropHero backdropUrl="/bd.jpg" effects={fx} phase="visible" instant />);
     const img = a.container.querySelector('img')!;
     expect(img.style.opacity).toBe('0');
     expect(img.style.transition).toMatch(/opacity 0\.45s/);
     fireEvent.load(img);
     expect(img.style.opacity).toBe('1');
-    // The details' hero mounts on the same src as the seed leaves: shown on its first frame, no transition.
-    const b = render(<BackdropHero backdropUrl="/bd.jpg" effects={fx} phase="visible" instant />);
-    const im2 = b.container.querySelector('img')!;
-    expect(im2.style.opacity).toBe('1');
-    expect(im2.style.transition).toBe('none');
-    expect(b.container.querySelectorAll('img')).toHaveLength(1);
-    // A different image still fades in once.
-    const c = render(<BackdropHero backdropUrl="/other.jpg" effects={fx} phase="visible" instant />);
-    expect(c.container.querySelector('img')!.style.opacity).toBe('0');
+    expect(a.container.querySelectorAll('img')).toHaveLength(1);
+    expect(src('components/media/BackdropHero.tsx')).not.toMatch(/PAINTED|handoff/);
   });
+
 
 });
