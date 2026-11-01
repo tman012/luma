@@ -46,21 +46,26 @@ describe('one backdrop per sheet open', () => {
     expect(h.result.current).toBe('/tmdb-textless.jpg');
   });
 
-  it('cap fallback: at 1.2s the best available image shows, and nothing swaps afterward', async () => {
+  it('v341 deadline: at 1.0s only a decoded image shows; one not decoded is dropped for that open (no-art), never later', async () => {
+    expect(BACKDROP_CAP_MS).toBe(1000);
     const h = mount({ c: '/slow.jpg', s: true, k: 'a' });
     act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS - 1); });
     expect(h.result.current).toBeNull();
     act(() => { vi.advanceTimersByTime(1); });
-    expect(h.result.current).toBe('/slow.jpg');
+    expect(h.result.current).toBeNull();
+    await decode('/slow.jpg');
+    expect(h.result.current).toBeNull();
     h.rerender({ c: '/later-better.jpg', s: true, k: 'a' });
-    expect(h.result.current).toBe('/slow.jpg');
-    expect(decodes.has('/later-better.jpg')).toBe(false);
+    expect(h.result.current).toBeNull();
   });
 
-  it('cap with nothing known yet: the first image that arrives is the only one', async () => {
+  it('v341 deadline before the details: the hero latches when the pick settles, with what has decoded by then', async () => {
     const h = mount({ c: null, s: false, k: 'a' });
     act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
     h.rerender({ c: '/first.jpg', s: false, k: 'a' });
+    expect(h.result.current).toBeNull();
+    await decode('/first.jpg');
+    h.rerender({ c: '/first.jpg', s: true, k: 'a' });
     expect(h.result.current).toBe('/first.jpg');
     h.rerender({ c: '/second.jpg', s: true, k: 'a' });
     expect(h.result.current).toBe('/first.jpg');
@@ -132,7 +137,7 @@ describe('one backdrop per sheet open', () => {
     expect(HERO_FADE).toBe('opacity 0.45s ease-out');
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
       const c = src(`components/media/${k}/CompactLayout.tsx`);
-      expect(c).toMatch(/data-hero-title=\{sheetHero\.state\}[\s\S]{0,200}opacity: sheetHero\.state === 'hold' \? 0 : 1, transition: reducedMotion\(\) \? 'none' : HERO_FADE/);
+      expect(c).toMatch(/data-hero-title=\{sheetHero\.state\}[\s\S]{0,200}opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1, transition: reducedMotion\(\) \? 'none' : HERO_FADE/);
       const e = src(`components/media/${k}/ExpandedLayout.tsx`);
       expect(e).toMatch(/revealStyle\(sheetHero\.state\), animation: HERO_ANIM/);
       expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \? 0 : 1,\s*transition: `transform [^`]*\$\{HERO_FADE\}`/);
@@ -170,7 +175,7 @@ describe('one backdrop per sheet open', () => {
       expect(c).not.toMatch(/hero\.year/);
       expect(c).not.toMatch(/<ReservedRows[^>]*meta=/);
       // The seeded title/logo box holds at opacity 0 until the hero is decided (one fade with the backdrop).
-      expect(c).toMatch(/opacity: sheetHero\.state === 'hold' \? 0 : 1/);
+      expect(c).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1/);
     }
     // The real meta row (in the gated details) still carries the year, unchanged.
     expect(src('components/media/MovieDetailModal/CompactLayout.tsx')).toMatch(/if \(detail\?\.year\) metaItems\.push\(String\(detail\.year\)\)/);

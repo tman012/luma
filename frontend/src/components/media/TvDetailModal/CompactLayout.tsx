@@ -21,6 +21,7 @@ import type {
 import { autoSearchSeason } from '@/services/sonarrApi';
 import { isSeasonMonitored } from './tvSourcesUtils';
 import { UltraBlurOverlay } from '../UltraBlurOverlay';
+import { useOneReveal } from '@/hooks/useOneReveal';
 import { BackdropHero } from '../BackdropHero';
 import { useBackdropEffects } from '@/hooks/useBackdropEffects';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
@@ -231,6 +232,9 @@ export function CompactLayout(props: TvModalViewProps) {
   // The row settles once and fades in together (useRatingsSettle); a later answer is dropped for this open.
   const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey, !!show);
   const hasRatings = !!ratingsSettle.ratings;
+  // ONE reveal: backdrop, title/logo, meta, ratings and buttons together, in one fade (useOneReveal).
+  const reveal = useOneReveal(props.openKey, !loading && !error && !!show, sheetHero.state !== 'hold', ratingsSettle.shown,
+    sheetHero.deadline, !!false);
     // Known at tap time: outside minimal builds the ratings row has a source (OMDb/RT); the seed reserves it and the
   // row keeps that box, so a late ratings fetch never moves the rows below.
   const ratingsExpected = useRef(ratingsExpectedAtTap(false)).current;
@@ -489,7 +493,7 @@ export function CompactLayout(props: TvModalViewProps) {
                   }}
                 >
                   <div data-hero-title={sheetHero.state} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-                    opacity: sheetHero.state === 'hold' ? 0 : 1, transition: reducedMotion() ? 'none' : HERO_FADE }}>
+                    opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1, transition: reducedMotion() ? 'none' : HERO_FADE }}>
                   {sheetHero.state === 'logo' && sheetHero.logo ? (
                     <img data-hero-logo="" src={sheetHero.logo} onError={sheetHero.logoFailed} alt={show?.title}
                         style={{ maxWidth: 'calc(100% - 32px)', maxHeight: '200px', objectFit: 'contain', filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }} />
@@ -589,11 +593,11 @@ export function CompactLayout(props: TvModalViewProps) {
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
-                hold={heroHold} instant
+                hold={!reveal.revealed} instant
               />
 
               {/* === CENTERED CONTENT AREA === */}
-              <div data-reveal={titleState !== 'hold' ? 'shown' : 'hold'} data-details-fade={hero.seeded ? '' : undefined} style={{
+              <div data-reveal={titleState !== 'hold' ? 'shown' : 'hold'} data-reveal-gate={reveal.revealed ? 'shown' : 'hold'} style={{
                 position: 'relative',
                 zIndex: 3,
                 textAlign: 'center',

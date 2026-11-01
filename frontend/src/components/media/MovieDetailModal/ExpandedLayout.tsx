@@ -1,3 +1,4 @@
+import { useOneReveal } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
@@ -402,6 +403,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const effectiveRatings = useMemo<Ratings | null>(() => mergeRatings(ratings, reviewData), [ratings, reviewData]);
   // ONE settled row, faded in once; the Info shelf's later reviews don't add badges to it for this open.
   const ratingsSettle = useRatingsSettle(effectiveRatings, !!detail && !props.ratingsLoading && props.ratingsSettled !== false, props.openKey, !!detail);
+  // The action row is decided when the details first show: a trailer known by then, or left out for this open,
+  // so the buttons never re-flow (useOneReveal's trailer latch).
+  const actionsTrailer = useOneReveal(props.openKey, !!detail, true, true, true, !!trailerKey).trailer;
   const ratingsRow = useRef(ratingsExpectedAtTap(true)).current || !!ratingsSettle.ratings;
 
 
@@ -1069,7 +1073,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                     />
                     </span>
                   )}
-                  {trailerKey && (
+                  {trailerKey && actionsTrailer && (
                     <PillButton
                       focusKey="mm-info-trailer"
                       zoneId="movie-detail-modal"
