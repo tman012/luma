@@ -87,8 +87,8 @@ def test_backstop_redacts_secrets_in_error_bodies(test_app):
             body = app.main._redact_api_error_bodies(resp).get_data(as_text=True)
         assert SECRET not in body and 'plextok99' not in body and 'abc.def' not in body
     with test_app.test_request_context('/api/anything'):
-        ok = jsonify({'ok': True, 'url': BAD_URL})       # success bodies are untouched
-        assert SECRET in app.main._redact_api_error_bodies(ok).get_data(as_text=True)
+        ok = jsonify({'ok': True, 'url': BAD_URL})       # r2b: every /api JSON reply is redacted, 200s too
+        assert SECRET not in app.main._redact_api_error_bodies(ok).get_data(as_text=True)
 
 
 def test_redact_helper_covers_headers_and_params():
@@ -192,3 +192,34 @@ def test_200_path_helpers_return_fixed_text(monkeypatch):
         src = inspect.getsource(mod)
         assert "Run failed: {e}" not in src and "'detail': str(e)" not in src and "'error': str(e)" not in src, mod
         assert 'fetch failed: {e}' not in src and 'unavailable ({e})' not in src, mod
+
+
+def test_backstop_redacts_every_200_and_keeps_others_byte_identical(test_app):
+    import json
+    from flask import jsonify
+    with test_app.test_request_context('/api/anything'):
+        resp = jsonify({'poster': f'http://x/p.jpg?api_key={SECRET}', 'title': 'Dune',
+                        'h': f'X-Plex-Token: {SECRET}\\"'})
+        out = app.main._redact_api_error_bodies(resp)
+        data = json.loads(out.get_data(as_text=True))
+    assert out.status_code == 200 and SECRET not in json.dumps(data) and data['title'] == 'Dune'
+    with test_app.test_request_context('/api/anything'):
+        plain = jsonify({'ok': True, 'title': 'Dune'})
+        before = plain.get_data()
+        assert app.main._redact_api_error_bodies(plain).get_data() == before
+
+
+def test_omdb_votes_log_is_redacted(monkeypatch, caplog):
+    import logging
+    app.main.settings.update({'apis': {'omdb': {'api_key': SECRET}}})
+
+    def boom(url, **kw): raise _rq.exceptions.ConnectionError(f'Max retries exceeded with url: {url}')
+    monkeypatch.setattr(app.main.requests, 'get', boom)
+    with caplog.at_level(logging.DEBUG):
+        try:
+            app.main.fetch_imdb_votes_batch([{'title': 'Dune', 'year': 2021}])
+        except Exception:
+            pass
+    src = open(app.main.__file__).read()
+    assert 'OMDB votes for {title}: {_redact_secrets(e)}' in src
+    assert all(SECRET not in r.msg if isinstance(r.msg, str) else True for r in caplog.records)

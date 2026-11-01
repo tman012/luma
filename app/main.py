@@ -563,21 +563,26 @@ def _prefix_image_urls(response):
     return response
 
 
-_ERRORISH_BODY = re.compile(r'"(?:ok|success)"\s*:\s*false|"(?:error|message|detail|errors)"\s*:')
+_REDACT_BODY_MAX = 262144
+_REDACT_HINTS = ('KEY=', 'TOKEN=', 'AUTHORIZATION', 'API-KEY', 'PLEX-TOKEN')
 
 
 @app.after_request
 def _redact_api_error_bodies(response):
-    """Backstop: an /api error reply never carries a credential, whatever text a
-    helper put in it (HTTP >= 400, ok/success false, or any nested error/message/detail key, even on a 200)."""
+    """Backstop: no /api JSON reply carries a credential (apikey=, token=, X-Plex-Token,
+    Authorization, X-Api-Key), whatever text a helper put in it. Cheap: bodies over
+    256 KB are skipped, and a body is only rewritten when a pattern actually matches,
+    so every other reply goes out byte for byte."""
     try:
         if (not request.path.startswith('/api/') or response.is_streamed
-                or response.mimetype != 'application/json'):
+                or response.direct_passthrough or response.mimetype != 'application/json'):
+            return response
+        length = response.calculate_content_length()
+        if length is None or length > _REDACT_BODY_MAX:
             return response
         body = response.get_data(as_text=True)
-        if len(body) > 262144:
-            return response
-        if response.status_code < 400 and not _ERRORISH_BODY.search(body):
+        upper = body.upper()
+        if not any(h in upper for h in _REDACT_HINTS):
             return response
         red = _redact_secrets(body)
         if red != body:
@@ -1046,7 +1051,7 @@ def fetch_imdb_votes_batch(items, max_items=30):
                 else:
                     logger.debug(f"OMDB not found: '{title}' ({year}) - {omdb_data.get('Error', 'Unknown error')}")
         except Exception as e:
-            logger.error(f"Error fetching OMDB votes for {title}: {e}")
+            logger.error(f"Error fetching OMDB votes for {title}: {_redact_secrets(e)}")
 
         return (key, 0)
 
