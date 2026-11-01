@@ -77,4 +77,9 @@ describe('P3 image loader and bundled icons', () => {
     expect(t).toMatch(/seasonRatingsKey\(show, season\)/);
     expect(t).toMatch(/reserve=\{seasonRatingsRow \? RATINGS_SLOT_LG : 0\}/);
   });
+
+  it('phone movie: a ratings source still out at compose (RT reviews) keeps the row reserved', () => {
+    const c = src('src/components/media/MovieDetailModal/CompactLayout.tsx');
+    expect(c).toMatch(/composed && \(ratingsLoading \|\| !effRatings\.settled \|\| hasRatings\)/);
+  });
 });
