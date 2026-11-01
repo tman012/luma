@@ -36,7 +36,7 @@ and "Title (Year)/Title (Year).ext" naming. Rulings for luma-test:
 """
 
 from __future__ import annotations
-from app.err_text import public as _err_public
+from app.err_text import public as _err_public, remote_reason as _remote_reason
 
 import errno
 import logging
@@ -1015,7 +1015,7 @@ def _remote_transfer(src: str, dest: str) -> str:
             _set_inflight(h, dest, tmp)
         else:
             _set_inflight(h, dest, None, abandon=True)
-        raise Transient(_err_public(e, 'remote copy cut off', 'library_mover')) from e
+        raise Transient(_remote_reason(e, 'remote copy cut off', 'library_mover')) from e
     except remote_mover.RemoteMoverError as e:
         _set_inflight(h, dest, None)
         raise Refused(_err_public(e, 'remote copy refused', 'library_mover')) from e

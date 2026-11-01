@@ -18,7 +18,7 @@ PUT  /api/settings/movies/import        {root?, naming?: {standard, folder}}
 POST /api/settings/movies/import/run    one pass now -> {checked, imported}
 """
 from __future__ import annotations
-from app.err_text import public as _err_public
+from app.err_text import public as _err_public, remote_reason as _remote_reason
 
 import hashlib
 import logging
@@ -198,7 +198,7 @@ def copy_verified(src: str, dest: str) -> str:
         except remote_mover.RemoteTransient as e:
             # a cut-off copy (helper unreachable, ssh rc 255, stall, remote reboot) is not a refusal: the
             # grab stays 'grabbed' and the next pass tries again (it used to be 'failed' for good)
-            raise Skip(_err_public(e, 'remote copy cut off', 'movie_import')) from e
+            raise Skip(_remote_reason(e, 'remote copy cut off', 'movie_import')) from e
         except remote_mover.RemoteMoverError as e:
             raise Refused(_err_public(e, 'remote copy refused', 'movie_import')) from e
     if os.path.lexists(dest):

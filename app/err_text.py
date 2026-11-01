@@ -91,3 +91,15 @@ def unmask(new, old):
         o = old if isinstance(old, list) else []
         return [unmask(v, o[i] if i < len(o) else None) for i, v in enumerate(new)]
     return new
+def remote_reason(exc, default: str, where: str = 'remote_mover') -> str:
+    """Fixed, diagnosable text for a remote mover failure (no paths, stderr or hosts)."""
+    text = str(exc).lower()
+    if 'stall' in text:
+        message = 'remote copy stalled'
+    elif 'vanish' in text:
+        message = 'remote partial vanished'
+    elif type(exc).__name__ == 'RemoteConnectionLost':
+        message = 'remote connection lost'
+    else:
+        message = default
+    return public(exc, message, where)
