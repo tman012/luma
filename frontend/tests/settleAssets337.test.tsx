@@ -17,6 +17,7 @@ const { useRatingsSettle, RATINGS_CAP_MS, RATINGS_ICON_CAP_MS } = await import('
 const { RATING_ICONS } = await import('@/utils/ratingIcons');
 const { SkeletonCrossfade, HOME_DECODE_CAP_MS } = await import('@/components/home/Rails');
 const { cardSrcSet, CARD_MAX_DENSITY } = await import('@/components/home/homeApi');
+const { RatingsSettle } = await import('@/components/media/RatingsSettle');
 
 const src = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8');
 beforeEach(() => { vi.useFakeTimers(); });
@@ -87,6 +88,27 @@ function stubDecode(impl: () => Promise<void>) {
 function inViewport() {
   return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: 10, left: 10, bottom: 200, right: 120, width: 110, height: 190, x: 10, y: 10, toJSON: () => ({}) } as DOMRect);
 }
+
+describe('ratings row: text and icons first paint together', () => {
+  it('the fade waits for the row\'s own icon elements to decode, at most RATINGS_ICON_CAP_MS', async () => {
+    let done!: () => void;
+    const dec = stubDecode(() => new Promise<void>(r => { done = r; }));
+    const { container } = render(<RatingsSettle settle={{ shown: true, ratings: imdb }} size="lg" reserve={0} />);
+    const slot = container.querySelector('[data-ratings-slot]') as HTMLElement;
+    expect(slot.style.opacity).toBe('0');
+    await act(async () => { done(); await Promise.resolve(); await Promise.resolve(); });
+    expect(slot.style.opacity).toBe('1');
+    cleanup();
+    stubDecode(() => new Promise<void>(() => {}));
+    const r2 = render(<RatingsSettle settle={{ shown: true, ratings: imdb }} size="lg" reserve={0} />);
+    const s2 = r2.container.querySelector('[data-ratings-slot]') as HTMLElement;
+    act(() => { vi.advanceTimersByTime(RATINGS_ICON_CAP_MS - 1); });
+    expect(s2.style.opacity).toBe('0');
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(s2.style.opacity).toBe('1');
+    dec.mockRestore();
+  });
+});
 
 describe('Home: the reveal waits for the first viewport posters', () => {
   it('holds the skeleton until the posters decode, then reveals; first viewport cards load eager, high priority', async () => {
