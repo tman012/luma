@@ -5,6 +5,7 @@
  *  the reveal: the trailer known by then (or left out for that open) and the ownership then, so the action row
  *  never re-flows. */
 import { useEffect, useRef, useState } from 'react';
+import { endSheetPriority } from '@/loading/sheetPriority';
 
 export interface OneReveal { revealed: boolean; trailer: boolean; owned: boolean }
 export function useOneReveal(openKey: unknown, detailsIn: boolean, heroLatched: boolean, ratingsShown: boolean,
@@ -13,6 +14,7 @@ export function useOneReveal(openKey: unknown, detailsIn: boolean, heroLatched: 
   const cur = st && st.key === openKey ? st : null;
   const ready = !cur && detailsIn && heroLatched && (ratingsShown || deadline) && (ownedKnown || artDeadline);
   useEffect(() => { if (ready) setSt({ key: openKey, trailer: hasTrailer, owned }); }, [ready, openKey, hasTrailer, owned]);
+  useEffect(() => { if (ready) endSheetPriority(); }, [ready]);
   // The render that latches already shows everything (no frame with the details but no title).
   if (ready) return { revealed: true, trailer: hasTrailer, owned };
   return cur ? { revealed: true, trailer: cur.trailer, owned: cur.owned } : { revealed: false, trailer: hasTrailer, owned };

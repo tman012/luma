@@ -13,12 +13,13 @@ function touch(url: string, e: Entry): void {
 
 /** Loads and decodes `url`; resolves when it is ready to paint, or has failed (a failure is forgotten, so the
  *  next request retries). */
-export function loadImage(url: string | null | undefined): Promise<void> {
+export function loadImage(url: string | null | undefined, priority?: 'high' | 'low'): Promise<void> {
   if (!url || typeof Image === 'undefined') return Promise.resolve();
   const hit = entries.get(url);
   if (hit) { touch(url, hit); return hit.ready; }
   const img = new Image();
   img.decoding = 'async';
+  if (priority) (img as HTMLImageElement & { fetchPriority?: string }).fetchPriority = priority;
   const entry: Entry = { img, ready: Promise.resolve(), done: false };
   img.src = url;
   // decode() waits for the load itself and rejects on a broken image; without it, the load event.

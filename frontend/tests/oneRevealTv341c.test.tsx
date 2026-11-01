@@ -20,11 +20,13 @@ const mount = (x: P) => renderHook(({ a, s, p }: P) => useSheetHero(a, s, null, 
 const past = () => { act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); }); act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); }); };
 
 describe('v341c: the TV hero is capped while TMDb is pending', () => {
-  it('TMDb pending past the art deadline latches the decoded Plex art (text title), and nothing swaps in after', async () => {
+  it('TMDb pending past the 1.0s deadline: the decoded Plex art latches at once (text title), and nothing swaps in after', async () => {
     const h = mount({ a: '/plex-art.jpg', s: false, p: true });
     await decode('/plex-art.jpg');
-    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
-    expect(h.result.current.state).toBe('hold');                 // before the cap: still waiting for TMDb
+    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS - 1); });
+    expect(h.result.current.state).toBe('hold');                 // before the deadline: still waiting for TMDb
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(h.result.current).toMatchObject({ state: 'text', art: '/plex-art.jpg' });   // v341e: no 600ms wait
     act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); });
     expect(h.result.current).toMatchObject({ state: 'text', art: '/plex-art.jpg' });
     h.rerender({ a: '/tmdb-textless.jpg', s: true, p: true });   // TMDb lands late

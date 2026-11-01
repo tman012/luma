@@ -1184,8 +1184,17 @@ export function ExpandedLayout(props: TvModalViewProps) {
   } = props;
   const titleState = useTitleReveal(logoInput(liveShow), liveShow?.title, liveShow?.backdropUrl || liveShow?.posterUrl);
   // ONE backdrop per open (useSheetBackdrop): the text-free pick when it arrives before the latch, never swapped after.
-  const sheetHero = useSheetHero(finalBackdropUrl(liveShow?.backdropTextlessUrl ?? liveShow?.backdropUrl), !!liveShow && !liveShow.backdropPending, liveShow?.clearLogoUrl, logoInput(liveShow) !== undefined, props.openKey, !!liveShow);
+  const artCandidate = finalBackdropUrl(liveShow?.backdropTextlessUrl ?? liveShow?.backdropUrl);
+  const sheetHero = useSheetHero(artCandidate, !!liveShow && !liveShow.backdropPending, liveShow?.clearLogoUrl, logoInput(liveShow) !== undefined, props.openKey, !!liveShow);
   const sheetArt = sheetHero.art;
+  // The backdrop img mounts (hidden) as soon as its URL is known, so it has painted by the one reveal.
+  const artEl = sheetArt ?? (sheetHero.state === 'hold' ? artCandidate : null);
+  // The one reveal waits for that img element itself to have loaded (a warm open: the decoded art still needs its
+  // element's load), so the backdrop is in the reveal frame; an error settles it too.
+  // Per open: a reopen mounts a new img, so the last open's load doesn't count.
+  const [artPaintedAt, setArtPaintedAt] = useState<{ key: unknown; url: string } | null>(null);
+  const setArtPainted = (url: string) => setArtPaintedAt({ key: props.openKey, url });
+  const artInFrame = !sheetArt || (!!artPaintedAt && artPaintedAt.key === props.openKey && artPaintedAt.url === sheetArt);
 
   // Determine if we're in active episode-mode display
   const isEpisodeIntent = !showFullShow && !!episodeContext;
@@ -1208,7 +1217,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // ONE settled row, faded in once (useRatingsSettle); a later answer is dropped for this open.
   const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!liveShow && ratingsDone(ratingsState, liveShow?.title), props.openKey, !!liveShow);
   // ONE reveal (useOneReveal): backdrop, logo or title, meta, ratings and buttons together.
-  const reveal = useOneReveal(props.openKey, !loading && !!liveShow, sheetHero.state !== 'hold', ratingsSettle.shown,
+  const reveal = useOneReveal(props.openKey, !loading && !!liveShow, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const show = useRevealFreeze(liveShow, reveal.revealed, props.openKey, TV_TEXT);
@@ -1402,13 +1411,13 @@ export function ExpandedLayout(props: TvModalViewProps) {
                 transition: 'opacity 0.4s ease-out',
               }}
             >
-              {sheetArt ? (
+              {artEl ? (
                 <img
-                  key={sheetArt}
-                  src={perf.limitBackdropResolution && sheetArt.includes('/t/p/original')
-                    ? sheetArt.replace('/t/p/original', '/t/p/w1280')
-                    : sheetArt}
-                  alt=""
+                  key={`${String(props.openKey)}|${artEl}`}
+                  src={perf.limitBackdropResolution && artEl.includes('/t/p/original')
+                    ? artEl.replace('/t/p/original', '/t/p/w1280')
+                    : artEl}
+                  alt="" fetchPriority="high" onLoad={() => setArtPainted(artEl)} onError={() => setArtPainted(artEl)}
                   style={{
                     ...revealStyle(reveal.revealed ? sheetHero.state : 'hold'), animation: reveal.revealed ? HERO_ANIM : 'none',
                     width: '100%',
