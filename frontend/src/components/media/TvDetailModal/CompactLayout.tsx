@@ -234,7 +234,7 @@ export function CompactLayout(props: TvModalViewProps) {
   const hasRatings = !!ratingsSettle.ratings;
   // ONE reveal: backdrop, title/logo, meta, ratings and buttons together, in one fade (useOneReveal).
   const reveal = useOneReveal(props.openKey, !loading && !error && !!show, sheetHero.state !== 'hold', ratingsSettle.shown,
-    sheetHero.deadline, !!false);
+    sheetHero.deadline, false, false, true, sheetHero.artDeadline);
     // Known at tap time: outside minimal builds the ratings row has a source (OMDb/RT); the seed reserves it and the
   // row keeps that box, so a late ratings fetch never moves the rows below.
   const ratingsExpected = useRef(ratingsExpectedAtTap(false)).current;

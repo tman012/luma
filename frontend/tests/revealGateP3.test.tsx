@@ -30,10 +30,10 @@ describe('P3 reveal gate', () => {
     act(() => { vi.advanceTimersByTime(SURFACE_DEADLINE_MS + 10); });
     expect(result.current.shown).toBe(false);
     rerender({ v: { imdb: { score: 7.5 } } as never, s: false });
-    expect(result.current.shown).toBe(true);
-    expect(result.current.ratings).toEqual({ imdb: { score: 7.5 } });
+    expect(result.current.shown).toBe(false);   // v341: empty at the deadline waits for every source (one group)
     rerender({ v: { imdb: { score: 7.5 }, metacritic: { score: 90 } } as never, s: true });
-    expect(result.current.ratings).toEqual({ imdb: { score: 7.5 } });
+    expect(result.current.shown).toBe(true);
+    expect(result.current.ratings).toEqual({ imdb: { score: 7.5 }, metacritic: { score: 90 } });
   });
 
   it('a new open key (Fix Match) starts a new row', () => {

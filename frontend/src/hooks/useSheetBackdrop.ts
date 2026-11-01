@@ -6,7 +6,7 @@
  *   and the logo has decoded or is known to be absent (`logoSettled`); or at BACKDROP_CAP_MS from the tap.
  * - Logo vs. text is decided at the latch: the logo only if it decoded in time, otherwise the text title.
  * - At the deadline (SURFACE_DEADLINE_MS from the tap, the sheet's one revealGate) the hero latches as soon as the
- *   pick is settled, with only what has decoded: a backdrop not decoded by then is dropped for that open (the
+ *   pick is settled and a known backdrop has decoded (or failed, or BACKDROP_ART_DEADLINE_MS passed): a backdrop not decoded by then is dropped for that open (the
  *   no-art state), a logo not decoded is the text title. Once latched nothing changes for that open (`openKey`):
  *   no backdrop arrives later, no swap, no text-to-logo jump. Nothing paints before the latch. */
 import { useCallback, useEffect, useState } from 'react';
@@ -15,6 +15,11 @@ import type { TitleState } from '@/hooks/useTitleReveal';
 import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
 
 export const BACKDROP_CAP_MS = SURFACE_DEADLINE_MS;
+/** A cold open's backdrop-only deadline (PM, v341): past BACKDROP_CAP_MS the whole reveal still waits up to this
+ *  long from the tap for a known backdrop to decode, so backdrop and title fade in together. */
+export const BACKDROP_ART_DEADLINE_MS = 1600;
+/** Details that land past the 1.0s deadline (a slow TMDb): their backdrop still gets this long to decode. */
+export const BACKDROP_LATE_DECODE_MS = BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS;
 /** The hero's one soft fade (backdrop and title/logo together). */
 export const HERO_FADE = 'opacity 0.45s ease-out';
 
@@ -35,19 +40,21 @@ function useDecoded(url: string | null): { url: string | null; ok: boolean } {
   return done;
 }
 
-export function capLeft(): number {
+export function capLeft(cap: number = BACKDROP_CAP_MS): number {
   const e = tapElapsed();
-  return e == null ? BACKDROP_CAP_MS : Math.max(0, BACKDROP_CAP_MS - e);
+  return e == null ? cap : Math.max(0, cap - e);
 }
 
 export interface SheetHero {
   state: TitleState; art: string | null; logo: string | null;
   /** The one deadline has passed for this open. */
   deadline: boolean;
+  /** The cold backdrop-only deadline (BACKDROP_ART_DEADLINE_MS) has passed. */
+  artDeadline: boolean;
   /** The chosen logo failed to paint (img onError): show the text title instead. */
   logoFailed: () => void;
 }
-interface St { key: unknown; capped: boolean; title: 'logo' | 'text' | null; logo: string | null; art: string | null; artDone: boolean }
+interface St { key: unknown; capped: boolean; artCapped?: boolean; title: 'logo' | 'text' | null; logo: string | null; art: string | null; artDone: boolean }
 const fresh = (key: unknown): St => ({ key, capped: false, title: null, logo: null, art: null, artDone: false });
 
 export function useSheetHero(art: string | null | undefined, artSettled: boolean, logo: string | null | undefined,
@@ -61,6 +68,14 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     const t = window.setTimeout(() => setSt(s => (s.key === openKey && !s.capped ? { ...s, capped: true } : s)), capLeft());
     return () => window.clearTimeout(t);
   }, [openKey]);
+  // Details past the 1.0s deadline: the backdrop known then still gets BACKDROP_LATE_DECODE_MS to decode.
+  const lateKnown = cur.capped && artSettled && !cur.artCapped;
+  useEffect(() => {
+    if (!lateKnown) return;
+    const t = window.setTimeout(() => setSt(s => (s.key === openKey && !s.artCapped ? { ...s, artCapped: true } : s)),
+      tapElapsed() == null ? BACKDROP_LATE_DECODE_MS : Math.max(BACKDROP_LATE_DECODE_MS, capLeft(BACKDROP_ART_DEADLINE_MS)));
+    return () => window.clearTimeout(t);
+  }, [lateKnown, openKey]);
   useEffect(() => {
     if (cur.title) return;
     // Only a successful decode counts; a 404 or corrupt image is settled as absent (text title / no art).
@@ -69,11 +84,14 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     const artIn = !!art && artOk.url === art && artOk.ok;
     const ready = artSettled && (art ? artOk.url === art : true) && (logo ? logoIn || logoBad : logoSettled);
     // Past the deadline: latch once the pick is settled (the details are in), with what has decoded.
-    if (!ready && !(cur.capped && artSettled)) return;
+    // Past the deadline: latch once the pick is settled (the details are in), with what has decoded; a known backdrop
+    // still decoding holds the latch until it decodes, fails, or BACKDROP_ART_DEADLINE_MS.
+    const artWait = !!art && artOk.url !== art && !cur.artCapped;
+    if (!ready && !(cur.capped && artSettled && !artWait)) return;
     setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: artIn ? art! : null, artDone: true });
   }, [art, artOk, artSettled, logo, logoOk, logoSettled, cur, openKey]);
   const logoFailed = useCallback(() => setSt(s => (s.key === openKey && s.title === 'logo' ? { ...s, title: 'text', logo: null } : s)), [openKey]);
-  return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, deadline: cur.capped, logoFailed };
+  return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, deadline: cur.capped, artDeadline: !!cur.artCapped, logoFailed };
 }
 /** The same fade for an element that mounts at the latch (the desktop backdrop img). */
 export const HERO_ANIM = 'm-crossfade 0.45s ease-out both';

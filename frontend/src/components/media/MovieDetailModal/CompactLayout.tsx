@@ -170,7 +170,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   const hasRatings = !!ratingsSettle.ratings;
   // ONE reveal: backdrop, title/logo, meta, ratings and buttons together, in one fade (useOneReveal).
   const reveal = useOneReveal(props.openKey, !loading && !error && !!detail, sheetHero.state !== 'hold', ratingsSettle.shown,
-    sheetHero.deadline, !!trailerKey);
+    sheetHero.deadline, !!trailerKey, detail?.isOwned ?? false, !!detail && (!!detail.isOwned || !!detail.ownershipSettled || !!detail.ratingKey), sheetHero.artDeadline);
     // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed
   // reserves the ratings row from it and the row keeps that box, so a late ratings fetch never moves the rows below.
   const ratingsExpected = useRef(ratingsExpectedAtTap(true)).current;
@@ -324,7 +324,8 @@ export function CompactLayout(props: MovieModalViewProps) {
   const genresDisplay = detail?.genres.slice(0, 2) ?? [];
   const directorsForDisplay = detail?.directors ?? [];
   const rawCast = detail?.cast.slice(0, 20) ?? [];
-  const isOwned = detail?.isOwned ?? false;
+  // The button set is decided at the reveal (useOneReveal): ownership as known then, for this open.
+  const isOwned = reveal.revealed ? reveal.owned : (detail?.isOwned ?? false);
   const similarTmdbId = detail?.tmdbId ?? props.resolvedTmdbId ?? null;
   // ⓘ File Info — Plex items only, signed-in users only (shows NAS paths)
   const canShowFileInfo = authenticated && isOwned && !!detail?.ratingKey;

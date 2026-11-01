@@ -216,16 +216,18 @@ export function useMovieDetail(
     apiFetch(`/api/plex/lookup?${params}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { owned: boolean; rating_key?: number; libraries?: string[]; library_keys?: Record<string, number> } | null) => {
-        if (cancelled || !data?.owned) return;
+        if (cancelled) return;
+        if (!data?.owned) { setDetail((prev) => (prev ? { ...prev, ownershipSettled: true } : prev)); return; }
         setDetail((prev) => prev ? {
           ...prev,
           isOwned: true,
+          ownershipSettled: true,
           ratingKey: data.rating_key ?? prev.ratingKey,
           libraries: data.libraries ?? [],
           libraryKeys: data.library_keys ?? {},
         } : prev);
       })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setDetail((prev) => (prev ? { ...prev, ownershipSettled: true } : prev)); });
 
     return () => { cancelled = true; };
   }, [ownershipTitle, ownershipYear, ownershipIsOwned, ratingKey, tmdbId]);

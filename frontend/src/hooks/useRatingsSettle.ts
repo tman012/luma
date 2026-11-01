@@ -10,7 +10,7 @@
  * - The icons ship in the app bundle and are decoded at boot, so they are normally ready with the data; past the
  *   deadline a stuck icon never holds the row.
  * - Once latched the row never changes for that open (`openKey`): a source that answers later is dropped. */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Ratings } from '@/utils/modalParsers';
 import { buildRatingItems, decodeRatingIcon, ratingIconDecoded } from '@/utils/ratingIcons';
 import { deadlineLeft } from '@/loading/revealGate';
@@ -32,13 +32,14 @@ function useIconsReady(icons: string[]): boolean {
 }
 
 export interface RatingsSettleState { ratings: Ratings | null; shown: boolean }
-interface St { key: unknown; capped: boolean; shown: boolean; ratings: Ratings | null; startedAt?: number }
+interface St { key: unknown; capped: boolean; shown: boolean; ratings: Ratings | null; startedAt?: number; hadAtCap?: boolean }
 
 export function useRatingsSettle(value: Ratings | null | undefined, settled: boolean, openKey: unknown, active = true): RatingsSettleState {
   const [st, setSt] = useState<St>({ key: openKey, capped: false, shown: false, ratings: null });
   const cur: St = st.key === openKey ? st : { key: openKey, capped: false, shown: false, ratings: null };
   const icons = useMemo(() => (value ? [...new Set(buildRatingItems(value).map(i => i.icon))] : []), [value]);
   const iconsReady = useIconsReady(icons);
+  const hasRef = useRef(false);
   useEffect(() => {
     setSt(s => (s.key === openKey ? s : { key: openKey, capped: false, shown: false, ratings: null }));
   }, [openKey]);
@@ -48,14 +49,16 @@ export function useRatingsSettle(value: Ratings | null | undefined, settled: boo
     const tap = tapElapsed();
     const startedAt = cur.startedAt ?? Date.now() - (tap ?? 0);
     if (cur.startedAt === undefined) setSt(s => (s.key === openKey && s.startedAt === undefined ? { ...s, startedAt } : s));
-    const t = window.setTimeout(() => setSt(s => (s.key === openKey && !s.capped ? { ...s, capped: true } : s)), deadlineLeft(startedAt));
+    const t = window.setTimeout(() => setSt(s => (s.key === openKey && !s.capped ? { ...s, capped: true, hadAtCap: hasRef.current } : s)), deadlineLeft(startedAt));
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openKey, active]);
   const has = !!value && buildRatingItems(value).length > 0;
+  hasRef.current = has;
   // Settled: lock with whatever is there, empty included, once the icons are ready (or the deadline passed).
-  // At the deadline: lock only with something to show.
-  const ready = !cur.shown && ((settled && (iconsReady || cur.capped)) || (cur.capped && has));
+  // At the deadline: lock with what is in hand. With nothing in hand then, wait for every source (v341, PM): the
+  // late badges arrive as ONE group into the reserved slot, never one source at a time.
+  const ready = !cur.shown && ((settled && (iconsReady || cur.capped)) || (cur.capped && has && cur.hadAtCap !== false));
   useEffect(() => {
     if (ready) setSt({ ...cur, capped: true, shown: true, ratings: has ? value! : null });
   }, [ready, value, has, cur]);
