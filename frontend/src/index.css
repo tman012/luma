@@ -1490,3 +1490,7 @@ html.luma-minimal [data-search-panel] { z-index: 70; }
 @media (prefers-reduced-motion: reduce){.luma-pressable[data-pressed="true"]{transform:none;opacity:.8}}
 /* Seeded phone hero: the details' boxes fade in; the hero (wash, title) is already final. */
 [data-details-fade] > :not([data-hero-keep]){animation:m-crossfade var(--m-dur-crossfade) var(--m-ease-standard) both}
+/* The sheet's ONE reveal (useOneReveal): the details hold until the hero latches, then fade with it (HERO_FADE). */
+[data-reveal-gate] > :not([data-hero-keep]){transition:opacity 0.45s ease-out}
+[data-reveal-gate="hold"] > :not([data-hero-keep]){opacity:0}
+@media (prefers-reduced-motion: reduce){[data-reveal-gate] > :not([data-hero-keep]){transition:none}}

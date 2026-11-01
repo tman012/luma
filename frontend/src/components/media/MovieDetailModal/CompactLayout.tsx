@@ -25,6 +25,7 @@ import { useEffectiveRatingsState } from './effectiveRatings';
 import { RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
 import { useRatingsSettle } from '@/hooks/useRatingsSettle';
 import { RatingsSettle } from '@/components/media/RatingsSettle';
+import { useOneReveal } from '@/hooks/useOneReveal';
 import { BackdropHero } from '@/components/media/BackdropHero';
 import { useBackdropEffects } from '@/hooks/useBackdropEffects';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
@@ -167,6 +168,9 @@ export function CompactLayout(props: MovieModalViewProps) {
   const ratingsSettle = useRatingsSettle(effRatings.ratings,
     !!detail && !ratingsLoading && props.ratingsSettled !== false && effRatings.settled, props.openKey, !!detail);
   const hasRatings = !!ratingsSettle.ratings;
+  // ONE reveal: backdrop, title/logo, meta, ratings and buttons together, in one fade (useOneReveal).
+  const reveal = useOneReveal(props.openKey, !loading && !error && !!detail, sheetHero.state !== 'hold', ratingsSettle.shown,
+    sheetHero.deadline, !!trailerKey);
     // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed
   // reserves the ratings row from it and the row keeps that box, so a late ratings fetch never moves the rows below.
   const ratingsExpected = useRef(ratingsExpectedAtTap(true)).current;
@@ -326,7 +330,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   const canShowFileInfo = authenticated && isOwned && !!detail?.ratingKey;
   // Action row sizing — count must mirror the conditional buttons below.
   const actionCount =
-    (trailerKey ? 1 : 0) + (isOwned ? 1 : 0) + (isOwner ? 1 : 0) /* Sources: admins only, grabs are admin-only */ +
+    (trailerKey && reveal.trailer ? 1 : 0) + (isOwned ? 1 : 0) + (isOwner ? 1 : 0) /* Sources: admins only, grabs are admin-only */ +
     (similarTmdbId ? 1 : 0) + (collectionId != null ? 1 : 0);
   const denseActions = actionCount >= 6;
   const actionCircle = denseActions ? 'min(46px, 11.8vw)' : actionCount === 5 ? 'min(50px, 12.8vw)' : '50px';
@@ -405,7 +409,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   }}
                 >
                   <div data-hero-title={sheetHero.state} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-                    opacity: sheetHero.state === 'hold' ? 0 : 1, transition: reducedMotion() ? 'none' : HERO_FADE }}>
+                    opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1, transition: reducedMotion() ? 'none' : HERO_FADE }}>
                   {sheetHero.state === 'logo' && sheetHero.logo ? (
                     <img data-hero-logo="" src={sheetHero.logo} onError={sheetHero.logoFailed} alt={detail?.title}
                         style={{ maxWidth: 'calc(100% - 32px)', maxHeight: '200px', objectFit: 'contain', filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }} />
@@ -507,11 +511,11 @@ export function CompactLayout(props: MovieModalViewProps) {
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
-                hold={heroHold} instant
+                hold={!reveal.revealed} instant
               />
 
               {/* === CENTERED CONTENT AREA === */}
-              <div ref={contentRef} data-reveal={titleState !== 'hold' ? 'shown' : 'hold'} data-details-fade={hero.seeded ? '' : undefined} style={{
+              <div ref={contentRef} data-reveal={titleState !== 'hold' ? 'shown' : 'hold'} data-reveal-gate={reveal.revealed ? 'shown' : 'hold'} style={{
                 position: 'relative',
                 zIndex: 3,
                 textAlign: 'center',
@@ -693,7 +697,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   }}
                 >
                   {/* Trailer */}
-                  {trailerKey && (
+                  {trailerKey && reveal.trailer && (
                     <ActionButton
                       circle={actionCircle}
                       fontSize={actionFont}
@@ -1073,7 +1077,7 @@ export function CompactLayout(props: MovieModalViewProps) {
               effects={backdropEffects}
               phase={phase}
               containerRef={topBackdropRef}
-              hold={heroHold} instant
+              hold={!reveal.revealed} instant
             />
           )}
           {ultraBlurColors && (
