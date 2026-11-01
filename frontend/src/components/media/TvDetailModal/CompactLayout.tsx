@@ -217,7 +217,7 @@ export function CompactLayout(props: TvModalViewProps) {
   // the cap, never swapped (useSheetBackdrop).
   // The hero (backdrop + title) is ONE unit: logo vs. text and the backdrop are decided together before the reveal
   // (1.2s cap from the tap), fade in once together, and never change for that open.
-  const sheetHero = useSheetHero(finalBackdropUrl(show?.backdropTextlessUrl ?? show?.backdropUrl), !!show && !show.backdropPending, show?.clearLogoUrl ? withBase(show.clearLogoUrl) : null, logoInput(show) !== undefined, props.openKey);
+  const sheetHero = useSheetHero(finalBackdropUrl(show?.backdropTextlessUrl ?? show?.backdropUrl), !!show && !show.backdropPending, show?.clearLogoUrl ? withBase(show.clearLogoUrl) : null, logoInput(show) !== undefined, props.openKey, !!show);
   const sheetArt = sheetHero.art;
   const posterFill = show && !show.backdropUrl && !sheetArt ? show.posterUrl : null;
   const ultraBlurColors = hero.colors;

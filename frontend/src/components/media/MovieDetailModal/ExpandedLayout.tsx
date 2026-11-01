@@ -819,7 +819,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
             // One reveal for all content, with the backdrop, blur and title.
             // The one gate: shown at the reveal with the one fade; while the details are out (spinner) as before. It
             // hides at once when the details land (no fade-out frame with the content before the reveal).
-            ...(loading || reveal.revealed ? revealStyle('text') : { opacity: 0, transition: 'none' }),
+            ...(loading || error || reveal.revealed ? revealStyle('text') : { opacity: 0, transition: 'none' }),
             position: 'relative',
             zIndex: 3,
             display: 'flex',

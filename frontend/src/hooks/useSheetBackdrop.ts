@@ -58,7 +58,7 @@ interface St { key: unknown; capped: boolean; artCapped?: boolean; title: 'logo'
 const fresh = (key: unknown): St => ({ key, capped: false, title: null, logo: null, art: null, artDone: false });
 
 export function useSheetHero(art: string | null | undefined, artSettled: boolean, logo: string | null | undefined,
-  logoSettled: boolean, openKey: unknown): SheetHero {
+  logoSettled: boolean, openKey: unknown, present: boolean = artSettled): SheetHero {
   const [st, setSt] = useState<St>(() => fresh(openKey));
   const cur = st.key === openKey ? st : fresh(openKey);
   const artOk = useDecoded(cur.artDone ? null : art ?? null);
@@ -68,8 +68,10 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     const t = window.setTimeout(() => setSt(s => (s.key === openKey && !s.capped ? { ...s, capped: true } : s)), capLeft());
     return () => window.clearTimeout(t);
   }, [openKey]);
-  // Details past the 1.0s deadline: the backdrop known then still gets BACKDROP_LATE_DECODE_MS to decode.
-  const lateKnown = cur.capped && artSettled && !cur.artCapped;
+  // Details past the 1.0s deadline: the backdrop known then still gets BACKDROP_LATE_DECODE_MS to decode. `present`:
+  // the details are in even if a better pick is still on its way (TV: TMDb pending over Plex art); the same art
+  // deadline caps that wait too.
+  const lateKnown = cur.capped && present && !cur.artCapped;
   useEffect(() => {
     if (!lateKnown) return;
     const t = window.setTimeout(() => setSt(s => (s.key === openKey && !s.artCapped ? { ...s, artCapped: true } : s)),
@@ -83,13 +85,14 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     const logoBad = !!logo && logoOk.url === logo && !logoOk.ok;
     const artIn = !!art && artOk.url === art && artOk.ok;
     const ready = artSettled && (art ? artOk.url === art : true) && (logo ? logoIn || logoBad : logoSettled);
-    // Past the deadline: latch once the pick is settled (the details are in), with what has decoded.
     // Past the deadline: latch once the pick is settled (the details are in), with what has decoded; a known backdrop
     // still decoding holds the latch until it decodes, fails, or BACKDROP_ART_DEADLINE_MS.
     const artWait = !!art && artOk.url !== art && !cur.artCapped;
-    if (!ready && !(cur.capped && artSettled && !artWait)) return;
+    // At the art deadline a pick still pending (TMDb slow or failing) latches with what has decoded (the Plex art), or
+    // no art: never a blank sheet past the cap, and nothing swaps in after.
+    if (!ready && !(cur.capped && artSettled && !artWait) && !(cur.artCapped && present)) return;
     setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: artIn ? art! : null, artDone: true });
-  }, [art, artOk, artSettled, logo, logoOk, logoSettled, cur, openKey]);
+  }, [art, artOk, artSettled, present, logo, logoOk, logoSettled, cur, openKey]);
   const logoFailed = useCallback(() => setSt(s => (s.key === openKey && s.title === 'logo' ? { ...s, title: 'text', logo: null } : s)), [openKey]);
   return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, deadline: cur.capped, artDeadline: !!cur.artCapped, logoFailed };
 }

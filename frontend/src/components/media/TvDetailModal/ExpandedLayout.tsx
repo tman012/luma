@@ -1184,7 +1184,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
   } = props;
   const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
   // ONE backdrop per open (useSheetBackdrop): the text-free pick when it arrives before the latch, never swapped after.
-  const sheetHero = useSheetHero(finalBackdropUrl(show?.backdropTextlessUrl ?? show?.backdropUrl), !!show && !show.backdropPending, show?.clearLogoUrl, logoInput(show) !== undefined, props.openKey);
+  const sheetHero = useSheetHero(finalBackdropUrl(show?.backdropTextlessUrl ?? show?.backdropUrl), !!show && !show.backdropPending, show?.clearLogoUrl, logoInput(show) !== undefined, props.openKey, !!show);
   const sheetArt = sheetHero.art;
 
   // Determine if we're in active episode-mode display
@@ -1447,7 +1447,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
           <div data-reveal={loading || titleState !== 'hold' ? 'shown' : 'hold'} style={{
             // The one gate: shown at the reveal with the one fade; while the details are out (spinner) as before. It
             // hides at once when the details land (no fade-out frame with the content before the reveal).
-            ...(loading || reveal.revealed ? revealStyle('text') : { opacity: 0, transition: 'none' }),
+            ...(loading || error || reveal.revealed ? revealStyle('text') : { opacity: 0, transition: 'none' }),
             position: 'relative',
             zIndex: 3,
             display: 'flex',
