@@ -10911,7 +10911,7 @@ def _omdb_title_ratings(title, year='', warm=None):
     except Exception as e:
         # The exception text can hold the request URL (apikey included): never in the reply, redacted in the log.
         logger.error(f"Error fetching ratings from OMDB: {type(e).__name__}: {_redact_secrets(e)}")
-        return {'error': 'Failed to fetch ratings'}, 500
+        return {'error': _public_error(e)}, 500
 
 
 @app.route('/api/ratings/<title>')

@@ -115,7 +115,7 @@ def test_api_key_never_in_the_response(fake, monkeypatch, caplog):
         resp, status = app.main.get_ratings('X')
         body = resp.get_data(as_text=True)
     assert status == 500 and 'k-test' not in body and 'apikey' not in body
-    assert resp.get_json() == {'error': 'Failed to fetch ratings'}
+    assert resp.get_json() == {'error': app.main._PUBLIC_ERROR}       # r2's fixed text
     assert 'k-test' not in caplog.text
 
 
