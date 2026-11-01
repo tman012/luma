@@ -14,6 +14,7 @@ Snapshot: data/watchlist_digital_dates_snapshot.json
 Log:      data/watchlist_digital_dates_log.json
 """
 from __future__ import annotations
+from app.err_text import public as _err_public
 
 import json
 import logging
@@ -370,8 +371,8 @@ def run_cycle(*, dry_run: bool = False, scheduled: bool = False,
     try:
         items = _load_watchlist_movies()
     except Exception as e:
-        result["error"] = str(e)
-        result["reason"] = f"Failed to load watchlist: {e}"
+        result["error"] = _err_public(e, "Failed to load watchlist", "watchlist_digital_dates")
+        result["reason"] = "Failed to load watchlist"
         logger.error("watchlist_digital_dates: load watchlist failed: %s", e)
         if scheduled and not dry_run:
             _stamp_scheduled(settings)
@@ -548,7 +549,7 @@ def _guarded(dry_run: bool, scheduled: bool = False) -> None:
     except Exception as e:
         logger.error("watchlist_digital_dates cycle error: %s", e, exc_info=True)
         result = {
-            "error": f"Run failed: {e}",
+            "error": _err_public(e, "Run failed", "watchlist_digital_dates"),
             "dry_run": dry_run,
             "checked": 0,
             "changes": [],

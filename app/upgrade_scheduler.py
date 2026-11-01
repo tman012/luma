@@ -8,6 +8,7 @@ Background daemon that runs once per day at a configurable hour:
 Designed to finish before any downstream upgrade-grab job runs.
 """
 
+from app.err_text import public as _err_public
 import json
 import logging
 import threading
@@ -254,7 +255,7 @@ def _run_pipeline(force: bool = False) -> None:
                 f"from {new_result.get('remuxes_found', 0)} remuxes")
         except Exception as e:
             logger.warning(f'[upgrade-scheduler] New releases scan failed: {e}')
-            result['steps']['new_releases'] = {'status': 'error', 'error': str(e)}
+            result['steps']['new_releases'] = {'status': 'error', 'error': _err_public(e, 'Step failed', 'upgrade_scheduler')}
 
         elapsed = round(time.time() - start, 1)
         result['status'] = 'ok'
@@ -292,7 +293,7 @@ def _run_pipeline(force: bool = False) -> None:
 
     except Exception as e:
         result['status'] = 'error'
-        result['error'] = str(e)
+        result['error'] = _err_public(e, 'Run failed', 'upgrade_scheduler')
         logger.error(f'[upgrade-scheduler] Pipeline failed: {e}', exc_info=True)
     finally:
         with _lock:

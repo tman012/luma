@@ -13,6 +13,7 @@ parity on MINIMAL=1).
 Store: automation.db (Genre Roulette file): meta 'ttv_settings' / 'ttv_state', ttv_log, ttv_seen.
 """
 from __future__ import annotations
+from app.err_text import public as _err_public
 
 import json
 import logging
@@ -430,7 +431,7 @@ def _group_run(g: Dict[str, Any], index: Dict[str, Any], cid: str, now: float) -
     except Busy:
         raise
     except Exception as e:                          # noqa: BLE001
-        return {**res, 'error': f'Trakt failed ({e})'}
+        return {**res, 'error': _err_public(e, 'Trakt failed', 'ttv')}
     entries = [_ids(x) for x in raw[:g['limit']]]
     langs = g['languages']
     need_meta = bool(langs) or g['one_season_only']

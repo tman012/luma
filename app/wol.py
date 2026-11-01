@@ -5,6 +5,7 @@ Sends a standard 102-byte magic packet (6x 0xFF + 16x target MAC)
 via UDP broadcast to 255.255.255.255:9.  Uses only stdlib.
 """
 
+from app.err_text import public as _err_public
 import logging
 import re
 import socket
@@ -42,4 +43,4 @@ def send_wol(mac_address: str) -> dict:
         return {"ok": True, "detail": f"WoL magic packet sent to {mac}"}
     except Exception as e:
         logger.error("WoL send failed for %s: %s", mac, e)
-        return {"ok": False, "detail": f"WoL send failed: {e}"}
+        return {"ok": False, "detail": _err_public(e, "WoL send failed", "wol")}

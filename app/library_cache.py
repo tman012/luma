@@ -3,6 +3,7 @@ Library Cache Module - Caches frequently accessed library data for fast loading
 Similar to the ExploreCache but for library browsing, continue watching, and recent items.
 """
 
+from app.err_text import public as _err_public
 import os
 import sqlite3
 import json
@@ -404,7 +405,7 @@ class LibraryCache:
 
         except Exception as e:
             logger.error(f"Error getting cached library browse: {e}")
-            return {'movies': [], 'total': 0, 'genres': [], 'error': str(e)}
+            return {'movies': [], 'total': 0, 'genres': [], 'error': _err_public(e, 'Library unavailable', 'library_cache')}
 
     def get_recent_items(self, limit: int = 25, metadata_type: Optional[int] = None) -> List[Dict]:
         """Get cached recent items (movies or TV shows)"""

@@ -6,6 +6,7 @@ Manages a cloudflared tunnel as a subprocess — start, stop, monitor,
 auto-restart on crash, and auto-start at Flask boot if enabled in settings.
 """
 
+from app.err_text import public as _err_public
 import logging
 import os
 import shutil
@@ -71,9 +72,9 @@ def start_tunnel(token: str) -> dict:
             return {"success": True, "message": f"Tunnel started (PID {_process.pid})"}
 
         except Exception as e:
-            _last_error = str(e)
+            _last_error = _err_public(e, "Tunnel error", "tunnel")
             logger.error(f"Failed to start cloudflared: {e}")
-            return {"success": False, "message": str(e)}
+            return {"success": False, "message": _last_error}
 
 
 def stop_tunnel() -> dict:
@@ -98,9 +99,9 @@ def stop_tunnel() -> dict:
                 _process.wait(timeout=5)
             logger.info(f"Cloudflare Tunnel stopped (PID {pid})")
         except Exception as e:
-            _last_error = str(e)
+            _last_error = _err_public(e, "Tunnel error", "tunnel")
             logger.error(f"Error stopping cloudflared: {e}")
-            return {"success": False, "message": str(e)}
+            return {"success": False, "message": _last_error}
         finally:
             _process = None
             _started_at = None
@@ -185,7 +186,7 @@ def _monitor_process(token: str) -> None:
                 _last_error = ""
                 logger.info(f"cloudflared restarted (PID {_process.pid})")
             except Exception as e:
-                _last_error = str(e)
+                _last_error = _err_public(e, "Tunnel error", "tunnel")
                 logger.error(f"Failed to restart cloudflared: {e}")
                 return
 

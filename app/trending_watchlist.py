@@ -4,6 +4,7 @@ Background daemon that periodically fetches Trakt trending movies
 and adds qualifying ones to Radarr (skipping Plex-owned and existing Radarr entries).
 """
 
+from app.err_text import public as _err_public
 import json
 import os
 import threading
@@ -259,7 +260,7 @@ def _do_cycle(settings, plex_service, RadarrAPI) -> Dict[str, Any]:
         raw_items = resp.json()  # list of {watchers, movie: {title, year, ids: {tmdb, imdb, ...}}}
     except Exception as e:
         logger.error(f'Failed to fetch Trakt trending movies: {e}')
-        return {'error': f'Trakt fetch failed: {e}', 'checked': 0, 'added': 0, 'skipped': 0, 'errors': []}
+        return {'error': _err_public(e, 'Trakt fetch failed', 'trending'), 'checked': 0, 'added': 0, 'skipped': 0, 'errors': []}
 
     # Normalize into simple dicts with tmdb_id
     trending_movies: List[Dict[str, Any]] = []
@@ -285,7 +286,7 @@ def _do_cycle(settings, plex_service, RadarrAPI) -> Dict[str, Any]:
         # would add films already in Plex. Skip the cycle instead — the next
         # one is minutes away and costs nothing to wait for.
         logger.warning(f'Could not build Plex ownership index: {e}')
-        return {'error': f'Plex ownership index unavailable ({e}) — cycle skipped',
+        return {'error': _err_public(e, 'Plex ownership index unavailable — cycle skipped', 'trending'),
                 'checked': 0, 'added': 0, 'skipped': 0, 'errors': []}
     if not ownership.get('movies'):
         logger.warning('Plex ownership index is empty — skipping cycle rather '
@@ -350,7 +351,7 @@ def _do_cycle(settings, plex_service, RadarrAPI) -> Dict[str, Any]:
             else:
                 errors.append(f'{title} ({year}): Radarr add returned None')
         except Exception as e:
-            errors.append(f'{title} ({year}): {e}')
+            errors.append(f'{title} ({year}): ' + _err_public(e, 'failed', 'trending'))
             logger.error(f'Trending watchlist: failed to add {title} ({year}): {e}')
 
     # ── Persist added movies to log file ──────────────────────────

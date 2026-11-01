@@ -4,6 +4,7 @@ Explore movies cache management
 Caches popular/seeded movies for fast loading
 """
 
+from app.err_text import public as _err_public
 import sqlite3
 import json
 import logging
@@ -384,7 +385,7 @@ class ExploreCache:
         except Exception as e:
             logger.error(f"Error getting cache info: {e}")
             return {
-                'error': str(e),
+                'error': _err_public(e, 'Cache info unavailable', 'explore_cache'),
                 'movie_count': 0,
                 'needs_update': True
             }

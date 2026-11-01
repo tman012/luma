@@ -22,6 +22,7 @@ Concretely:
   • Append every grab to a log file that the unified Activity Log surfaces.
 """
 
+from app.err_text import public as _err_public
 import json
 import logging
 import os
@@ -341,7 +342,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
         payload = {'results': latest_releases({'limit': 600, 'sweep': 'remux2160p'})}
     except Exception as e:
         logger.error(f'4K auto-grab: failed to fetch /api/indexer/latest sweep: {e}')
-        return {'error': f'Latest sweep fetch failed: {e}', 'checked': 0, 'grabbed': 0,
+        return {'error': _err_public(e, 'Latest sweep fetch failed', 'upgrade_4k'), 'checked': 0, 'grabbed': 0,
                 'skipped_in_4k': 0, 'skipped_rejected': 0, 'errors': []}
 
     items: List[Dict[str, Any]] = payload.get('results') or []
@@ -555,7 +556,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
                     f"{'; '.join(rejections) or push_result.get('error')}"
                 )
         except Exception as e:
-            errors.append(f'{title} ({year}): {e}')
+            errors.append(f'{title} ({year}): ' + _err_public(e, 'failed', 'upgrade_4k'))
             logger.error(f'4K auto-grab: failed on {title} ({year}): {e}', exc_info=True)
 
     _append_log(grabbed_list)

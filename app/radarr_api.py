@@ -4,6 +4,7 @@ Radarr API Integration
 Handles communication with Radarr for movie management
 """
 
+from app.err_text import public as _err_public
 import requests
 import logging
 from datetime import datetime
@@ -582,11 +583,11 @@ class RadarrAPI:
             try:
                 if hasattr(e, 'response') and e.response is not None:
                     body = e.response.json()
-                    error_msg = body.get('message', str(e))
+                    error_msg = body.get('message') or _err_public(e, 'Radarr request failed', 'radarr')
                 else:
-                    error_msg = str(e)
+                    error_msg = _err_public(e, 'Radarr request failed', 'radarr')
             except Exception:
-                error_msg = str(e)
+                error_msg = _err_public(e, 'Radarr request failed', 'radarr')
             logger.error(f"Radarr grab failed: {error_msg}")
             return {"ok": False, "error": error_msg}
 
@@ -636,11 +637,11 @@ class RadarrAPI:
             try:
                 if hasattr(e, 'response') and e.response is not None:
                     body = e.response.json()
-                    error_msg = body.get('message', str(e))
+                    error_msg = body.get('message') or _err_public(e, 'Radarr request failed', 'radarr')
                 else:
-                    error_msg = str(e)
+                    error_msg = _err_public(e, 'Radarr request failed', 'radarr')
             except Exception:
-                error_msg = str(e)
+                error_msg = _err_public(e, 'Radarr request failed', 'radarr')
             logger.error(f"Radarr push_release failed: {error_msg}")
             return {'ok': False, 'error': error_msg}
 

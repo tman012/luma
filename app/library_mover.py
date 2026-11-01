@@ -36,6 +36,7 @@ and "Title (Year)/Title (Year).ext" naming. Rulings for luma-test:
 """
 
 from __future__ import annotations
+from app.err_text import public as _err_public
 
 import errno
 import logging
@@ -813,7 +814,7 @@ def _ensure_folder(rfd: int, lib_root: str, folder: str, owner) -> Tuple[int, bo
         try:
             remote_mover.mkdir_p(full)
         except remote_mover.RemoteMoverError as e:
-            raise Refused(str(e)) from e
+            raise Refused(_err_public(e, 'remote folder could not be created', 'library_mover')) from e
     try:
         os.mkdir(folder, 0o775, dir_fd=rfd)
         created = True
@@ -1014,10 +1015,10 @@ def _remote_transfer(src: str, dest: str) -> str:
             _set_inflight(h, dest, tmp)
         else:
             _set_inflight(h, dest, None, abandon=True)
-        raise Transient(str(e)) from e
+        raise Transient(_err_public(e, 'remote copy cut off', 'library_mover')) from e
     except remote_mover.RemoteMoverError as e:
         _set_inflight(h, dest, None)
-        raise Refused(str(e)) from e
+        raise Refused(_err_public(e, 'remote copy refused', 'library_mover')) from e
 
 
 def partials_removed(paths) -> int:

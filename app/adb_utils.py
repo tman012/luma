@@ -16,6 +16,7 @@ Hint codes:
   unknown         — unclassified failure
 """
 
+from app.err_text import public as _err_public
 import logging
 import os
 import re
@@ -150,7 +151,7 @@ def run_adb(args: list[str], timeout: int = ADB_TIMEOUT,
         return {
             "ok": False,
             "stdout": "",
-            "stderr": str(e),
+            "stderr": _err_public(e, "ADB command failed", "adb"),
             "returncode": -1,
         }
 
@@ -175,10 +176,10 @@ def tcp_probe(host: str, port: int, timeout: float = TCP_TIMEOUT) -> dict:
     except OSError as e:
         err_str = str(e).lower()
         if "no route to host" in err_str or "network is unreachable" in err_str:
-            return {"ok": False, "detail": str(e), "error_type": "unreachable"}
-        return {"ok": False, "detail": str(e), "error_type": "unreachable"}
+            return {"ok": False, "detail": _err_public(e, "Host unreachable", "adb"), "error_type": "unreachable"}
+        return {"ok": False, "detail": _err_public(e, "Host unreachable", "adb"), "error_type": "unreachable"}
     except Exception as e:
-        return {"ok": False, "detail": str(e), "error_type": "unreachable"}
+        return {"ok": False, "detail": _err_public(e, "Host unreachable", "adb"), "error_type": "unreachable"}
 
 
 def resolve_host(host: str) -> dict:
@@ -191,7 +192,7 @@ def resolve_host(host: str) -> dict:
         ip = socket.gethostbyname(host)
         return {"ok": True, "detail": f"Resolved to {ip}", "ip": ip}
     except socket.gaierror as e:
-        return {"ok": False, "detail": f"DNS resolution failed: {e}", "ip": None}
+        return {"ok": False, "detail": _err_public(e, "DNS resolution failed", "adb"), "ip": None}
 
 
 def _classify_adb_output(stdout: str, stderr: str) -> dict:

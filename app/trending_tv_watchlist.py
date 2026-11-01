@@ -5,6 +5,7 @@ and adds qualifying first-season-only shows to Sonarr
 (skipping Plex-owned and existing Sonarr entries).
 """
 
+from app.err_text import public as _err_public
 import json
 import os
 import threading
@@ -292,7 +293,7 @@ def _do_cycle(settings, plex_service, SonarrAPI) -> Dict[str, Any]:
         raw_items = resp.json()  # list of {watchers, show: {title, year, ids: {tmdb, tvdb, imdb, ...}}}
     except Exception as e:
         logger.error(f'Failed to fetch Trakt trending shows: {e}')
-        return {'error': f'Trakt fetch failed: {e}', 'checked': 0, 'added': 0, 'skipped': 0, 'errors': []}
+        return {'error': _err_public(e, 'Trakt fetch failed', 'trending_tv'), 'checked': 0, 'added': 0, 'skipped': 0, 'errors': []}
 
     # Normalize into simple dicts — require both tmdb_id and tvdb_id
     trending_shows: List[Dict[str, Any]] = []
@@ -347,7 +348,7 @@ def _do_cycle(settings, plex_service, SonarrAPI) -> Dict[str, Any]:
         # An empty index makes every show look un-owned, so proceeding would
         # re-add shows already in Plex. Skip the cycle instead.
         logger.warning(f'Could not build Plex ownership index: {e}')
-        return {'error': f'Plex ownership index unavailable ({e}) — cycle skipped',
+        return {'error': _err_public(e, 'Plex ownership index unavailable — cycle skipped', 'trending_tv'),
                 'checked': 0, 'added': 0, 'skipped': 0, 'errors': []}
     if not ownership.get('tv'):
         logger.warning('Plex ownership index is empty — skipping cycle rather '
@@ -415,7 +416,7 @@ def _do_cycle(settings, plex_service, SonarrAPI) -> Dict[str, Any]:
             else:
                 errors.append(f'{title} ({year}): Sonarr add returned None')
         except Exception as e:
-            errors.append(f'{title} ({year}): {e}')
+            errors.append(f'{title} ({year}): ' + _err_public(e, 'failed', 'trending_tv'))
             logger.error(f'Trending TV watchlist: failed to add {title} ({year}): {e}')
 
     # ── Persist added shows to log file ───────────────────────────

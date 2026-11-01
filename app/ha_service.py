@@ -6,6 +6,7 @@ testing HA connectivity, and reading/controlling the state of
 entities grouped by HA areas (rooms).
 """
 
+from app.err_text import public as _err_public
 import json
 import logging
 from typing import Any
@@ -232,10 +233,10 @@ def call_service(
     except requests.exceptions.Timeout:
         return {"ok": False, "detail": "HA request timed out (10s)"}
     except requests.exceptions.ConnectionError as e:
-        return {"ok": False, "detail": f"Cannot connect to HA: {e}"}
+        return {"ok": False, "detail": _err_public(e, "Cannot connect to HA", "ha")}
     except Exception as e:
         logger.warning("call_service(%s.%s) error: %s", domain, service, e)
-        return {"ok": False, "detail": str(e)}
+        return {"ok": False, "detail": _err_public(e, "HA request failed", "ha")}
 
 
 def fire_entity(ha_url: str, access_token: str, entity_id: str) -> dict:
@@ -270,10 +271,10 @@ def fire_entity(ha_url: str, access_token: str, entity_id: str) -> dict:
     except requests.exceptions.Timeout:
         return {"ok": False, "detail": "HA request timed out (10s)"}
     except requests.exceptions.ConnectionError as e:
-        return {"ok": False, "detail": f"Cannot connect to HA: {e}"}
+        return {"ok": False, "detail": _err_public(e, "Cannot connect to HA", "ha")}
     except Exception as e:
         logger.warning("fire_entity(%s) error: %s", entity_id, e)
-        return {"ok": False, "detail": str(e)}
+        return {"ok": False, "detail": _err_public(e, "HA request failed", "ha")}
 
 
 def test_connection(ha_url: str, access_token: str) -> dict:
@@ -305,4 +306,4 @@ def test_connection(ha_url: str, access_token: str) -> dict:
     except requests.exceptions.ConnectionError:
         return {"ok": False, "detail": f"Cannot connect to {ha_url}"}
     except Exception as e:
-        return {"ok": False, "detail": str(e)}
+        return {"ok": False, "detail": _err_public(e, "HA request failed", "ha")}

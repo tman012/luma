@@ -16,6 +16,7 @@ monitoring and search behavior as Luma's Watchlist / Sources), tagged 'Requested
 in Activity with the requester's name.
 """
 from __future__ import annotations
+from app.err_text import public as _err_public
 
 import html
 import ipaddress
@@ -1713,7 +1714,7 @@ def _tv_followup(sid: int, scope: str, season: int, wanted: List[int], attempts:
                         'search': 'SeasonSearch' if scope == 'season' else 'EpisodeSearch'}
             last_err = f'verify failed (series={ser.get("monitored")}, season={season_ok}, eps={eps_ok}, cmd={cmd})'
         except Exception as exc:  # noqa: BLE001
-            last_err = str(exc)
+            last_err = _err_public(exc, 'Sonarr request failed', 'request')
         logger.warning('[request] follow-up attempt %d for series %s: %s', n, sid, last_err)
         time.sleep(min(30, 5 * n))
     return {'ok': False, 'error': last_err, 'attempts': attempts}
@@ -1725,7 +1726,7 @@ def _followup_bg(app, entry_id: str, tmdb_id: int, title: str, sid: int, scope: 
         try:
             res = _tv_followup(sid, scope, season, wanted)
         except Exception as exc:  # noqa: BLE001
-            res = {'ok': False, 'error': str(exc)}
+            res = {'ok': False, 'error': _err_public(exc, 'Follow-up failed', 'request')}
         res['at'] = time.strftime('%Y-%m-%dT%H:%M:%S%z')
         if res.get('ok'):
             _update_log(entry_id, followup=dict(res, state='done'))
@@ -1813,7 +1814,7 @@ def request_tv(tmdb_id: int):
     except Exception as exc:  # noqa: BLE001
         logger.error('[request] sonarr request failed: %s', exc)
         ok = False
-        steps.append({'error': str(exc)})
+        steps.append({'error': _err_public(exc, 'Sonarr request failed', 'request')})
     entry = _log_request('tv', tmdb_id, title, year, scope, scope if ok else 'error', steps, season=season,
                          episodes=wanted or None, new_series=not series,
                          followup={'state': 'pending'} if (ok and followup) else None)

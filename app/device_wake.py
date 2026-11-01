@@ -10,6 +10,7 @@ sequence, because a partially-awake device is still worth attempting
 playback on.
 """
 
+from app.err_text import public as _err_public
 import logging
 import time
 
@@ -153,7 +154,7 @@ def _step_wol(mac: str, steps: list[str]) -> None:
         time.sleep(0.5)
     except Exception as e:
         logger.warning("WoL failed for %s: %s", mac, e)
-        steps.append(f"wol: failed — {e}")
+        steps.append(f"wol: failed — {_err_public(e, 'error', 'device_wake')}")
 
 
 def _step_adb_connect(host: str, port: int, steps: list[str],
@@ -165,7 +166,7 @@ def _step_adb_connect(host: str, port: int, steps: list[str],
         steps.append(f"adb_connect: {detail}")
     except Exception as e:
         logger.warning("ADB connect failed for %s:%s: %s", host, port, e)
-        steps.append(f"adb_connect: failed — {e}")
+        steps.append(f"adb_connect: failed — {_err_public(e, 'error', 'device_wake')}")
 
 
 def _step_check_display(host: str, port: int, steps: list[str]) -> str:
@@ -175,7 +176,7 @@ def _step_check_display(host: str, port: int, steps: list[str]) -> str:
         return state
     except Exception as e:
         logger.warning("Display check failed for %s:%s: %s", host, port, e)
-        steps.append(f"display_check: failed — {e}")
+        steps.append(f"display_check: failed — {_err_public(e, 'error', 'device_wake')}")
         return "unknown"
 
 
@@ -222,7 +223,7 @@ def _step_harmony_switch(room: dict, device: dict,
             time.sleep(3)
     except Exception as e:
         logger.warning("Harmony switch failed: %s", e)
-        steps.append(f"harmony_switch: failed — {e}")
+        steps.append(f"harmony_switch: failed — {_err_public(e, 'error', 'device_wake')}")
     return False
 
 
@@ -282,7 +283,7 @@ def _step_adb_wake(host: str, port: int, platform: str,
             steps.append(f"adb_wake_power: {'OK' if result['ok'] else result['stderr'].strip()}")
         except Exception as e:
             logger.warning("ADB POWER failed for %s:%s: %s", host, port, e)
-            steps.append(f"adb_wake_power: failed — {e}")
+            steps.append(f"adb_wake_power: failed — {_err_public(e, 'error', 'device_wake')}")
 
     # KEYCODE_WAKEUP (224) — always safe to send
     try:
@@ -291,7 +292,7 @@ def _step_adb_wake(host: str, port: int, platform: str,
         steps.append(f"adb_wake_wakeup: {'OK' if result['ok'] else result['stderr'].strip()}")
     except Exception as e:
         logger.warning("ADB WAKEUP failed for %s:%s: %s", host, port, e)
-        steps.append(f"adb_wake_wakeup: failed — {e}")
+        steps.append(f"adb_wake_wakeup: failed — {_err_public(e, 'error', 'device_wake')}")
 
 
 def _step_poll_awake(host: str, port: int, timeout: int,

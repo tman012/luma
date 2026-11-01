@@ -18,6 +18,7 @@ trimmed to History kept) and antic_seen (every show this ever added, by TMDB/TVD
 re-add removed shows reads it).
 """
 from __future__ import annotations
+from app.err_text import public as _err_public
 
 import json
 import logging
@@ -572,7 +573,7 @@ def _group_run(kind: str, g: Dict[str, Any], index: Dict[str, Any], cid: str, no
     except Busy:
         raise
     except Exception as e:                          # noqa: BLE001
-        return {**res, 'error': f'Trakt failed ({e})'}
+        return {**res, 'error': _err_public(e, 'Trakt failed', 'antic')}
     entries = [_ids(x, 'show' if kind == 'shows' else 'movie') for x in raw[:g['limit']]]
     langs = g['languages']
     details: Dict[int, Dict[str, Any]] = {}
