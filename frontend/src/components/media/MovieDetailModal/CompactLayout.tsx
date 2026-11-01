@@ -173,8 +173,9 @@ export function CompactLayout(props: MovieModalViewProps) {
   const [reserveRatings, setReserveRatings] = useState(ratingsExpected);
   useEffect(() => { setReserveRatings(ratingsExpected); }, [detail?.title]);
   useEffect(() => {
-    if (composed && (ratingsLoading || hasRatings)) setReserveRatings(true);
-  }, [composed, ratingsLoading, hasRatings]);
+    // A source still out when the sheet composes (the RT reviews fetch included) keeps the row's box.
+    if (composed && (ratingsLoading || !effRatings.settled || hasRatings)) setReserveRatings(true);
+  }, [composed, ratingsLoading, effRatings.settled, hasRatings]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const topScrimRef = useRef<HTMLDivElement>(null);
