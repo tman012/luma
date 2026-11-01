@@ -1,5 +1,6 @@
-/** IMDb (+ Rotten Tomatoes / Metacritic) via OMDb for TV detail, shared by the TV
- * Expanded and Compact (phone) layouts. Never TMDb. Off in the minimal build. */
+/** IMDb (+ Rotten Tomatoes / Metacritic) for TV detail, shared by the TV Expanded and Compact (phone) layouts.
+ * Never TMDb. `inline`: the ratings the detail reply carried (the server asks every source within its budget,
+ * the minimal build included); only a reply without them falls back to the OMDb endpoint (off in minimal). */
 import { useEffect, useState } from 'react';
 import { detailFetch, titleRatingsPath } from '@/services/modalPrefetch';
 import { isMinimal } from '@/minimal';
@@ -7,9 +8,20 @@ import type { Ratings } from '@/utils/modalParsers';
 
 export interface ImdbRatingsState { ratings: Ratings | null; loading: boolean }
 
-export function useImdbRatingsState(title: string | null | undefined, year: number | null | undefined): ImdbRatingsState {
+function nonEmpty(r: Ratings | null | undefined): Ratings | null {
+  return r && [r.imdb, r.rotten_tomatoes_critic, r.rotten_tomatoes_audience, r.metacritic].some((x) => x?.score != null)
+    ? { ...r, tmdb: null } : null;
+}
+
+export function useImdbRatingsState(title: string | null | undefined, year: number | null | undefined,
+  inline?: Ratings | null): ImdbRatingsState {
   const [state, setState] = useState<ImdbRatingsState>({ ratings: null, loading: false });
+  const hasInline = inline !== undefined;
   useEffect(() => {
+    if (hasInline) {
+      setState({ ratings: nonEmpty(inline), loading: false });
+      return;
+    }
     if (!title || isMinimal()) {
       setState({ ratings: null, loading: false });
       return;
@@ -33,10 +45,10 @@ export function useImdbRatingsState(title: string | null | undefined, year: numb
       })
       .catch(() => { if (!controller.signal.aborted) setState({ ratings: null, loading: false }); });
     return () => controller.abort();
-  }, [title, year]);
-  return state;
+  }, [title, year, hasInline, inline]);
+  return hasInline ? { ratings: nonEmpty(inline), loading: false } : state;
 }
 
-export function useImdbRatings(title: string | null | undefined, year: number | null | undefined): Ratings | null {
-  return useImdbRatingsState(title, year).ratings;
+export function useImdbRatings(title: string | null | undefined, year: number | null | undefined, inline?: Ratings | null): Ratings | null {
+  return useImdbRatingsState(title, year, inline).ratings;
 }

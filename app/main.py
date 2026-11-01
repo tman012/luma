@@ -10818,10 +10818,9 @@ _omdb_ratings_cache: Dict[str, tuple] = {}   # "title:year" → (timestamp, resp
 _OMDB_RATINGS_CACHE_TTL = 3600               # 1 hour
 _OMDB_RATINGS_CACHE_MAX = 500
 
-@app.route('/api/ratings/<title>')
-def get_ratings(title):
-    """Get movie ratings from OMDB API."""
-    year = request.args.get('year', '')
+def _omdb_title_ratings(title, year='', warm=None):
+    """OMDb ratings by title and year: (payload, status). `warm`: the warm-up id of a background request
+    (quota guarded), None for a user's open."""
 
     try:
         # Check cache
@@ -10829,19 +10828,18 @@ def get_ratings(title):
         cache_key = f"{title}:{year}"
         cached = _omdb_ratings_cache.get(cache_key)
         if cached and (now - cached[0]) < _OMDB_RATINGS_CACHE_TTL:
-            return jsonify(cached[1])
+            return cached[1], 200
 
         from app import omdb as _omdb
         if _omdb.negative_hit(cache_key):
-            return jsonify({'error': 'Movie not found'}), 404
+            return {'error': 'Movie not found'}, 404
         # Query OMDB API (settings → env var fallback)
         omdb_key = _omdb.api_key()
         if not omdb_key:
-            return jsonify({'error': 'No OMDb API key configured'}), 503
+            return {'error': 'No OMDb API key configured'}, 503
         # A background warm-up (not a user open) stays within its share of the daily quota and its load's cap.
-        warm = request.headers.get(_omdb.WARM_HEADER)
         if warm and not _omdb.warm_allowed(warm):
-            return jsonify({'error': 'Warm-up skipped'}), 429
+            return {'error': 'Warm-up skipped'}, 429
         params = {'apikey': omdb_key, 't': title}
         if year:
             params['y'] = year
@@ -10893,17 +10891,26 @@ def get_ratings(title):
                     del _omdb_ratings_cache[oldest_key]
                 _omdb_ratings_cache[cache_key] = (now, ratings_data)
 
-                return jsonify(ratings_data)
+                return ratings_data, 200
             else:
                 _omdb.remember_miss(cache_key)
-                return jsonify({'error': 'Movie not found'}), 404
+                return {'error': 'Movie not found'}, 404
         else:
             _omdb.remember_miss(cache_key)
-            return jsonify({'error': 'Failed to fetch ratings'}), 500
+            return {'error': 'Failed to fetch ratings'}, 500
 
     except Exception as e:
         logger.error(f"Error fetching ratings from OMDB: {type(e).__name__}: {_redact_secrets(e)}")
-        return jsonify({'error': _public_error(e)}), 500
+        return {'error': _public_error(e)}, 500
+
+
+@app.route('/api/ratings/<title>')
+def get_ratings(title):
+    """Get movie ratings from OMDB API."""
+    from app import omdb as _omdb
+    payload, status = _omdb_title_ratings(title, request.args.get('year', ''), request.headers.get(_omdb.WARM_HEADER))
+    return jsonify(payload), status
+
 
 @app.route('/api/imdb/votes', methods=['POST'])
 def get_imdb_votes_batch():
@@ -11016,6 +11023,122 @@ def get_plex_ratings(rating_key):
     except Exception as e:
         logger.error(f"Error fetching ratings from Plex API: {e}")
         return jsonify({'error': _public_error(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Ratings inline with details: the movie/TV detail routes carry `ratings` (Plex, OMDb and RT asked in
+# parallel). Whatever answers within RATINGS_BUDGET_S goes in; a source that misses it is left out and the
+# reply says `ratings_partial`. Slow sources keep running and fill their caches for the next open.
+# ---------------------------------------------------------------------------
+
+RATINGS_BUDGET_S = 0.6
+_ratings_pool = None
+_ratings_pool_lock = threading.Lock()
+
+
+def _ratings_executor():
+    global _ratings_pool
+    with _ratings_pool_lock:
+        if _ratings_pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+            _ratings_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix='ratings')
+        return _ratings_pool
+
+
+def _plex_ratings_cached(rating_key):
+    now = time.time()
+    key = str(rating_key)
+    cached = _plex_ratings_cache.get(key)
+    if cached and (now - cached[0]) < _PLEX_RATINGS_CACHE_TTL:
+        return cached[1]
+    data = _parse_plex_ratings(key)
+    if data is not None:
+        if len(_plex_ratings_cache) >= _PLEX_RATINGS_CACHE_MAX:
+            del _plex_ratings_cache[min(_plex_ratings_cache, key=lambda k: _plex_ratings_cache[k][0])]
+        _plex_ratings_cache[key] = (now, data)
+    return data
+
+
+def _rt_scores(title, year, media_type):
+    r = rt_scraper.get_reviews(title, year, 1, media_type) or {}
+    return {'critic': r.get('critic_score'), 'audience': r.get('audience_score')} if r.get('success', True) else None
+
+
+def _score(v):
+    return v if isinstance(v, dict) and v.get('score') is not None else None
+
+
+def inline_ratings(kind, title, year, rating_key=None, warm=None, budget=None):
+    """(ratings, partial, skipped) for a detail reply. Never TMDb's vote average."""
+    from concurrent.futures import wait
+    pool = _ratings_executor()
+    jobs = {}
+    if rating_key:
+        jobs['plex'] = pool.submit(_plex_ratings_cached, rating_key)
+    if title:
+        jobs['omdb'] = pool.submit(_omdb_title_ratings, title, str(year or ''), warm)
+        jobs['rt'] = pool.submit(_rt_scores, title, year, 'tv' if kind == 'tv' else 'movie')
+    done, _ = wait(list(jobs.values()), timeout=RATINGS_BUDGET_S if budget is None else budget)
+    partial = any(f not in done for f in jobs.values())
+
+    def result(name):
+        f = jobs.get(name)
+        if f is None or f not in done:
+            return None
+        try:
+            return f.result()
+        except Exception:
+            return None
+    plex = result('plex') or {}
+    omdb_res = result('omdb')
+    skipped = bool(omdb_res and omdb_res[1] == 429)
+    omdb = omdb_res[0] if omdb_res and omdb_res[1] == 200 else {}
+    rt = result('rt') or {}
+    out = {}
+    for k in ('imdb', 'rotten_tomatoes_critic', 'rotten_tomatoes_audience', 'metacritic'):
+        out[k] = _score(plex.get(k)) or _score(omdb.get(k))
+    if out['rotten_tomatoes_critic'] is None and rt.get('critic') is not None:
+        out['rotten_tomatoes_critic'] = {'score': rt['critic'], 'fresh': rt['critic'] >= 60}
+    if out['rotten_tomatoes_audience'] is None and rt.get('audience') is not None:
+        out['rotten_tomatoes_audience'] = {'score': rt['audience']}
+    out['tmdb'] = None
+    return out, partial, skipped
+
+
+_INLINE_RATINGS_ROUTES = {
+    'movie_details': ('movie', 'title', 'release_date'),
+    'tv_details': ('tv', 'name', 'first_air_date'),
+    'plex_movie_metadata': ('movie', 'title', 'year'),
+    'plex_tv_metadata': ('tv', 'title', 'year'),
+}
+
+
+@app.after_request
+def _detail_ratings_inline(response):
+    """Adds `ratings` (and `ratings_partial` / `ratings_skipped`) to a successful detail reply."""
+    spec = _INLINE_RATINGS_ROUTES.get(request.endpoint or '')
+    if not spec or response.status_code != 200 or not response.is_json or response.direct_passthrough:
+        return response
+    try:
+        data = response.get_json(silent=True)
+        if not isinstance(data, dict):
+            return response
+        kind, tkey, ykey = spec
+        title = data.get(tkey) or data.get('title') or data.get('name')
+        yv = data.get(ykey)
+        year = str(yv)[:4] if yv else ''
+        rk = (request.view_args or {}).get('rating_key')
+        from app import omdb as _omdb
+        ratings, partial, skipped = inline_ratings(kind, title, year, rk, request.headers.get(_omdb.WARM_HEADER))
+        data['ratings'] = ratings
+        if partial:
+            data['ratings_partial'] = True
+        if skipped:
+            data['ratings_skipped'] = True
+        response.set_data(json.dumps(data, separators=(',', ':')))
+    except Exception as e:             # noqa: BLE001 - a detail reply never fails on ratings
+        logger.warning('inline ratings failed: %s', type(e).__name__)
+    return response
 
 
 @app.route('/api/plex/ratings/resolve')

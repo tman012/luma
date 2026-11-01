@@ -1,3 +1,10 @@
+/** The `ratings` a detail reply carries inline (undefined when it carries none). */
+export function inlineRatings(data: Record<string, unknown>): { ratings?: Ratings | null; ratingsPartial?: boolean } {
+  if (!('ratings' in data)) return {};
+  const r = data.ratings as Ratings | null;
+  return { ratings: r ?? null, ratingsPartial: !!data.ratings_partial };
+}
+
 // ---------------------------------------------------------------------------
 // Shared types, parsers, and constants for media detail modals.
 // Extracted from KioskMovieDetailModal and KioskTvDetailModal so the same
@@ -28,6 +35,9 @@ export interface Director {
 }
 
 export interface MediaDetail {
+  /** Ratings the detail reply carried inline (undefined: the server sent none, ask the ratings endpoints). */
+  ratings?: Ratings | null;
+  ratingsPartial?: boolean;
   title: string;
   year: number | null;
   summary: string;
@@ -57,6 +67,8 @@ export interface MediaDetail {
 }
 
 export interface TvShowDetail {
+  ratings?: Ratings | null;
+  ratingsPartial?: boolean;
   title: string;
   year: number | null;
   summary: string;
@@ -229,6 +241,7 @@ export function parsePlexResponse(data: Record<string, unknown>): MediaDetail {
   );
 
   return {
+    ...inlineRatings(data),
     title: (data.title as string) ?? '',
     year: (data.year as number) ?? null,
     summary: (data.summary as string) ?? '',
@@ -314,6 +327,7 @@ export function parseTmdbResponse(data: Record<string, unknown>): MediaDetail {
   }
 
   return {
+    ...inlineRatings(data),
     title: (data.title as string) ?? (data.name as string) ?? '',
     year,
     summary: (data.overview as string) ?? '',
@@ -407,6 +421,7 @@ export function parseTmdbTvResponse(data: Record<string, unknown>): TvShowDetail
     : null;
 
   return {
+    ...inlineRatings(data),
     title: (data.name as string) ?? (data.title as string) ?? '',
     year,
     summary: (data.overview as string) ?? '',
@@ -459,6 +474,7 @@ export function parsePlexTvResponse(data: Record<string, unknown>): TvShowDetail
   );
 
   return {
+    ...inlineRatings(data),
     title: (data.title as string) ?? '',
     year: (data.year as number) ?? null,
     summary: (data.summary as string) ?? '',

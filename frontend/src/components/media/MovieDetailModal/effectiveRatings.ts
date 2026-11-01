@@ -18,9 +18,11 @@ export function mergeRatings(ratings: Ratings | null | undefined,
   return { imdb, rotten_tomatoes_critic: rtCritic, rotten_tomatoes_audience: rtAudience, metacritic, tmdb } as Ratings;
 }
 
-export function useEffectiveRatings(ratings: Ratings | null | undefined, title: string | null | undefined, year: number | null | undefined): Ratings | null {
-  // Only ask the reviews endpoint when the ratings are missing an RT score (no extra request otherwise).
-  const needRt = ratings?.rotten_tomatoes_critic?.score == null || ratings?.rotten_tomatoes_audience?.score == null;
+export function useEffectiveRatings(ratings: Ratings | null | undefined, title: string | null | undefined, year: number | null | undefined,
+  inline = false): Ratings | null {
+  // Only ask the reviews endpoint when the ratings are missing an RT score (no extra request otherwise); ratings
+  // that came inline with the details already include what RT had within the server's budget.
+  const needRt = !inline && (ratings?.rotten_tomatoes_critic?.score == null || ratings?.rotten_tomatoes_audience?.score == null);
   const reviews = useReviews(needRt ? (title ?? '') : '', year ?? null).data;
   return useMemo(() => mergeRatings(ratings, reviews), [ratings, reviews]);
 }

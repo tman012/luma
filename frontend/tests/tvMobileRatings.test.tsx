@@ -48,7 +48,7 @@ describe('both TV layouts use it; the phone sheet renders the bar', () => {
   });
   it('CompactLayout: RatingsBar sm in the reserved slot, after the meta line and before the actions (as the movie sheet)', () => {
     const s = read('components/media/TvDetailModal/CompactLayout.tsx');
-    expect(s).toContain("useImdbRatingsState(show?.title, show?.year)");
+    expect(s).toContain("useImdbRatingsState(show?.title, show?.year, show?.ratings)");
     const slot = s.indexOf("<div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>");
     expect(slot).toBeGreaterThan(0);
     expect(s.slice(slot, slot + 200)).toContain('{ratings && <RatingsBar ratings={ratings} size="sm" />}');

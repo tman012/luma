@@ -152,6 +152,7 @@ NEG_MAX = 5000
 DEFAULT_DAILY_QUOTA = 1000
 WARM_BUDGET_SHARE = 0.7
 WARMS_PER_LOAD = 12
+WARMS_PER_QUERY = 4                 # a search query's warm id is '<load>/<query>'
 WARM_LOADS_MAX = 500
 WARM_HEADER = 'X-Luma-Warm'
 
@@ -222,15 +223,18 @@ def count_call() -> None:
 def warm_allowed(load_id: str) -> bool:
     """A background warm-up may call OMDb: under WARM_BUDGET_SHARE of today's quota and under WARMS_PER_LOAD
     for its load. Counts the warm when allowed. User opens never go through this."""
+    load, _, query = str(load_id).partition('/')
     with _guard_lock:
         if _today_calls() >= daily_quota() * WARM_BUDGET_SHARE:
             return False
-        n = _warm_loads.get(load_id, 0)
-        if n >= WARMS_PER_LOAD:
+        if _warm_loads.get(load, 0) >= WARMS_PER_LOAD:
             return False
-        if load_id not in _warm_loads and len(_warm_loads) >= WARM_LOADS_MAX:
-            del _warm_loads[next(iter(_warm_loads))]
-        _warm_loads[load_id] = n + 1
+        if query and _warm_loads.get(load_id, 0) >= WARMS_PER_QUERY:
+            return False
+        for k in ([load, load_id] if query else [load]):
+            if k not in _warm_loads and len(_warm_loads) >= WARM_LOADS_MAX:
+                del _warm_loads[next(iter(_warm_loads))]
+            _warm_loads[k] = _warm_loads.get(k, 0) + 1
         return True
 
 
