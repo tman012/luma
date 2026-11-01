@@ -38,6 +38,13 @@ let searchRatingsWarms = 0;
 /** A new search result set: its ratings warm count starts over. */
 export function startSearchWarms(): void {
   searchRatingsWarms = 0;
+  searchQuery += 1;
+}
+/** The warm id background requests carry (the server caps OMDb per id: per Home load, and per query under it). */
+let searchQuery = 0;
+function warmHeaders(search: boolean): Record<string, string> {
+  if (!warmLoad) startWarmLoad();
+  return { [WARM_HEADER]: search ? `${warmLoad}/${searchQuery}` : warmLoad };
 }
 function takeRatingsWarm(search: boolean): Record<string, string> | null {
   if (ratingsWarms >= RATINGS_WARMS_PER_LOAD) return null;
@@ -45,9 +52,8 @@ function takeRatingsWarm(search: boolean): Record<string, string> | null {
     if (searchRatingsWarms >= SEARCH_RATINGS_WARMS) return null;
     searchRatingsWarms += 1;
   }
-  if (!warmLoad) startWarmLoad();
   ratingsWarms += 1;
-  return { [WARM_HEADER]: warmLoad };
+  return warmHeaders(search);
 }
 function yearOf(d: unknown): number | null {
   const y = typeof d === 'string' ? Number(d.slice(0, 4)) : NaN;
@@ -79,7 +85,7 @@ function load(url: string, warmHeaders?: Record<string, string>): Promise<Cached
 export function detailFetch(url: string, init?: { signal?: AbortSignal }): Promise<Response> {
   const signal = init?.signal;
   // A warm-up the server skipped (quota guard) is no answer for an open: ask again as the open.
-  const res = load(url).then((c) => (c.warm && !c.ok ? (cache.delete(url), load(url)) : c)).then((c) => new Response(c.body, { status: c.status || 500, headers: { 'Content-Type': c.type } }));
+  const res = load(url).then((c) => (c.warm && (!c.ok || c.body.includes('"ratings_skipped":true')) ? (cache.delete(url), load(url)) : c)).then((c) => new Response(c.body, { status: c.status || 500, headers: { 'Content-Type': c.type } }));
   if (!signal) return res;
   if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
   return new Promise((resolve, reject) => {
@@ -135,6 +141,8 @@ export async function warmDetail(
   kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number, opts: { images?: boolean; ratings?: boolean; open?: boolean; search?: boolean } = {},
 ): Promise<void> {
   if (!ratingKey && !tmdbId) return;
+  // Background detail requests carry the warm id: their inline ratings stay inside the server's OMDb guards.
+  const bg = opts.open ? undefined : warmHeaders(!!opts.search);
   const images = opts.images !== false;
   prefetchModalColors(kind, ratingKey, tmdbId);
   let tid = tmdbId;
@@ -150,7 +158,7 @@ export async function warmDetail(
   };
   let plexDone: Promise<unknown> = Promise.resolve();
   if (plexPath && !tmdbId) {
-    const plex = await json(plexPath);
+    const plex = await json(plexPath, bg);
     const parsed = readPlex(plex);
     if (parsed && plex) {
       tid = (parsed.tmdbId as number | undefined) || (plex.tmdb_id as number | undefined) || undefined;
@@ -159,15 +167,16 @@ export async function warmDetail(
   } else if (plexPath) {
     // Both ids (owned search results): warm Plex too, which runs the
     // server-side tmdb_id type check the popup waits on.
-    plexDone = json(plexPath).then(readPlex);
+    plexDone = json(plexPath, bg).then(readPlex);
   }
   if (kind === 'movie' && ratingKey) void json(plexRatingsPath(ratingKey));
   const [tm, logo] = await Promise.all([
-    tid ? json(kind === 'movie' ? `/api/movie/${tid}` : `/api/tv/${tid}`) : Promise.resolve(null),
+    tid ? json(kind === 'movie' ? `/api/movie/${tid}` : `/api/tv/${tid}`, bg) : Promise.resolve(null),
     tid ? json(clearlogoPath(kind, tid)) : Promise.resolve(null),
   ]);
   // Ratings with the details: the title-based ratings the sheet asks for (none in the minimal build).
-  if ((opts.ratings || opts.open) && !isMinimal()) {
+  // Only when the detail reply carried no inline ratings (an older server) is the ratings endpoint warmed.
+  if ((opts.ratings || opts.open) && !isMinimal() && tm?.ratings === undefined) {
     void plexDone.then(() => {
       const named = plexTitle as { title: string; year: number | null } | null;
       const title = named?.title ?? ((tm?.title ?? tm?.name) as string | undefined);

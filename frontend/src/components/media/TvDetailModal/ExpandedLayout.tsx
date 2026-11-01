@@ -793,7 +793,7 @@ function SeasonDetailModal({
   if (show.contentRating) metaItems.push(show.contentRating);
 
   // Season rating — IMDb via OMDb (never TMDb vote_average)
-  const effectiveRatings = useImdbRatings(show.title, show.year);
+  const effectiveRatings = useImdbRatings(show.title, show.year, show.ratings);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -1192,7 +1192,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
   const logoRef = useRef<HTMLDivElement>(null);
 
   // Effective ratings — IMDb via OMDb (never TMDb vote_average)
-  const effectiveRatings = useImdbRatings(show?.title, show?.year);
+  const effectiveRatings = useImdbRatings(show?.title, show?.year, show?.ratings);
 
   // Trigger reviews fetch when detail loads
   useEffect(() => {

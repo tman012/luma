@@ -225,7 +225,7 @@ export function CompactLayout(props: TvModalViewProps) {
   }, [composed]);
   // Ratings (shared with ExpandedLayout) arrive after the details: as on the movie
   // sheet, keep their row reserved once the sheet shows so nothing below moves.
-  const { ratings, loading: ratingsLoading } = useImdbRatingsState(show?.title, show?.year);
+  const { ratings, loading: ratingsLoading } = useImdbRatingsState(show?.title, show?.year, show?.ratings);
   const hasRatings = !!ratings && buildRatingItems(ratings).length > 0;
     // Known at tap time: outside minimal builds the ratings row has a source (OMDb/RT); the seed reserves it and the
   // row keeps that box, so a late ratings fetch never moves the rows below.

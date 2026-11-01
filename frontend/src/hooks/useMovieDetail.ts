@@ -11,6 +11,7 @@ import {
   type UltraBlurColors,
 } from '@/utils/modalParsers';
 import { apiFetch } from '../apiClient';
+import type { Ratings as InlineRatings } from '@/utils/modalParsers';
 import { detailFetch, plexRatingsPath, remainingCap, titleRatingsPath } from '@/services/modalPrefetch';
 import { useModalColors } from './useModalColors';
 
@@ -231,8 +232,15 @@ export function useMovieDetail(
   // -------------------------------------------------------------------------
   const movieTitle = detail?.title;
   const movieYear = detail?.year;
+  // Ratings the detail reply carried (the server asks Plex, OMDb and RT within its budget): no separate requests.
+  const inline = detail?.ratings;
   useEffect(() => {
     if (!movieTitle) return;
+    if (inline !== undefined) {
+      setRatings(hasAnyRating(inline) ? inline : null);
+      setRatingsLoading(false);
+      return;
+    }
 
     const controller = new AbortController();
     let cancelled = false;
@@ -315,7 +323,7 @@ export function useMovieDetail(
       cancelled = true;
       controller.abort();
     };
-  }, [movieTitle, movieYear, ratingKey, reloadNonce]);
+  }, [movieTitle, movieYear, ratingKey, reloadNonce, inline]);
 
   // -------------------------------------------------------------------------
   // Fetch UltraBlurColors — race Plex (fast) vs TMDb (slow but higher quality)
@@ -425,4 +433,8 @@ export function useMovieDetail(
     ultraBlurColors,
     resolvedTmdbId,
   };
+}
+
+function hasAnyRating(r: InlineRatings | null): r is InlineRatings {
+  return !!r && [r.imdb, r.rotten_tomatoes_critic, r.rotten_tomatoes_audience, r.metacritic].some((x) => x?.score != null);
 }

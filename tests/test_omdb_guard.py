@@ -96,3 +96,55 @@ def test_quota_configurable(monkeypatch):
     assert omdb.daily_quota() == 5000
     monkeypatch.setattr(Config, 'OMDB_DAILY_QUOTA', None, raising=False)
     assert omdb.daily_quota() == omdb.DEFAULT_DAILY_QUOTA == 1000
+
+
+def test_search_warms_capped_per_query_inside_the_load(fake):
+    for i in range(6):
+        call(f'S{i}', {omdb.WARM_HEADER: 'load-s/1'})
+    assert len(fake.calls) == omdb.WARMS_PER_QUERY == 4
+    for i in range(6):
+        call(f'Q{i}', {omdb.WARM_HEADER: 'load-s/2'})
+    assert len(fake.calls) == 8
+    for i in range(10):                                  # Home warms share the load's 12
+        call(f'H{i}', {omdb.WARM_HEADER: 'load-s'})
+    assert len(fake.calls) == omdb.WARMS_PER_LOAD
+
+
+class _Pool:
+    def submit(self, fn, *a):
+        from concurrent.futures import Future
+        f = Future()
+        if fn is app.main._rt_scores:
+            return f                                     # never answers within the budget
+        f.set_result(fn(*a))
+        return f
+
+
+def test_inline_ratings_budget_partial_and_merge(fake, monkeypatch):
+    fake.body = {'Response': 'True', 'imdbRating': '7.9', 'imdbVotes': '1', 'Metascore': '81', 'Ratings': [], 'imdbID': 'tt1'}
+    monkeypatch.setattr(app.main, '_ratings_executor', lambda: _Pool())
+    monkeypatch.setattr(app.main, '_plex_ratings_cached', lambda rk: {'imdb': {'score': 8.0}})
+    r, partial, skipped = app.main.inline_ratings('movie', 'Arrival', '2016', '5003', budget=0.05)
+    assert r['imdb'] == {'score': 8.0}                   # Plex first
+    assert r['metacritic'] == {'score': 81}              # OMDb fills
+    assert r['rotten_tomatoes_critic'] is None and r['tmdb'] is None
+    assert partial is True and skipped is False          # RT missed the budget: left out
+
+
+def test_inline_ratings_warm_guard(fake, monkeypatch):
+    monkeypatch.setattr(app.main, '_ratings_executor', lambda: _Pool())
+    monkeypatch.setattr(omdb, 'daily_quota', lambda: 1)
+    omdb.count_call()
+    r, partial, skipped = app.main.inline_ratings('movie', 'Arrival', '2016', None, warm='w', budget=0.05)
+    assert skipped is True and fake.calls == []
+
+
+def test_detail_routes_carry_ratings(fake, monkeypatch):
+    monkeypatch.setattr(app.main, 'inline_ratings', lambda *a, **k: ({'imdb': {'score': 7.0}, 'tmdb': None}, True, False))
+    assert set(app.main._INLINE_RATINGS_ROUTES) == {'movie_details', 'tv_details', 'plex_movie_metadata', 'plex_tv_metadata'}
+    monkeypatch.setitem(app.main._INLINE_RATINGS_ROUTES, '', app.main._INLINE_RATINGS_ROUTES['tv_details'])
+    with app.main.app.test_request_context('/api/tv/1'):
+        from flask import jsonify
+        resp = app.main._detail_ratings_inline(jsonify({'name': 'Severance', 'first_air_date': '2022-02-18'}))
+        data = resp.get_json()
+    assert data['ratings']['imdb'] == {'score': 7.0} and data['ratings_partial'] is True

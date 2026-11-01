@@ -161,7 +161,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   // Ratings arrive after the details: if the sheet shows before them, keep
   // their row reserved (and never collapse it) so nothing below moves.
   // Phone parity with web: RT from the reviews endpoint when the ratings lack it (mergeRatings).
-  const shownRatings = useEffectiveRatings(ratings, detail?.title, detail?.year);
+  const shownRatings = useEffectiveRatings(ratings, detail?.title, detail?.year, detail?.ratings !== undefined);
   const hasRatings = !!shownRatings && buildRatingItems(shownRatings).length > 0;
     // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed
   // reserves the ratings row from it and the row keeps that box, so a late ratings fetch never moves the rows below.
