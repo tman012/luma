@@ -51,6 +51,7 @@ def api_key() -> str:
 def lookup(imdb_id: str, key: str, timeout: float = 15) -> Optional[Dict[str, Any]]:
     """One OMDb call: {'rating', 'votes', 'at'} (nulls when IMDb has nothing), None on failure."""
     today = datetime.now().strftime('%Y-%m-%d')
+    count_call()
     try:
         o = requests.get(OMDB_URL, params={'apikey': key, 'i': imdb_id}, timeout=timeout)
         o.raise_for_status()
@@ -138,3 +139,103 @@ def test_key(key: str) -> Optional[str]:
 def forget() -> None:
     with _lock:
         _cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# Quota protection for title lookups (/api/ratings): a negative cache for misses and errors, a daily call
+# budget that background warm-ups may only use up to WARM_BUDGET_SHARE of, and a per-load warm cap. All in
+# server memory.
+# ---------------------------------------------------------------------------
+
+NEG_TTL_S = 6 * 3600
+NEG_MAX = 5000
+DEFAULT_DAILY_QUOTA = 1000
+WARM_BUDGET_SHARE = 0.7
+WARMS_PER_LOAD = 12
+WARM_LOADS_MAX = 500
+WARM_HEADER = 'X-Luma-Warm'
+
+_neg: Dict[str, float] = {}
+_day = {'date': '', 'calls': 0}
+_warm_loads: Dict[str, int] = {}
+_guard_lock = threading.Lock()
+
+
+def _now() -> float:
+    import time
+    return time.time()
+
+
+def negative_hit(key: str) -> bool:
+    """True when this lookup missed or failed within NEG_TTL_S."""
+    with _guard_lock:
+        at = _neg.get(key)
+        if at is None:
+            return False
+        if _now() - at >= NEG_TTL_S:
+            del _neg[key]
+            return False
+        return True
+
+
+def remember_miss(key: str) -> None:
+    with _guard_lock:
+        if len(_neg) >= NEG_MAX:
+            del _neg[min(_neg, key=_neg.get)]
+        _neg[key] = _now()
+
+
+def daily_quota() -> int:
+    """The OMDb plan's daily request limit: Settings apis.omdb.daily_quota, else OMDB_DAILY_QUOTA, else 1000."""
+    val: Any = None
+    try:
+        from app.settings_manager import SettingsFile
+        val = SettingsFile().get('apis.omdb.daily_quota')
+    except Exception:                  # noqa: BLE001
+        val = None
+    if not val:
+        try:
+            from app.config import Config
+            val = getattr(Config, 'OMDB_DAILY_QUOTA', None)
+        except Exception:              # noqa: BLE001
+            val = None
+    try:
+        n = int(val)
+    except (TypeError, ValueError):
+        n = 0
+    return n if n > 0 else DEFAULT_DAILY_QUOTA
+
+
+def _today_calls() -> int:
+    today = datetime.now().strftime('%Y-%m-%d')
+    if _day['date'] != today:
+        _day['date'], _day['calls'] = today, 0
+    return _day['calls']
+
+
+def count_call() -> None:
+    with _guard_lock:
+        _today_calls()
+        _day['calls'] += 1
+
+
+def warm_allowed(load_id: str) -> bool:
+    """A background warm-up may call OMDb: under WARM_BUDGET_SHARE of today's quota and under WARMS_PER_LOAD
+    for its load. Counts the warm when allowed. User opens never go through this."""
+    with _guard_lock:
+        if _today_calls() >= daily_quota() * WARM_BUDGET_SHARE:
+            return False
+        n = _warm_loads.get(load_id, 0)
+        if n >= WARMS_PER_LOAD:
+            return False
+        if load_id not in _warm_loads and len(_warm_loads) >= WARM_LOADS_MAX:
+            del _warm_loads[next(iter(_warm_loads))]
+        _warm_loads[load_id] = n + 1
+        return True
+
+
+def _reset_guard() -> None:
+    with _guard_lock:
+        _neg.clear()
+        _warm_loads.clear()
+        _day['date'], _day['calls'] = '', 0

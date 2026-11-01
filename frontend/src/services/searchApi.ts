@@ -253,7 +253,7 @@ export function resultIds(item: SearchMovie): { kind: 'movie' | 'tv'; ratingKey?
   return { kind: item.media_type === 'tv' ? 'tv' : 'movie', ratingKey: rk, tmdbId: tmdb ? Number(tmdb) : undefined };
 }
 
-function warmResult(item: SearchMovie, opts?: { images?: boolean }): Promise<void> {
+function warmResult(item: SearchMovie, opts?: { images?: boolean; ratings?: boolean }): Promise<void> {
   const { kind, ratingKey, tmdbId } = resultIds(item);
   return warmDetail(kind, ratingKey, tmdbId, opts).catch(() => {});
 }
@@ -303,7 +303,7 @@ function warmResults(items: SearchMovie[]): () => void {
     cancels = onScreen(items.slice(0, WARM_META_ROWS)).map((item, i) => {
       const full = i < WARM_FULL_ROWS;
       const key = `search:${resultWarmKey(item)}:${full ? 'full' : 'meta'}`;
-      return scheduleWarm(key, () => warmResult(item, { images: full }), SEARCH_WARM_GROUP);
+      return scheduleWarm(key, () => warmResult(item, { images: full, ratings: full }), SEARCH_WARM_GROUP);
     });
   }, SEARCH_WARM_DEBOUNCE_MS);
   return () => { window.clearTimeout(t); cancels.forEach((c) => c()); };

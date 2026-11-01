@@ -470,7 +470,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                     <CreditRow
                       key={`all-${i}`}
                       credit={credit}
-                      onClick={() => handleCreditClick(credit)}
+                      onClick={(el) => handleCreditClick(credit, el)}
                     />
                   ))}
                 </div>
@@ -489,7 +489,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                         <CreditRow
                           key={`owned-${i}`}
                           credit={credit}
-                          onClick={() => handleCreditClick(credit)}
+                          onClick={(el) => handleCreditClick(credit, el)}
                         />
                       ))}
                     </div>
@@ -523,7 +523,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                             <CreditRow
                               key={`unowned-${i}`}
                               credit={credit}
-                              onClick={() => handleCreditClick(credit)}
+                              onClick={(el) => handleCreditClick(credit, el)}
                             />
                           ))}
                         </div>
@@ -549,13 +549,13 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
 // ---------------------------------------------------------------------------
 
 
-function CreditRow({ credit, onClick }: { credit: PersonCredit; onClick: () => void }) {
+function CreditRow({ credit, onClick }: { credit: PersonCredit; onClick: (el: HTMLElement) => void }) {
   const typeLabel = credit.media_type === 'tv' ? 'Show' : 'Movie';
 
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(e) => onClick(e.currentTarget)}
       className="flex w-full items-center gap-4 px-4 py-3 text-left active:bg-white/5 rounded-lg"
     >
       <div className="h-[100px] w-[67px] flex-shrink-0 overflow-hidden rounded-lg bg-white/5">

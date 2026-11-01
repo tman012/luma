@@ -55,7 +55,7 @@ function SearchResultCard({
   wl,
 }: {
   item: SearchMovie;
-  onClick: () => void;
+  onClick: (el: HTMLElement) => void;
   /** v202 (test install): an unowned movie's Add to watchlist / In watchlist (the native watchlist) */
   wl?: { inList: boolean; onAdd: () => void };
 }) {
@@ -90,7 +90,7 @@ function SearchResultCard({
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(e) => onClick(e.currentTarget)}
       onPointerEnter={warm}
       onPointerDown={warm}
       onFocus={warm}
@@ -127,7 +127,7 @@ function PersonCard({
   onClick,
 }: {
   person: SearchPerson;
-  onClick: () => void;
+  onClick: (el: HTMLElement) => void;
 }) {
   const d = useUiDensity();
   const tk = uiDensityTokens(d);
@@ -136,7 +136,7 @@ function PersonCard({
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(e) => onClick(e.currentTarget)}
       className="group flex flex-col items-center gap-2 rounded-2xl p-3 transition-colors hover:bg-glass-10"
     >
       <div className={cn(
@@ -1061,7 +1061,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                             key={`unified-${i}`}
                             item={entry.item}
                             wl={entry.owned ? undefined : wlFor(entry.item)}
-                            onClick={() => handleResultClick(entry.item)}
+                            onClick={(el) => handleResultClick(entry.item, el)}
                           />
                         );
                       })}
@@ -1108,7 +1108,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                       <SearchResultCard
                         key={`owned-${i}`}
                         item={item}
-                        onClick={() => handleResultClick(item)}
+                        onClick={(el) => handleResultClick(item, el)}
                       />
                     ))}
                   </div>
@@ -1152,7 +1152,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                             key={`unowned-${i}`}
                             item={item}
                             wl={wlFor(item)}
-                            onClick={() => handleResultClick(item)}
+                            onClick={(el) => handleResultClick(item, el)}
                           />
                         ))}
                       </div>
@@ -1181,7 +1181,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                           tmdb_id: credit.tmdb_id,
                           isOwned: false,
                         }}
-                        onClick={() =>
+                        onClick={(el) =>
                           handleResultClick({
                             title: credit.title,
                             year: credit.year,
@@ -1189,7 +1189,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                             media_type: credit.media_type,
                             tmdb_id: credit.tmdb_id,
                             isOwned: false,
-                          })
+                          }, el)
                         }
                       />
                     ))}
@@ -1216,7 +1216,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                               tmdb_id: credit.tmdb_id,
                               isOwned: true,
                             }}
-                            onClick={() =>
+                            onClick={(el) =>
                               handleResultClick({
                                 title: credit.title,
                                 year: credit.year,
@@ -1225,7 +1225,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                                 rating_key: credit.rating_key,
                                 tmdb_id: credit.tmdb_id,
                                 isOwned: true,
-                              })
+                              }, el)
                             }
                           />
                         ))}
@@ -1267,7 +1267,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                                   tmdb_id: credit.tmdb_id,
                                   isOwned: false,
                                 }}
-                                onClick={() =>
+                                onClick={(el) =>
                                   handleResultClick({
                                     title: credit.title,
                                     year: credit.year,
@@ -1275,7 +1275,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                                     media_type: credit.media_type,
                                     tmdb_id: credit.tmdb_id,
                                     isOwned: false,
-                                  })
+                                  }, el)
                                 }
                               />
                             ))}

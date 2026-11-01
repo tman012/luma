@@ -3,7 +3,7 @@ import { CARD_SIZES, cardSrcSet, img, type Card, type Rail } from './homeApi';
 import { FONT } from '@/components/start/StartUI';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MOTION, reducedMotion } from '@/theme/motion';
-import { PRESS_RELEASED_EVENT, scheduleWarm, tapPending, warmDetail } from '@/services/modalPrefetch';
+import { PRESS_RELEASED_EVENT, scheduleWarm, startWarmLoad, tapPending, warmDetail } from '@/services/modalPrefetch';
 import { OwnedOrb, plexOwned, useRailOwnership, type CardOwnership } from './railOwnership';
 import { LONG_PRESS_STYLE, useLongPress } from './useLongPress';
 
@@ -28,9 +28,17 @@ export function cardIds(c: Card): { kind: 'movie' | 'tv'; ratingKey?: number; tm
 }
 
 /** Warm the detail popup (metadata, backdrop, logo, color blur). */
-export function warmCard(c: Card): Promise<void> {
+export function warmCard(c: Card, ratings = false): Promise<void> {
   const { kind, ratingKey, tmdbId } = cardIds(c);
-  return warmDetail(kind, ratingKey, tmdbId).catch(() => {});
+  return warmDetail(kind, ratingKey, tmdbId, { ratings }).catch(() => {});
+}
+
+/** Ratings are warmed only for the first rail and cards on screen (each counts against the load's cap). */
+function warmsRatings(el: HTMLElement): boolean {
+  const rails = el.closest('[data-testid="home-rails"]');
+  if (rails && el.closest('section') === rails.querySelector('section')) return true;
+  const r = el.getBoundingClientRect();
+  return r.bottom > 0 && r.right > 0 && r.top < window.innerHeight && r.left < window.innerWidth;
 }
 
 /** Home's background warm-ups share one cap where the link can't be checked (UNKNOWN_LINK_CAP). */
@@ -54,7 +62,7 @@ function useWarmWhenVisible(ref: React.RefObject<HTMLElement | null>, card: Card
     const io = new IntersectionObserver((entries) => {
       const e = entries[entries.length - 1];
       cancel();
-      cancel = e?.isIntersecting ? scheduleWarm(warmKey(card), () => warmCard(card), HOME_WARM_GROUP) : () => {};
+      cancel = e?.isIntersecting ? scheduleWarm(warmKey(card), () => warmCard(card, warmsRatings(el)), HOME_WARM_GROUP) : () => {};
     }, { rootMargin: '150px' });
     io.observe(el);
     return () => { io.disconnect(); cancel(); };
@@ -70,7 +78,7 @@ function CardShell({ card, onOpen, onLongPress, style, children, own }: { card: 
   useWarmWhenVisible(ref, card, !!onOpen);
   const lp = useLongPress(onLongPress ? () => onLongPress(card) : undefined);
   if (!onOpen && !lp) return <div style={style}>{children}</div>;
-  const warm = () => { void warmCard(card); };
+  const warm = () => { void warmCard(card, true); };
   return (
     <button ref={ref} type="button" aria-label={card.title}
       onClick={(e) => { if (lp?.consumeClick()) return; onOpen?.(card, e.currentTarget); }}
@@ -234,6 +242,8 @@ export function HomeRails({ cw, rails, onOpen, onDismiss, afterFirst }: { cw: Ca
   const own = useRailOwnership(rails.flatMap(r => r.items).filter(c => c.tmdb_id));
   const root = useRef<HTMLDivElement>(null);
   // The next cold load's skeleton is drawn from this layout (after paint: never on the tap path).
+  // Each Home load starts a fresh ratings warm count (RATINGS_WARMS_PER_LOAD).
+  useEffect(() => { startWarmLoad(); }, []);
   useEffect(() => { const t = window.setTimeout(() => saveHomeLayout(root.current), 500); return () => window.clearTimeout(t); });
   return (
     <div ref={root} data-testid="home-rails" className="luma-rails-in">

@@ -990,7 +990,7 @@ def fetch_imdb_votes_batch(items, max_items=30):
         key = f"{title.lower()}_{year}"
 
         try:
-            omdb_url = f"http://www.omdbapi.com/?apikey={settings.get('apis.omdb.api_key')}&t={title}"
+            omdb_url = f"https://www.omdbapi.com/?apikey={settings.get('apis.omdb.api_key')}&t={title}"
             if year:
                 omdb_url += f"&y={year}"
 
@@ -1093,7 +1093,7 @@ def enrich_hero_imdb(items: List[Dict]) -> List[Dict]:
                 params['t'] = title
                 if year:
                     params['y'] = str(year)
-            resp = requests.get('http://www.omdbapi.com/', params=params, timeout=5)
+            resp = requests.get('https://www.omdbapi.com/', params=params, timeout=5)
             if resp.ok:
                 data = resp.json()
                 if data.get('Response') == 'True':
@@ -10785,16 +10785,26 @@ def get_ratings(title):
         if cached and (now - cached[0]) < _OMDB_RATINGS_CACHE_TTL:
             return jsonify(cached[1])
 
-        # Query OMDB API (settings → env var fallback)
         from app import omdb as _omdb
+        if _omdb.negative_hit(cache_key):
+            return jsonify({'error': 'Movie not found'}), 404
+        # Query OMDB API (settings → env var fallback)
         omdb_key = _omdb.api_key()
         if not omdb_key:
             return jsonify({'error': 'No OMDb API key configured'}), 503
-        omdb_url = f"http://www.omdbapi.com/?apikey={omdb_key}&t={title}"
+        # A background warm-up (not a user open) stays within its share of the daily quota and its load's cap.
+        warm = request.headers.get(_omdb.WARM_HEADER)
+        if warm and not _omdb.warm_allowed(warm):
+            return jsonify({'error': 'Warm-up skipped'}), 429
+        params = {'apikey': omdb_key, 't': title}
         if year:
-            omdb_url += f"&y={year}"
-
-        response = requests.get(omdb_url, timeout=5)
+            params['y'] = year
+        _omdb.count_call()
+        try:
+            response = requests.get(_omdb.OMDB_URL, params=params, timeout=5)
+        except Exception:
+            _omdb.remember_miss(cache_key)
+            raise
 
         if response.ok:
             data = response.json()
@@ -10839,12 +10849,14 @@ def get_ratings(title):
 
                 return jsonify(ratings_data)
             else:
+                _omdb.remember_miss(cache_key)
                 return jsonify({'error': 'Movie not found'}), 404
         else:
+            _omdb.remember_miss(cache_key)
             return jsonify({'error': 'Failed to fetch ratings'}), 500
 
     except Exception as e:
-        logger.error(f"Error fetching ratings from OMDB: {e}")
+        logger.error(f"Error fetching ratings from OMDB: {type(e).__name__}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/imdb/votes', methods=['POST'])
