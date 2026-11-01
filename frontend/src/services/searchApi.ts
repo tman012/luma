@@ -248,15 +248,18 @@ export async function batchCheckOwnership(
  *  ids the popup will be opened with. */
 /** The ids a result's popup opens (and is warmed) with. */
 /** Home's ids (MinimalHomePage openDetail): a known TMDb id opens by that id alone, else the Plex key. */
-export function openIds(tmdb: unknown, rk: unknown): { ratingKey?: number; tmdbId?: number } {
+export function openIds(tmdb: unknown, rk: unknown, kind?: 'movie' | 'tv'): { ratingKey?: number; tmdbId?: number } {
   const t = Number(tmdb) || undefined;
+  // An owned show also carries its Plex key (the Home card's path): the sheet opens over the Plex art, and a slow or
+  // failing TMDb still reveals at the art deadline instead of waiting or erroring.
+  if (t && kind === 'tv' && Number(rk)) return { ratingKey: Number(rk), tmdbId: t };
   if (t) return { ratingKey: undefined, tmdbId: t };
   const k = Number(rk) || undefined;
   return { ratingKey: k, tmdbId: undefined };
 }
 export function resultIds(item: SearchMovie): { kind: 'movie' | 'tv'; ratingKey?: number; tmdbId?: number } {
   return { kind: item.media_type === 'tv' ? 'tv' : 'movie',
-    ...openIds(item.tmdb_id || item.id, item.isOwned ? item.rating_key : undefined) };
+    ...openIds(item.tmdb_id || item.id, item.isOwned ? item.rating_key : undefined, item.media_type === 'tv' ? 'tv' : 'movie') };
 }
 
 function warmResult(item: SearchMovie, opts?: { images?: boolean; ratings?: boolean; search?: boolean }): Promise<void> {

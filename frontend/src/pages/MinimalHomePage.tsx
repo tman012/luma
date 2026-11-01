@@ -280,7 +280,8 @@ export function openDetail(modals: { openMovie: (o: object) => void; openTv: (o:
   if (c.tmdb_id) {
     return c.type === 'movie'
       ? modals.openMovie({ tmdbId: c.tmdb_id, origin: 'trakt_movies' })
-      : modals.openTv({ tmdbId: c.tmdb_id, origin: 'trakt_shows' });
+      // An owned show (a Plex card) also passes its Plex key: the sheet opens over the Plex art (see openIds).
+      : modals.openTv({ tmdbId: c.tmdb_id, ...(Number(c.key) ? { ratingKey: Number(c.key) } : {}), origin: 'trakt_shows' });
   }
   const key = Number(c.key);
   if (c.type === 'movie') return modals.openMovie({ ratingKey: key, origin: 'continue_watching' });

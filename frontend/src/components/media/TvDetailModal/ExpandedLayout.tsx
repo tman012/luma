@@ -1,4 +1,4 @@
-import { useOneReveal } from '@/hooks/useOneReveal';
+import { useOneReveal, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
 import { useSheetHero, HERO_FADE, HERO_ANIM } from '@/hooks/useSheetBackdrop';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
@@ -1151,7 +1151,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
   const lumaMon = useLumaSeries(props.resolvedTmdbId);
   const isOwner = !!user?.is_admin;
   const {
-    show,
+    show: liveShow,
     seasons,
     tvdbId,
     ownership,
@@ -1182,9 +1182,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
     showFullShow,
     onEpisodeClick,
   } = props;
-  const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
+  const titleState = useTitleReveal(logoInput(liveShow), liveShow?.title, liveShow?.backdropUrl || liveShow?.posterUrl);
   // ONE backdrop per open (useSheetBackdrop): the text-free pick when it arrives before the latch, never swapped after.
-  const sheetHero = useSheetHero(finalBackdropUrl(show?.backdropTextlessUrl ?? show?.backdropUrl), !!show && !show.backdropPending, show?.clearLogoUrl, logoInput(show) !== undefined, props.openKey, !!show);
+  const sheetHero = useSheetHero(finalBackdropUrl(liveShow?.backdropTextlessUrl ?? liveShow?.backdropUrl), !!liveShow && !liveShow.backdropPending, liveShow?.clearLogoUrl, logoInput(liveShow) !== undefined, props.openKey, !!liveShow);
   const sheetArt = sheetHero.art;
 
   // Determine if we're in active episode-mode display
@@ -1204,12 +1204,14 @@ export function ExpandedLayout(props: TvModalViewProps) {
   const logoRef = useRef<HTMLDivElement>(null);
 
   // Effective ratings — IMDb via OMDb (never TMDb vote_average)
-  const ratingsState = useImdbRatingsState(show?.title, show?.year, show?.ratings);
+  const ratingsState = useImdbRatingsState(liveShow?.title, liveShow?.year, liveShow?.ratings);
   // ONE settled row, faded in once (useRatingsSettle); a later answer is dropped for this open.
-  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey, !!show);
+  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!liveShow && ratingsDone(ratingsState, liveShow?.title), props.openKey, !!liveShow);
   // ONE reveal (useOneReveal): backdrop, logo or title, meta, ratings and buttons together.
-  const reveal = useOneReveal(props.openKey, !loading && !!show, sheetHero.state !== 'hold', ratingsSettle.shown,
+  const reveal = useOneReveal(props.openKey, !loading && !!liveShow, sheetHero.state !== 'hold', ratingsSettle.shown,
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
+  // The revealed text stays for the open: a late TMDb answer changes nothing visible.
+  const show = useRevealFreeze(liveShow, reveal.revealed, props.openKey, TV_TEXT);
   const ratingsRow = useRef(ratingsExpectedAtTap(false)).current || !!ratingsSettle.ratings;
 
   // Trigger reviews fetch when detail loads
@@ -1459,7 +1461,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
           }}>
 
             {/* Loading state */}
-            {loading && (
+            {(loading || (!reveal.revealed && !error)) && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
                 <div style={{
                   width: '48px', height: '48px', borderRadius: '50%',

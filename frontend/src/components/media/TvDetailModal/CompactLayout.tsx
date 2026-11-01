@@ -21,7 +21,7 @@ import type {
 import { autoSearchSeason } from '@/services/sonarrApi';
 import { isSeasonMonitored } from './tvSourcesUtils';
 import { UltraBlurOverlay } from '../UltraBlurOverlay';
-import { useOneReveal } from '@/hooks/useOneReveal';
+import { useOneReveal, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
 import { BackdropHero } from '../BackdropHero';
 import { useBackdropEffects } from '@/hooks/useBackdropEffects';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
@@ -162,7 +162,7 @@ export function CompactLayout(props: TvModalViewProps) {
   // What the tapped card knew about ownership (null: unknown), read once at mount: the seed reserves from it.
   const seedOwned = useRef(tapShell()?.owned ?? null).current;
   const {
-    show,
+    show: liveShow,
     seasons,
     ownership,
     showOwned,
@@ -205,11 +205,11 @@ export function CompactLayout(props: TvModalViewProps) {
   } = props;
   // The tap-time seed only stands in until the details load; after that the details (or the ownership lookup) decide,
   // so a stale card orb can't keep Watch in place of Add.
-  const showOwnedNow = (loading || !show) ? (showOwned || seedOwned === true) : (showOwned || !!show.isOwned);
-  const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
-  // Phone: the sheet stays off-screen until it can show fully composed
+  const showOwnedNow = (loading || !liveShow) ? (showOwned || seedOwned === true) : (showOwned || !!liveShow.isOwned);
+  const titleState = useTitleReveal(logoInput(liveShow), liveShow?.title, liveShow?.backdropUrl || liveShow?.posterUrl);
+  // Phone: the sheet stays off-screen until it can liveShow fully composed
   // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
-  const composed = !!error || (!loading && !!show && titleState !== 'hold');
+  const composed = !!error || (!loading && !!liveShow && titleState !== 'hold');
   // Past the open budget the sheet starts on the tapped card's own art, colors and title (useSeededHero).
   const hero = useSeededHero(composed, detailColors);
   const heroHold = hero.seeded ? false : titleState === 'hold';
@@ -217,9 +217,9 @@ export function CompactLayout(props: TvModalViewProps) {
   // the cap, never swapped (useSheetBackdrop).
   // The hero (backdrop + title) is ONE unit: logo vs. text and the backdrop are decided together before the reveal
   // (1.2s cap from the tap), fade in once together, and never change for that open.
-  const sheetHero = useSheetHero(finalBackdropUrl(show?.backdropTextlessUrl ?? show?.backdropUrl), !!show && !show.backdropPending, show?.clearLogoUrl ? withBase(show.clearLogoUrl) : null, logoInput(show) !== undefined, props.openKey, !!show);
+  const sheetHero = useSheetHero(finalBackdropUrl(liveShow?.backdropTextlessUrl ?? liveShow?.backdropUrl), !!liveShow && !liveShow.backdropPending, liveShow?.clearLogoUrl ? withBase(liveShow.clearLogoUrl) : null, logoInput(liveShow) !== undefined, props.openKey, !!liveShow);
   const sheetArt = sheetHero.art;
-  const posterFill = show && !show.backdropUrl && !sheetArt ? show.posterUrl : null;
+  const posterFill = liveShow && !liveShow.backdropUrl && !sheetArt ? liveShow.posterUrl : null;
   const ultraBlurColors = hero.colors;
   const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
   useEffect(() => {
@@ -227,14 +227,16 @@ export function CompactLayout(props: TvModalViewProps) {
   }, [composed]);
   // Ratings (shared with ExpandedLayout) arrive after the details: as on the movie
   // sheet, keep their row reserved once the sheet shows so nothing below moves.
-  const ratingsState = useImdbRatingsState(show?.title, show?.year, show?.ratings);
+  const ratingsState = useImdbRatingsState(liveShow?.title, liveShow?.year, liveShow?.ratings);
   const ratingsLoading = ratingsState.loading;
   // The row settles once and fades in together (useRatingsSettle); a later answer is dropped for this open.
-  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey, !!show);
+  const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!liveShow && ratingsDone(ratingsState, liveShow?.title), props.openKey, !!liveShow);
   const hasRatings = !!ratingsSettle.ratings;
   // ONE reveal: backdrop, title/logo, meta, ratings and buttons together, in one fade (useOneReveal).
-  const reveal = useOneReveal(props.openKey, !loading && !error && !!show, sheetHero.state !== 'hold', ratingsSettle.shown,
+  const reveal = useOneReveal(props.openKey, !loading && !error && !!liveShow, sheetHero.state !== 'hold', ratingsSettle.shown,
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
+  // The revealed text stays for the open: a late TMDb answer changes nothing visible.
+  const show = useRevealFreeze(liveShow, reveal.revealed, props.openKey, TV_TEXT);
     // Known at tap time: outside minimal builds the ratings row has a source (OMDb/RT); the seed reserves it and the
   // row keeps that box, so a late ratings fetch never moves the rows below.
   const ratingsExpected = useRef(ratingsExpectedAtTap(false)).current;
@@ -520,6 +522,13 @@ export function CompactLayout(props: TvModalViewProps) {
   return (
     <SheetFrame name="TvDetailModal" phase={phase} composed={composed} go={go} onScrimClick={onClose}>
       <SheetCard background={sheetBg}>
+        {/* Past the 1.0s deadline with the details still out (a slow TMDb): the sheet spinner, as on desktop; it
+            leaves at the one reveal. */}
+        {sheetHero.deadline && !reveal.revealed && !error && (
+          <div data-sheet-spinner="" aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+            <div style={{ width: '28px', height: '28px', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.7)', animation: 'mobileTvModalSpin 0.8s linear infinite' }} />
+          </div>
+        )}
         {/* Scrollable content */}
         <div
           ref={scrollRef}

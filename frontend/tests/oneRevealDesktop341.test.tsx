@@ -26,14 +26,14 @@ describe('v341b: desktop one reveal and the button set', () => {
   it('movie and TV expanded layouts: backdrop, logo/title and the content block share the one gate and fade', () => {
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
       const e = src(`components/media/${k}/ExpandedLayout.tsx`);
-      expect(e, k).toMatch(/const reveal = useOneReveal\(props\.openKey, !loading && !!(detail|show), sheetHero\.state !== 'hold', ratingsSettle\.shown,\s*sheetHero\.deadline/);
+      expect(e, k).toMatch(/const reveal = useOneReveal\(props\.openKey, !loading && !!(liveDetail|liveShow), sheetHero\.state !== 'hold', ratingsSettle\.shown,\s*sheetHero\.deadline/);
       expect(e, k).toMatch(/revealStyle\(reveal\.revealed \? sheetHero\.state : 'hold'\), animation: reveal\.revealed \? HERO_ANIM : 'none'/); // backdrop: decoded, mounted, fades at the reveal
       expect(e, k).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1/);  // logo/title
       expect(e, k).toMatch(/\.\.\.\(loading \|\| error \|\| reveal\.revealed \? revealStyle\('text'\) : \{ opacity: 0, transition: 'none' \}\)/); // meta, ratings, pills
     }
     const m = src('components/media/MovieDetailModal/ExpandedLayout.tsx');
     expect(m).toMatch(/const isOwned = reveal\.revealed \? reveal\.owned : \(detail\?\.isOwned \?\? false\);/);
-    expect(m).toMatch(/!!detail\.ownershipSettled/);
+    expect(m).toMatch(/!!liveDetail\.ownershipSettled/);
     expect(src('hooks/useMovieDetail.ts')).toMatch(/ownershipSettled: true/);
   });
 });

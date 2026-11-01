@@ -15,7 +15,7 @@ describe('text-free backdrop over Plex art', () => {
 
   it('phone and desktop TV sheets pick the text-free backdrop as their one backdrop', () => {
     for (const f of ['CompactLayout', 'ExpandedLayout']) {
-      expect(src(`components/media/TvDetailModal/${f}.tsx`)).toMatch(/useSheetHero\(finalBackdropUrl\(show\?\.backdropTextlessUrl \?\? show\?\.backdropUrl\), !!show && !show\.backdropPending/);
+      expect(src(`components/media/TvDetailModal/${f}.tsx`)).toMatch(/useSheetHero\(finalBackdropUrl\(liveShow\?\.backdropTextlessUrl \?\? liveShow\?\.backdropUrl\), !!liveShow && !liveShow\.backdropPending/);
     }
   });
 });
