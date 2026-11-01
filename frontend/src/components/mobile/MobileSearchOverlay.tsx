@@ -7,7 +7,7 @@ import {
   batchCheckOwnership,
   getPosterUrl,
   getProfileUrl,
-  openResult,
+  openResult, resultIds, openIds,
   warmResult,
   warmResults,
   resultWarmKey,
@@ -273,11 +273,10 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
   const topSuggestions = suggestions.slice(0, MAX_SUGGESTIONS);
 
   const handleMediaClick = (item: SearchMovie, el?: HTMLElement | null) => {
-    const tmdbId = item.tmdb_id || item.id;
-    const rk = item.rating_key;
+    const { ratingKey, tmdbId } = resultIds(item);
     const opts = {
-      ratingKey: (item.isOwned && rk) ? rk : undefined,
-      tmdbId: tmdbId ?? undefined,
+      ratingKey,
+      tmdbId,
       origin: 'search' as const,
       onPersonSearch: handlePersonSearch,
       searchQuery: query.trim() || undefined,
@@ -293,8 +292,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
   // Handle filmography credit click
   const handleCreditClick = (credit: PersonCredit, el?: HTMLElement | null) => {
     const opts = {
-      ratingKey: (credit.isOwned && credit.rating_key) ? credit.rating_key : undefined,
-      tmdbId: credit.tmdb_id ?? undefined,
+      ...openIds(credit.tmdb_id, credit.isOwned ? credit.rating_key : undefined),
       origin: 'search' as const,
       onPersonSearch: handlePersonSearch,
     };

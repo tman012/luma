@@ -192,7 +192,7 @@ describe('C2 Enter/Space on a focused control is that control only (Tester MED)'
   it('Enter in the input still opens the highlighted row', async () => {
     await setup();
     fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Enter' });
-    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ ratingKey: 1 })));
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ ratingKey: undefined, tmdbId: 438631 })));  // v340: Home's ids
   });
 });
 

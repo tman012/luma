@@ -5,7 +5,7 @@ import { useModalHost } from '@/contexts/ModalHostContext';
 import { APP_BG, MOTION } from '@/theme/motion';
 import { openModalForItem } from '@/utils/modalNavigation';
 import {
-  openResult,
+  openResult, resultIds,
   performSearch,
   warmResult,
   warmResults,
@@ -131,14 +131,13 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
   // query, results and scroll intact and focus on the tapped row (MOTION.md §3).
   const handleResultClick = useCallback((item: SearchMovie, el?: HTMLElement | null) => {
     void openResult(item, el, () => {
-      const tmdbId = item.tmdb_id || item.id;
-      const rk = item.rating_key;
+      const { ratingKey, tmdbId } = resultIds(item);
       openModalForItem(
         modalHost,
         {
           mediaType: item.media_type === 'tv' ? 'tv' : 'movie',
-          tmdbId: tmdbId ?? undefined,
-          ratingKey: (item.isOwned && rk) ? rk : undefined,
+          tmdbId,
+          ratingKey,
         },
         'search',
         { searchQuery: query.trim() || undefined, ...(onPersonSearch ? { onPersonSearch } : {}) },

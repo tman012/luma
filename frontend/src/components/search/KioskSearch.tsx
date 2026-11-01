@@ -25,7 +25,7 @@ import {
   getPosterUrl,
   getProfileUrl,
   warmResult,
-  openResult,
+  openResult, resultIds,
   getTitle,
   getYear,
   TMDB_BUSY_TEXT,
@@ -626,11 +626,10 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
 
   // Same open as a Home card tap (openWhenReady through openResult).
   const handleResultClick = (item: SearchMovie, el?: HTMLElement | null) => {
-    const rk = item.rating_key;
-    const tmdbId = item.tmdb_id || item.id;
+    const { ratingKey, tmdbId } = resultIds(item);
     const opts = {
-      ratingKey: (item.isOwned && rk) ? rk : undefined,
-      tmdbId: tmdbId ?? undefined,
+      ratingKey,
+      tmdbId,
       origin: 'search' as const,
       onPersonSearch: handlePersonSearch,
     };

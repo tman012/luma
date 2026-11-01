@@ -12,7 +12,7 @@ import { FONT } from '@/components/start/StartUI';
 import { HomeChevron, homeChevCss } from '@/components/home/HomeChevron';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import {
-  openResult, warmResult, warmResults, resultWarmKey,
+  openResult, resultIds, warmResult, warmResults, resultWarmKey,
   performSearch, getPosterUrl, getProfileUrl, getTitle, getYear, TMDB_BUSY_TEXT,
   type SearchMovie, type SearchPerson, type SearchResults,
 } from '@/services/searchApi';
@@ -186,8 +186,8 @@ export function HomeSearchR3() {
 
   // Same open as a Home card tap (openWhenReady through openResult).
   const open = (item: SearchMovie, el?: HTMLElement | null) => {
-    const tmdbId = item.tmdb_id || item.id;
-    const opts = { ratingKey: (item.isOwned && item.rating_key) ? item.rating_key : undefined, tmdbId: tmdbId ?? undefined, origin: 'search' as const };
+    const { ratingKey, tmdbId } = resultIds(item);
+    const opts = { ratingKey, tmdbId, origin: 'search' as const };
     if (!opts.ratingKey && !opts.tmdbId) return;
     void openResult(item, el, () => { if (item.media_type === 'tv') openTv(opts); else openMovie(opts); });
   };

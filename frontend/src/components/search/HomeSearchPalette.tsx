@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import {
-  openResult, warmResult, warmResults, resultWarmKey,
+  openResult, resultIds, warmResult, warmResults, resultWarmKey,
   performSearch, getPosterUrl, getProfileUrl, getTitle, getYear, TMDB_BUSY_TEXT,
   type SearchMovie, type SearchPerson, type SearchResults,
 } from '@/services/searchApi';
@@ -192,8 +192,8 @@ export function HomeSearchPalette() {
       return;
     }
     const item = r.item;
-    const tmdbId = item.tmdb_id || item.id;
-    const opts = { ratingKey: (item.isOwned && item.rating_key) ? item.rating_key : undefined, tmdbId: tmdbId ?? undefined, origin: 'search' as const };
+    const { ratingKey, tmdbId } = resultIds(item);
+    const opts = { ratingKey, tmdbId, origin: 'search' as const };
     if (!opts.ratingKey && !opts.tmdbId) { close(); return; }
     // Same open as a Home card tap (openWhenReady through openResult); the palette closes as the popup opens.
     const row = el ?? listRef.current?.querySelector<HTMLElement>(`[data-row="${hi}"]`);

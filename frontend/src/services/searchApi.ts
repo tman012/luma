@@ -247,10 +247,16 @@ export async function batchCheckOwnership(
 /** Warm a result's detail popup colors (hover, focus, tap), with the same
  *  ids the popup will be opened with. */
 /** The ids a result's popup opens (and is warmed) with. */
+/** Home's ids (MinimalHomePage openDetail): a known TMDb id opens by that id alone, else the Plex key. */
+export function openIds(tmdb: unknown, rk: unknown): { ratingKey?: number; tmdbId?: number } {
+  const t = Number(tmdb) || undefined;
+  if (t) return { ratingKey: undefined, tmdbId: t };
+  const k = Number(rk) || undefined;
+  return { ratingKey: k, tmdbId: undefined };
+}
 export function resultIds(item: SearchMovie): { kind: 'movie' | 'tv'; ratingKey?: number; tmdbId?: number } {
-  const rk = item.isOwned && item.rating_key ? Number(item.rating_key) : undefined;
-  const tmdb = item.tmdb_id || item.id;
-  return { kind: item.media_type === 'tv' ? 'tv' : 'movie', ratingKey: rk, tmdbId: tmdb ? Number(tmdb) : undefined };
+  return { kind: item.media_type === 'tv' ? 'tv' : 'movie',
+    ...openIds(item.tmdb_id || item.id, item.isOwned ? item.rating_key : undefined) };
 }
 
 function warmResult(item: SearchMovie, opts?: { images?: boolean; ratings?: boolean; search?: boolean }): Promise<void> {
