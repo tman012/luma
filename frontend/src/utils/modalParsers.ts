@@ -39,6 +39,8 @@ export interface MediaDetail {
   ratings?: Ratings | null;
   ratingsPartial?: boolean;
   title: string;
+  /** The per-item ownership lookup has answered (owned or not); unset while it is out. */
+  ownershipSettled?: boolean;
   year: number | null;
   summary: string;
   contentRating: string | null;

@@ -1,3 +1,4 @@
+import { useOneReveal } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
 import { useSheetHero, HERO_FADE, HERO_ANIM } from '@/hooks/useSheetBackdrop';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
@@ -1206,6 +1207,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
   const ratingsState = useImdbRatingsState(show?.title, show?.year, show?.ratings);
   // ONE settled row, faded in once (useRatingsSettle); a later answer is dropped for this open.
   const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!show && ratingsDone(ratingsState, show?.title), props.openKey, !!show);
+  // ONE reveal (useOneReveal): backdrop, logo or title, meta, ratings and buttons together.
+  const reveal = useOneReveal(props.openKey, !loading && !!show, sheetHero.state !== 'hold', ratingsSettle.shown,
+    sheetHero.deadline, false, false, true, sheetHero.artDeadline);
   const ratingsRow = useRef(ratingsExpectedAtTap(false)).current || !!ratingsSettle.ratings;
 
   // Trigger reviews fetch when detail loads
@@ -1404,7 +1408,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     : sheetArt}
                   alt=""
                   style={{
-                    ...revealStyle(sheetHero.state), animation: HERO_ANIM,
+                    ...revealStyle(reveal.revealed ? sheetHero.state : 'hold'), animation: reveal.revealed ? HERO_ANIM : 'none',
                     width: '100%',
                     height: '100%',
                     objectFit: 'cover',
@@ -1441,7 +1445,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
 
           {/* Content — flex column, justify-end */}
           <div data-reveal={loading || titleState !== 'hold' ? 'shown' : 'hold'} style={{
-            ...revealStyle(loading ? 'text' : titleState),
+            // The one gate: shown at the reveal with the one fade; while the details are out (spinner) as before. It
+            // hides at once when the details land (no fade-out frame with the content before the reveal).
+            ...(loading || reveal.revealed ? revealStyle('text') : { opacity: 0, transition: 'none' }),
             position: 'relative',
             zIndex: 3,
             display: 'flex',
@@ -1505,7 +1511,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    opacity: sheetHero.state === 'hold' ? 0 : 1,
+                    opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1,
                     transition: `transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), ${HERO_FADE}`,
                     transform: shelfOpen ? 'translateY(-15vh)' : 'translateY(0)',
                   }}>

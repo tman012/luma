@@ -24,17 +24,17 @@ describe('v341: one reveal for the whole sheet', () => {
 
   it('the trailer button is decided at the reveal: a late trailer is left out, so the action row x positions never change', () => {
     const h = mount({ k: 'a', d: true, h: true, r: true, dl: false, t: false });
-    expect(h.result.current).toEqual({ revealed: true, trailer: false });
+    expect(h.result.current).toMatchObject({ revealed: true, trailer: false });
     h.rerender({ k: 'a', d: true, h: true, r: true, dl: false, t: true });
     expect(h.result.current.trailer).toBe(false);
     const g = mount({ k: 'a', d: true, h: false, r: true, dl: false, t: true });
     g.rerender({ k: 'a', d: true, h: true, r: true, dl: false, t: true });
-    expect(g.result.current).toEqual({ revealed: true, trailer: true });
+    expect(g.result.current).toMatchObject({ revealed: true, trailer: true });
     const m = src('components/media/MovieDetailModal/CompactLayout.tsx');
     expect(m).toMatch(/\(trailerKey && reveal\.trailer \? 1 : 0\)/);
     expect(m).toMatch(/\{trailerKey && reveal\.trailer && \(/);
     const e = src('components/media/MovieDetailModal/ExpandedLayout.tsx');
-    expect(e).toMatch(/useOneReveal\(props\.openKey, !!detail, true, true, true, !!trailerKey\)\.trailer/);
+    expect(e).toMatch(/const actionsTrailer = reveal\.trailer;/);
     expect(e).toMatch(/\{trailerKey && actionsTrailer && \(/);
   });
 

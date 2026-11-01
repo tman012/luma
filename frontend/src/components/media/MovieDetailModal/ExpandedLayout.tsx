@@ -403,9 +403,11 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const effectiveRatings = useMemo<Ratings | null>(() => mergeRatings(ratings, reviewData), [ratings, reviewData]);
   // ONE settled row, faded in once; the Info shelf's later reviews don't add badges to it for this open.
   const ratingsSettle = useRatingsSettle(effectiveRatings, !!detail && !props.ratingsLoading && props.ratingsSettled !== false, props.openKey, !!detail);
-  // The action row is decided when the details first show: a trailer known by then, or left out for this open,
-  // so the buttons never re-flow (useOneReveal's trailer latch).
-  const actionsTrailer = useOneReveal(props.openKey, !!detail, true, true, true, !!trailerKey).trailer;
+  // ONE reveal (useOneReveal): backdrop, logo or title, meta, ratings and buttons together; the button set
+  // (trailer, ownership) is decided at the reveal so the row never re-flows.
+  const reveal = useOneReveal(props.openKey, !loading && !!detail, sheetHero.state !== 'hold', ratingsSettle.shown,
+    sheetHero.deadline, !!trailerKey, detail?.isOwned ?? false, !!detail && (!!detail.isOwned || !!detail.ownershipSettled || !!detail.ratingKey), sheetHero.artDeadline);
+  const actionsTrailer = reveal.trailer;
   const ratingsRow = useRef(ratingsExpectedAtTap(true)).current || !!ratingsSettle.ratings;
 
 
@@ -607,7 +609,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // ---------------------------------------------------------------------------
   // Derived
   // ---------------------------------------------------------------------------
-  const isOwned = detail?.isOwned ?? false;
+  const isOwned = reveal.revealed ? reveal.owned : (detail?.isOwned ?? false);
   const similarTmdbId = detail?.tmdbId ?? props.resolvedTmdbId ?? null;
   // ⓘ File Info — Plex items only, signed-in users only (shows NAS paths)
   const canShowFileInfo = authenticated && isOwned && !!detail?.ratingKey;
@@ -756,7 +758,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 src={sheetArt}
                 alt=""
                 style={{
-                  ...revealStyle(sheetHero.state), animation: HERO_ANIM,
+                  ...revealStyle(reveal.revealed ? sheetHero.state : 'hold'), animation: reveal.revealed ? HERO_ANIM : 'none',
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
@@ -815,7 +817,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           className="luma-scroll-y"
           style={{
             // One reveal for all content, with the backdrop, blur and title.
-            ...revealStyle(loading ? 'text' : titleState),
+            // The one gate: shown at the reveal with the one fade; while the details are out (spinner) as before. It
+            // hides at once when the details land (no fade-out frame with the content before the reveal).
+            ...(loading || reveal.revealed ? revealStyle('text') : { opacity: 0, transition: 'none' }),
             position: 'relative',
             zIndex: 3,
             display: 'flex',
@@ -920,7 +924,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                opacity: sheetHero.state === 'hold' ? 0 : 1,
+                opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1,
                     transition: `transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), ${HERO_FADE}`,
                 transform: showCastShelf ? 'translateY(-15vh)' : 'translateY(0)',
               }}>

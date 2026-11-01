@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { renderHook, act, cleanup, render } from '@testing-library/react';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { useSheetHero, BACKDROP_CAP_MS, HERO_FADE } from '@/hooks/useSheetBackdrop';
+import { useSheetHero, BACKDROP_CAP_MS, BACKDROP_ART_DEADLINE_MS, HERO_FADE } from '@/hooks/useSheetBackdrop';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 import { BackdropHero } from '@/components/media/BackdropHero';
 
@@ -46,16 +46,39 @@ describe('one backdrop per sheet open', () => {
     expect(h.result.current).toBe('/tmdb-textless.jpg');
   });
 
-  it('v341 deadline: at 1.0s only a decoded image shows; one not decoded is dropped for that open (no-art), never later', async () => {
+  it('v341 cold backdrop deadline: past 1.0s the hero waits for a known backdrop up to 1.6s, then drops it for the open', async () => {
     expect(BACKDROP_CAP_MS).toBe(1000);
+    expect(BACKDROP_ART_DEADLINE_MS).toBe(1600);
     const h = mount({ c: '/slow.jpg', s: true, k: 'a' });
-    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS - 1); });
-    expect(h.result.current).toBeNull();
-    act(() => { vi.advanceTimersByTime(1); });
-    expect(h.result.current).toBeNull();
+    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
+    expect(h.result.current).toBeNull();                 // still waiting for the sharp backdrop
+    act(() => { vi.advanceTimersByTime(300); });
     await decode('/slow.jpg');
+    expect(h.result.current).toBe('/slow.jpg');          // decoded at 1.3s: backdrop and title latch together
+    const g = mount({ c: '/never.jpg', s: true, k: 'b' });
+    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
+    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); });
+    expect(g.result.current).toBeNull();
+    await decode('/never.jpg');
+    expect(g.result.current).toBeNull();                 // past 1.6s: no art for that open, nothing arrives later
+    g.rerender({ c: '/later-better.jpg', s: true, k: 'b' });
+    expect(g.result.current).toBeNull();
+  });
+
+  it('v341 slow details (past 1.0s): the backdrop known then still gets 600ms to decode, so the reveal has art', async () => {
+    const h = mount({ c: null, s: false, k: 'a' });
+    act(() => { vi.advanceTimersByTime(2300); });          // TMDb at 1.5s + network: details land at 2.3s
+    h.rerender({ c: '/late.jpg', s: true, k: 'a' });
     expect(h.result.current).toBeNull();
-    h.rerender({ c: '/later-better.jpg', s: true, k: 'a' });
+    act(() => { vi.advanceTimersByTime(400); });
+    await decode('/late.jpg');
+    expect(h.result.current).toBe('/late.jpg');
+  });
+
+  it('a backdrop that errors falls back to no art at once (after the 1.0s deadline)', async () => {
+    const h = mount({ c: '/bad.jpg', s: true, k: 'a' });
+    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
+    await act(async () => { fails.get('/bad.jpg')!(); await Promise.resolve(); await Promise.resolve(); });
     expect(h.result.current).toBeNull();
   });
 
@@ -139,8 +162,8 @@ describe('one backdrop per sheet open', () => {
       const c = src(`components/media/${k}/CompactLayout.tsx`);
       expect(c).toMatch(/data-hero-title=\{sheetHero\.state\}[\s\S]{0,200}opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1, transition: reducedMotion\(\) \? 'none' : HERO_FADE/);
       const e = src(`components/media/${k}/ExpandedLayout.tsx`);
-      expect(e).toMatch(/revealStyle\(sheetHero\.state\), animation: HERO_ANIM/);
-      expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \? 0 : 1,\s*transition: `transform [^`]*\$\{HERO_FADE\}`/);
+      expect(e).toMatch(/revealStyle\(reveal\.revealed \? sheetHero\.state : 'hold'\), animation: reveal\.revealed \? HERO_ANIM : 'none'/);
+      expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1,\s*transition: `transform [^`]*\$\{HERO_FADE\}`/);
     }
     expect(src('components/media/BackdropHero.tsx')).toMatch(/transition: reducedMotion\(\) \|\| \(handoff && handoff === src\) \? 'none' : 'opacity 0\.45s ease-out'/);
   });
