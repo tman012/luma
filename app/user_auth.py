@@ -526,8 +526,9 @@ def get_user_settings(user_id: int) -> Dict:
 
 def save_user_settings(user_id: int, new_settings: Dict) -> None:
     """Merge and persist user-specific settings."""
+    from app.err_text import unmask
     current = get_user_settings(user_id)
-    current.update(new_settings)
+    current.update(unmask(new_settings, current))      # never store the /api backstop's mask
     with _get_db() as conn:
         conn.execute(
             """

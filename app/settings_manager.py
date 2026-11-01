@@ -2416,6 +2416,18 @@ class SettingsManager:
 
         Must be called while holding ``self._lock``.
         """
+        # Never persist the /api backstop's mask: any write (update, rooms, set...) is
+        # checked against what is on disk, and masked credentials are restored from it.
+        try:
+            from app.err_text import unmask
+            try:
+                with open(self._path) as f:
+                    on_disk = json.load(f)
+            except (OSError, ValueError):
+                on_disk = {}
+            self._settings = unmask(self._settings, on_disk)
+        except Exception:
+            logger.exception('settings: unmask check failed')
         try:
             # Ensure parent directory exists
             self._path.parent.mkdir(parents=True, exist_ok=True)
