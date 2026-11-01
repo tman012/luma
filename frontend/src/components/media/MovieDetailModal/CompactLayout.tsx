@@ -25,7 +25,7 @@ import { useEffectiveRatingsState } from './effectiveRatings';
 import { RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
 import { useRatingsSettle } from '@/hooks/useRatingsSettle';
 import { RatingsSettle } from '@/components/media/RatingsSettle';
-import { useOneReveal } from '@/hooks/useOneReveal';
+import { useOneReveal, useRevealFreeze, MOVIE_TEXT } from '@/hooks/useOneReveal';
 import { BackdropHero } from '@/components/media/BackdropHero';
 import { useBackdropEffects } from '@/hooks/useBackdropEffects';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
@@ -115,7 +115,7 @@ function ActionButton({
 
 export function CompactLayout(props: MovieModalViewProps) {
   const {
-    detail,
+    detail: liveDetail,
     ratings,
     ratingsLoading,
     trailerKey,
@@ -141,19 +141,19 @@ export function CompactLayout(props: MovieModalViewProps) {
     onUpgradeAdded,
     onWatchlistRemoved,
   } = props;
-  const titleState = useTitleReveal(logoInput(detail), detail?.title, detail?.backdropUrl || detail?.posterUrl);
+  const titleState = useTitleReveal(logoInput(liveDetail), liveDetail?.title, liveDetail?.backdropUrl || liveDetail?.posterUrl);
   // Phone: the sheet stays off-screen until it can show fully composed
   // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
-  const composed = !!error || (!loading && !!detail && titleState !== 'hold');
+  const composed = !!error || (!loading && !!liveDetail && titleState !== 'hold');
   // Past the open budget the sheet starts on the tapped card's own art, colors and title (useSeededHero).
   const hero = useSeededHero(composed, paletteColors);
   const heroHold = hero.seeded ? false : titleState === 'hold';
   // ONE backdrop per open: the final (sharp) image, latched once decoded or at the cap, never swapped (useSheetBackdrop).
   // The hero (backdrop + title) is ONE unit: logo vs. text and the backdrop are decided together before the reveal
   // (1.2s cap from the tap), fade in once together, and never change for that open.
-  const sheetHero = useSheetHero(finalBackdropUrl(detail?.backdropUrl), !!detail, detail?.clearLogoUrl, logoInput(detail) !== undefined, props.openKey);
+  const sheetHero = useSheetHero(finalBackdropUrl(liveDetail?.backdropUrl), !!liveDetail, liveDetail?.clearLogoUrl, logoInput(liveDetail) !== undefined, props.openKey);
   const sheetArt = sheetHero.art;
-  const posterFill = detail && !detail.backdropUrl && !sheetArt ? detail.posterUrl : null;
+  const posterFill = liveDetail && !liveDetail.backdropUrl && !sheetArt ? liveDetail.posterUrl : null;
   // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
   const ultraBlurColors = hero.colors;
   const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
@@ -164,13 +164,15 @@ export function CompactLayout(props: MovieModalViewProps) {
   // their row reserved (and never collapse it) so nothing below moves.
   // Phone parity with web: RT from the reviews endpoint when the ratings lack it (mergeRatings).
   // All sources settle into ONE row that fades in once (useRatingsSettle); inline ratings need no RT request.
-  const effRatings = useEffectiveRatingsState(ratings, detail?.title, detail?.year, detail?.ratings !== undefined);
+  const effRatings = useEffectiveRatingsState(ratings, liveDetail?.title, liveDetail?.year, liveDetail?.ratings !== undefined);
   const ratingsSettle = useRatingsSettle(effRatings.ratings,
-    !!detail && !ratingsLoading && props.ratingsSettled !== false && effRatings.settled, props.openKey, !!detail);
+    !!liveDetail && !ratingsLoading && props.ratingsSettled !== false && effRatings.settled, props.openKey, !!liveDetail);
   const hasRatings = !!ratingsSettle.ratings;
   // ONE reveal: backdrop, title/logo, meta, ratings and buttons together, in one fade (useOneReveal).
-  const reveal = useOneReveal(props.openKey, !loading && !error && !!detail, sheetHero.state !== 'hold', ratingsSettle.shown,
-    sheetHero.deadline, !!trailerKey, detail?.isOwned ?? false, !!detail && (!!detail.isOwned || !!detail.ownershipSettled || !!detail.ratingKey), sheetHero.artDeadline);
+  const reveal = useOneReveal(props.openKey, !loading && !error && !!liveDetail, sheetHero.state !== 'hold', ratingsSettle.shown,
+    sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey), sheetHero.artDeadline);
+  // The revealed text stays for the open: a late TMDb answer changes nothing visible.
+  const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);
     // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed
   // reserves the ratings row from it and the row keeps that box, so a late ratings fetch never moves the rows below.
   const ratingsExpected = useRef(ratingsExpectedAtTap(true)).current;
@@ -437,6 +439,13 @@ export function CompactLayout(props: MovieModalViewProps) {
   return (
     <SheetFrame name="MovieDetailModal" phase={phase} composed={composed} go={go} onScrimClick={onClose}>
       <SheetCard background={sheetBg}>
+        {/* Past the 1.0s deadline with the details still out (a slow TMDb): the sheet spinner, as on desktop; it
+            leaves at the one reveal. */}
+        {sheetHero.deadline && !reveal.revealed && !error && (
+          <div data-sheet-spinner="" aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+            <div style={{ width: '28px', height: '28px', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.7)', animation: 'webModalSpin 0.8s linear infinite' }} />
+          </div>
+        )}
         {/* Scrollable content */}
         <div
           ref={scrollRef}

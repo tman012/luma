@@ -48,7 +48,7 @@ describe('v341c: the TV hero is capped while TMDb is pending', () => {
       expect(src(`components/media/${k}/ExpandedLayout.tsx`), k).toMatch(/\.\.\.\(loading \|\| error \|\| reveal\.revealed \? revealStyle\('text'\)/);
     }
     for (const k of ['CompactLayout', 'ExpandedLayout']) {
-      expect(src(`components/media/TvDetailModal/${k}.tsx`), k).toMatch(/!!show && !show\.backdropPending, [^\n]*props\.openKey, !!show\);/);
+      expect(src(`components/media/TvDetailModal/${k}.tsx`), k).toMatch(/!!liveShow && !liveShow\.backdropPending, [^\n]*props\.openKey, !!liveShow\);/);
     }
   });
 });

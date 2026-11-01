@@ -27,7 +27,7 @@ describe('ratings inline with details', () => {
     const s = src('hooks/useMovieDetail.ts');
     expect(s).toMatch(/if \(inline !== undefined\) \{\s*setRatings\(hasAnyRating\(inline\) \? inline : null\);\s*setRatingsLoading\(false\);\s*setRatingsSettled\(true\);\s*return;/);
     expect(src('components/media/MovieDetailModal/effectiveRatings.ts')).toMatch(/const needRt = !inline &&/);
-    expect(src('components/media/MovieDetailModal/CompactLayout.tsx')).toMatch(/detail\?\.ratings !== undefined\)/);
+    expect(src('components/media/MovieDetailModal/CompactLayout.tsx')).toMatch(/liveDetail\?\.ratings !== undefined\)/);
   });
   it('background detail requests carry the warm id; a guarded reply is fetched again by the open', () => {
     const s = src('services/modalPrefetch.ts');

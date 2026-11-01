@@ -1,4 +1,4 @@
-import { useOneReveal } from '@/hooks/useOneReveal';
+import { useOneReveal, useRevealFreeze, MOVIE_TEXT } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
@@ -318,7 +318,7 @@ function FileInfoButton({ onClick, top, right, svgSize }: { onClick: () => void;
 
 export function ExpandedLayout(props: MovieModalViewProps) {
   const {
-    detail,
+    detail: liveDetail,
     ratings,
     trailerKey,
     ultraBlurColors,
@@ -339,9 +339,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
     onWatchlistRemoved,
     onSourcesGrabbed,
   } = props;
-  const titleState = useTitleReveal(logoInput(detail), detail?.title, detail?.backdropUrl || detail?.posterUrl);
+  const titleState = useTitleReveal(logoInput(liveDetail), liveDetail?.title, liveDetail?.backdropUrl || liveDetail?.posterUrl);
   // ONE backdrop per open (useSheetBackdrop): latched once decoded or at the cap, never swapped after.
-  const sheetHero = useSheetHero(finalBackdropUrl(detail?.backdropUrl), !!detail, detail?.clearLogoUrl, logoInput(detail) !== undefined, props.openKey);
+  const sheetHero = useSheetHero(finalBackdropUrl(liveDetail?.backdropUrl), !!liveDetail, liveDetail?.clearLogoUrl, logoInput(liveDetail) !== undefined, props.openKey);
   const sheetArt = sheetHero.art;
 
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -363,11 +363,11 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   useDownloadClientReady();
   // Each opening re-reads /api/sources/config (qBit set up or not).
   useEffect(() => { if (showSourcesShelf) fetchIndexerConfigured(); }, [showSourcesShelf]);
-  const collectionId = detail?.collectionId ?? null;
+  const collectionId = liveDetail?.collectionId ?? null;
   // File Info sheet (ⓘ above the meta line)
   const [showFileInfo, setShowFileInfo] = useState(false);
   // Ratings & Reviews (Rotten Tomatoes critics → audience) — row lives in the Cast shelf
-  const topReviews = useTopReviews(detail?.title ?? null, detail?.year ?? null);
+  const topReviews = useTopReviews(liveDetail?.title ?? null, liveDetail?.year ?? null);
   const [openReview, setOpenReview] = useState<TopReview | null>(null);
   const { authenticated, user } = useAuth();
   const [fixMatchKey, setFixMatchKey] = useState<number | null>(null);
@@ -396,17 +396,19 @@ export function ExpandedLayout(props: MovieModalViewProps) {
 
   // Reviews data — deferred until Info shelf is opened (RT scraping is slow)
   const [reviewsRequested, setReviewsRequested] = useState(false);
-  const reviewsQuery = useReviews(reviewsRequested ? (detail?.title ?? '') : '', detail?.year ?? null);
+  const reviewsQuery = useReviews(reviewsRequested ? (liveDetail?.title ?? '') : '', liveDetail?.year ?? null);
   const reviewData = reviewsQuery.data;
 
   // Effective ratings: Plex ratings augmented with RT scores from reviews (shared with the phone layout)
   const effectiveRatings = useMemo<Ratings | null>(() => mergeRatings(ratings, reviewData), [ratings, reviewData]);
   // ONE settled row, faded in once; the Info shelf's later reviews don't add badges to it for this open.
-  const ratingsSettle = useRatingsSettle(effectiveRatings, !!detail && !props.ratingsLoading && props.ratingsSettled !== false, props.openKey, !!detail);
+  const ratingsSettle = useRatingsSettle(effectiveRatings, !!liveDetail && !props.ratingsLoading && props.ratingsSettled !== false, props.openKey, !!liveDetail);
   // ONE reveal (useOneReveal): backdrop, logo or title, meta, ratings and buttons together; the button set
   // (trailer, ownership) is decided at the reveal so the row never re-flows.
-  const reveal = useOneReveal(props.openKey, !loading && !!detail, sheetHero.state !== 'hold', ratingsSettle.shown,
-    sheetHero.deadline, !!trailerKey, detail?.isOwned ?? false, !!detail && (!!detail.isOwned || !!detail.ownershipSettled || !!detail.ratingKey), sheetHero.artDeadline);
+  const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold', ratingsSettle.shown,
+    sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey), sheetHero.artDeadline);
+  // The revealed text stays for the open: a late TMDb answer changes nothing visible.
+  const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);
   const actionsTrailer = reveal.trailer;
   const ratingsRow = useRef(ratingsExpectedAtTap(true)).current || !!ratingsSettle.ratings;
 
@@ -835,7 +837,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
         >
 
         {/* Loading state */}
-        {loading && (
+        {(loading || (!reveal.revealed && !error)) && (
           <div
             style={{
               display: 'flex',
