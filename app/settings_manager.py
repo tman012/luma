@@ -1877,6 +1877,13 @@ class SettingsManager:
             return True, []
 
         with self._lock:
+            # A value echoed back with the /api backstop's mask keeps the stored secret;
+            # one that can't be restored safely is refused (the user re-enters it).
+            from app.err_text import unmask, UnmaskAmbiguous
+            try:
+                cleaned = unmask(cleaned, self._settings, strict=True)
+            except UnmaskAmbiguous as e:
+                return False, [e.message]
             # Special handling for array fields with sensitive items:
             # merge per-item secrets from current settings into cleaned data
             self._restore_array_secrets(cleaned)

@@ -29,8 +29,25 @@ def public(exc, message: str = GENERIC, where: str = '') -> str:
 # The /api backstop masks credential-looking parts of ANY string (a private RSS feed URL's
 # passkey=, a webhook's token=). Settings echoes those strings back on save, so every
 # settings write runs the submitted values through unmask() against what is stored.
+from urllib.parse import urlsplit as _urlsplit
+
 _PATTERNS = (SECRET_QS, SECRET_AUTH)
 MASK = '***'
+_ENC_MASK = re.compile(r'%2a%2a%2a', re.I)
+_ITEM_KEYS = ('id', 'name', 'key')
+
+
+class UnmaskAmbiguous(ValueError):
+    """A masked value can't be restored safely: the user has to re-enter the secret."""
+
+    def __init__(self, path: str = ''):
+        self.message = f'Re-enter the hidden value for {path or "this setting"}'   # app-authored, safe to show
+        super().__init__(self.message)
+        self.path = path
+
+
+def _norm(text: str) -> str:
+    return _ENC_MASK.sub(MASK, text)
 
 
 def _masked_parts(text: str):
@@ -53,44 +70,117 @@ def _secret_parts(text: str):
 
 
 def has_mask(value) -> bool:
-    return isinstance(value, str) and MASK in value and bool(_masked_parts(value))
+    if not isinstance(value, str):
+        return False
+    v = _norm(value)
+    return v.strip() == MASK or (MASK in v and bool(_masked_parts(v)))
 
 
-def _unmask_str(new: str, old):
-    masked = _masked_parts(new)
+def _origin(text: str):
+    try:
+        u = _urlsplit(text.strip())
+    except ValueError:
+        return None
+    if u.scheme and u.netloc:
+        return (u.scheme.casefold(), (u.hostname or '').casefold(), u.port)
+    return None
+
+
+def _strip_masks(text: str) -> str:
+    out, last = [], 0
+    for s, e, _ in _masked_parts(text):
+        out.append(text[last:s]); last = e
+    return ''.join(out) + text[last:]
+
+
+def _unmask_str(new: str, old, strict: bool, path: str):
+    if MASK not in new and '%2' not in new.casefold():
+        return new
+    norm = _norm(new)
+    if norm.strip() == MASK:                          # a typed/echoed bare mask is never a value
+        if isinstance(old, str):
+            return old
+        if strict:
+            raise UnmaskAmbiguous(path)
+        return ''
+    masked = _masked_parts(norm)
     if not masked:
         return new
-    if not isinstance(old, str):
-        # nothing stored to restore from: drop the masked value, never store the marker
-        out, last = [], 0
-        for s, e, _ in masked:
-            out.append(new[last:s]); last = e
-        return ''.join(out) + new[last:]
-    if new == redact(old):
+    if isinstance(old, str) and norm == redact(old):
         return old
-    secrets = _secret_parts(old)
-    if len(secrets) != len(masked) or any(p != sp for (_, _, p), (sp, _) in zip(masked, secrets)):
-        return old                                    # ambiguous: keep what is stored
+    if not isinstance(old, str) or _origin(norm) != _origin(old):
+        # nothing stored, or another scheme/host: the stored secret must not follow the URL
+        if strict:
+            raise UnmaskAmbiguous(path)
+        return old if isinstance(old, str) else _strip_masks(norm)
+    stored = {}
+    for p, v in _secret_parts(old):
+        stored.setdefault(p, []).append(v)
     out, last = [], 0
-    for (s, e, _), (_, val) in zip(masked, secrets):
-        out.append(new[last:s]); out.append(val); last = e
-    merged = ''.join(out) + new[last:]
-    return old if has_mask(merged) else merged
+    for s, e, p in masked:
+        vals = stored.get(p) or []
+        if not vals or (len(set(vals)) > 1 and len(vals) != sum(1 for *_, q in masked if q == p)):
+            if strict:
+                raise UnmaskAmbiguous(path)
+            return old
+        out.append(norm[last:s]); out.append(vals.pop(0)); last = e
+    merged = ''.join(out) + norm[last:]
+    if has_mask(merged):
+        if strict:
+            raise UnmaskAmbiguous(path)
+        return old
+    return merged                                      # stored params not re-sent are dropped (the edit)
 
 
-def unmask(new, old):
-    """*new* with every backstop-masked credential put back from *old* (same shape:
-    dicts by key, lists by index). Unchanged masked strings keep the stored value; an
-    edited one keeps the edit with the stored secrets substituted; ambiguous keeps stored."""
+def _item_key(item):
+    if isinstance(item, dict):
+        for k in _ITEM_KEYS:
+            if item.get(k) not in (None, ''):
+                return (k, item[k])
+        return None
+    if isinstance(item, str):
+        o = _origin(_norm(item))
+        return ('origin', o) if o else None
+    return None
+
+
+def _match_list(new: list, old: list):
+    """Old counterpart for each new item: by id/name/key (dicts) or scheme+host (URL strings);
+    position only when neither side has such keys and the lengths agree."""
+    index = {}
+    for o in old:
+        k = _item_key(o)
+        if k is not None:
+            index.setdefault(k, []).append(o)
+    out = []
+    for i, n in enumerate(new):
+        k = _item_key(n)
+        if k is not None:
+            cands = index.get(k) or []
+            out.append(cands[0] if len(cands) == 1 else None)
+        elif len(new) == len(old) and all(_item_key(o) is None for o in old):
+            out.append(old[i])
+        else:
+            out.append(None)
+    return out
+
+
+def unmask(new, old, strict: bool = False, path: str = ''):
+    """*new* with every backstop-masked credential put back from *old*. Dicts match by key;
+    list items by id/name/key or URL scheme+host. Unchanged masked strings keep the stored
+    value; an edit keeps the edit with the stored secrets substituted (same scheme+host
+    only). When that can't be done safely, strict raises UnmaskAmbiguous; otherwise the
+    stored value is kept (or the masked part dropped). The mask itself is never returned."""
     if isinstance(new, str):
-        return _unmask_str(new, old)
+        return _unmask_str(new, old, strict, path)
     if isinstance(new, dict):
         o = old if isinstance(old, dict) else {}
-        return {k: unmask(v, o.get(k)) for k, v in new.items()}
+        return {k: unmask(v, o.get(k), strict, f'{path}.{k}' if path else str(k)) for k, v in new.items()}
     if isinstance(new, list):
         o = old if isinstance(old, list) else []
-        return [unmask(v, o[i] if i < len(o) else None) for i, v in enumerate(new)]
+        return [unmask(v, ov, strict, path) for v, ov in zip(new, _match_list(new, o))]
     return new
+
 def remote_reason(exc, default: str, where: str = 'remote_mover') -> str:
     """Fixed, diagnosable text for a remote mover failure (no paths, stderr or hosts)."""
     text = str(exc).lower()

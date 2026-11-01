@@ -10146,7 +10146,11 @@ def update_user_settings_route():
         'rooms',
     }
     filtered = {k: v for k, v in data.items() if k in allowed}
-    user_auth.save_user_settings(user['id'], filtered)
+    from app.err_text import UnmaskAmbiguous
+    try:
+        user_auth.save_user_settings(user['id'], filtered)
+    except UnmaskAmbiguous as e:
+        return jsonify({'error': e.message}), 400
     # Invalidate cached PlexService when Plex credentials change
     if 'plex_url' in filtered or 'plex_token' in filtered:
         from app.plex_service_registry import invalidate_user

@@ -491,8 +491,11 @@ class TrackerStore:
             cur = next((t for t in self._data['trackers'] if t['id'] == tracker_id), None)
             if cur is None:
                 return None, {'_': 'Not found'}
-            from app.err_text import unmask
-            payload = unmask(payload, cur)          # a masked URL part keeps the stored value
+            from app.err_text import unmask, UnmaskAmbiguous
+            try:
+                payload = unmask(payload, cur, strict=True)   # a masked URL part keeps the stored value
+            except UnmaskAmbiguous as e:
+                return None, {e.path.split('.')[0] or '_': e.message}
             rec, errors, changes = self._build(payload, cur, self._data['trackers'], blocked)
             if cur.get('needs_test') and rec.get('enabled') and not cur.get('enabled'):
                 errors['enabled'] = TEST_REQUIRED                 # v170: a passing Test first
