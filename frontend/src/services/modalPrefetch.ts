@@ -32,8 +32,19 @@ export function startWarmLoad(): void {
   warmLoad = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   ratingsWarms = 0;
 }
-function takeRatingsWarm(): Record<string, string> | null {
+/** Search's ratings warm-ups per query (they count against the load's cap and the server budget too). */
+export const SEARCH_RATINGS_WARMS = 4;
+let searchRatingsWarms = 0;
+/** A new search result set: its ratings warm count starts over. */
+export function startSearchWarms(): void {
+  searchRatingsWarms = 0;
+}
+function takeRatingsWarm(search: boolean): Record<string, string> | null {
   if (ratingsWarms >= RATINGS_WARMS_PER_LOAD) return null;
+  if (search) {
+    if (searchRatingsWarms >= SEARCH_RATINGS_WARMS) return null;
+    searchRatingsWarms += 1;
+  }
   if (!warmLoad) startWarmLoad();
   ratingsWarms += 1;
   return { [WARM_HEADER]: warmLoad };
@@ -121,7 +132,7 @@ export function clearlogoPath(kind: 'movie' | 'tv', tmdbId: number): string {
 /** `ratings`: also warm the title ratings (background warm-ups: capped per load, flagged for the server's
  *  budget guard); `open`: a user's open, which fetches them unflagged and uncapped. */
 export async function warmDetail(
-  kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number, opts: { images?: boolean; ratings?: boolean; open?: boolean } = {},
+  kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number, opts: { images?: boolean; ratings?: boolean; open?: boolean; search?: boolean } = {},
 ): Promise<void> {
   if (!ratingKey && !tmdbId) return;
   const images = opts.images !== false;
@@ -165,7 +176,7 @@ export async function warmDetail(
       const url = titleRatingsPath(title, year);
       if (opts.open) { void json(url); return; }
       if (cache.has(url)) return;
-      const hdr = takeRatingsWarm();
+      const hdr = takeRatingsWarm(!!opts.search);
       if (hdr) void json(url, hdr);
     });
   }
@@ -417,6 +428,7 @@ export function _resetModalPrefetch(): void {
   groupCount.clear();
   warmLoad = '';
   ratingsWarms = 0;
+  searchRatingsWarms = 0;
   gen += 1;
   active = 0;
   pending = false;
