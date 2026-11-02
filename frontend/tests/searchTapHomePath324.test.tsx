@@ -31,9 +31,9 @@ describe('v324 search taps open through Home\'s openWhenReady path', () => {
     const rows = await screen.findAllByTestId('search-result');
     const t0 = Date.now();
     fireEvent.click(rows[0]!);
-    expect(owr.calls[0]!.slice(0, 4)).toEqual(['movie', undefined, 157336, rows[0]]);  // v340: Home's ids (TMDb id alone)
+    expect(owr.calls[0]!.slice(0, 4)).toEqual(['movie', 7, 157336, rows[0]]);  // v341i: an owned row opens with its Plex key too
     expect(rows[0]!.getAttribute('data-pressed')).toBe('true');
-    await waitFor(() => expect(host.openMovie).toHaveBeenCalledWith(expect.objectContaining({ ratingKey: undefined, tmdbId: 157336, origin: 'search' })));
+    await waitFor(() => expect(host.openMovie).toHaveBeenCalledWith(expect.objectContaining({ ratingKey: 7, tmdbId: 157336, origin: 'search' })));
     expect(Date.now() - t0).toBeLessThan(320);
     await act(async () => { await new Promise((r) => setTimeout(r, 350)); });
     // v325 motion P1: the shelf stays under the popup; closing the popup returns to it.

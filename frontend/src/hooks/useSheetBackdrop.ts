@@ -59,11 +59,14 @@ interface St { key: unknown; capped: boolean; artCapped?: boolean; title: 'logo'
 const fresh = (key: unknown): St => ({ key, capped: false, title: null, logo: null, art: null, artDone: false });
 
 export function useSheetHero(art: string | null | undefined, artSettled: boolean, logo: string | null | undefined,
-  logoSettled: boolean, openKey: unknown, present: boolean = artSettled): SheetHero {
+  logoSettled: boolean, openKey: unknown, present: boolean = artSettled, alt: string | null = null): SheetHero {
   const [st, setSt] = useState<St>(() => fresh(openKey));
   const cur = st.key === openKey ? st : fresh(openKey);
   const artOk = useDecoded(cur.artDone ? null : art ?? null);
   const logoOk = useDecoded(cur.title ? null : logo ?? null);
+  // `alt`: a second sharp backdrop (an owned movie's Plex art), loaded in parallel: the reveal takes `art` when it has
+  // decoded, else `alt` (never past the reveal: the latch is final).
+  const altOk = useDecoded(cur.artDone || !alt || alt === art ? null : alt);
   // The last backdrop that decoded for this open (TV: the Plex art before a TMDb pick replaced the candidate), so the
   // art deadline latches it rather than no art when the newer pick is still decoding.
   const good = useRef<{ key: unknown; url: string | null }>({ key: openKey, url: null });
@@ -99,10 +102,13 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     // Past the 1.0s deadline with the details in and their backdrop already decoded (TV: the Plex art while TMDb
     // is still out): latch now; a better pick still on its way doesn't hold a sheet that has its art.
     const artReady = cur.capped && present && artIn;
-    if (!ready && !(cur.capped && artSettled && !artWait) && !(cur.artCapped && present) && !artReady) return;
-    const fallback = cur.artCapped && present && !artIn ? good.current.url : null;
+    const altIn = !!alt && alt !== art && altOk.url === alt && altOk.ok;
+    // Past the 1.0s deadline with `art` still loading but `alt` decoded: latch on `alt` now.
+    const altReady = cur.capped && present && !artIn && altIn;
+    if (!ready && !(cur.capped && artSettled && !artWait) && !(cur.artCapped && present) && !artReady && !altReady) return;
+    const fallback = altIn ? alt : cur.artCapped && present && !artIn ? good.current.url : null;
     setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: artIn ? art! : fallback, artDone: true });
-  }, [art, artOk, artSettled, present, logo, logoOk, logoSettled, cur, openKey]);
+  }, [art, artOk, alt, altOk, artSettled, present, logo, logoOk, logoSettled, cur, openKey]);
   const logoFailed = useCallback(() => setSt(s => (s.key === openKey && s.title === 'logo' ? { ...s, title: 'text', logo: null } : s)), [openKey]);
   return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, deadline: cur.capped, artDeadline: !!cur.artCapped, logoFailed };
 }

@@ -88,7 +88,7 @@ export const TMDB_BUSY_TEXT = 'TMDB is busy. Try again in a minute.';
 // Helpers
 // ---------------------------------------------------------------------------
 
-import { posterUrl as tmdbPosterUrl, tmdbImg } from '@/utils/image';
+import { posterUrl as tmdbPosterUrl, tmdbImg, backdropUrl as tmdbBackdrop, finalBackdropUrl, plexSheetArt } from '@/utils/image';
 import { openWhenReady, resetWarmGroup, scheduleWarm, startSearchWarms, warmDetail } from '@/services/modalPrefetch';
 
 function titleKey(title: string, year: number | string | null | undefined): string {
@@ -248,11 +248,12 @@ export async function batchCheckOwnership(
  *  ids the popup will be opened with. */
 /** The ids a result's popup opens (and is warmed) with. */
 /** Home's ids (MinimalHomePage openDetail): a known TMDb id opens by that id alone, else the Plex key. */
-export function openIds(tmdb: unknown, rk: unknown, kind?: 'movie' | 'tv'): { ratingKey?: number; tmdbId?: number } {
+export function openIds(tmdb: unknown, rk: unknown, _kind?: 'movie' | 'tv'): { ratingKey?: number; tmdbId?: number } {
   const t = Number(tmdb) || undefined;
   // An owned show also carries its Plex key (the Home card's path): the sheet opens over the Plex art, and a slow or
   // failing TMDb still reveals at the art deadline instead of waiting or erroring.
-  if (t && kind === 'tv' && Number(rk)) return { ratingKey: Number(rk), tmdbId: t };
+  // An owned movie too: its Plex art loads with TMDb's from the tap, so a slow TMDb never leaves it without art.
+  if (t && Number(rk)) return { ratingKey: Number(rk), tmdbId: t };
   if (t) return { ratingKey: undefined, tmdbId: t };
   const k = Number(rk) || undefined;
   return { ratingKey: k, tmdbId: undefined };
@@ -262,9 +263,16 @@ export function resultIds(item: SearchMovie): { kind: 'movie' | 'tv'; ratingKey?
     ...openIds(item.tmdb_id || item.id, item.isOwned ? item.rating_key : undefined, item.media_type === 'tv' ? 'tv' : 'movie') };
 }
 
+/** The backdrops a row's sheet may show, as the sheet loads them: TMDb's, and an owned title's Plex art. */
+export function resultArt(item: SearchMovie): (string | null)[] {
+  const { ratingKey } = resultIds(item);
+  return [item.backdrop_path ? finalBackdropUrl(tmdbBackdrop(item.backdrop_path)) : null,
+    ratingKey && item.backdrop_url?.includes('/api/img/plex') ? plexSheetArt(item.backdrop_url) : null];
+}
+
 function warmResult(item: SearchMovie, opts?: { images?: boolean; ratings?: boolean; search?: boolean }): Promise<void> {
   const { kind, ratingKey, tmdbId } = resultIds(item);
-  return warmDetail(kind, ratingKey, tmdbId, opts).catch(() => {});
+  return warmDetail(kind, ratingKey, tmdbId, { ...opts, art: resultArt(item) }).catch(() => {});
 }
 
 /** A result tap opens its popup exactly like a Home card tap (MinimalHomePage openCard): openWhenReady with
@@ -274,7 +282,7 @@ export function openResult(item: SearchMovie, el: HTMLElement | null | undefined
   onClosed?: () => void): Promise<void> {
   const { kind, ratingKey, tmdbId } = resultIds(item);
   if (!ratingKey && !tmdbId) return Promise.resolve();
-  return openWhenReady(kind, ratingKey, tmdbId, el ?? null, open, onClosed);
+  return openWhenReady(kind, ratingKey, tmdbId, el ?? null, open, onClosed, resultArt(item));
 }
 
 /** Search warms what's on screen once the results settle (SEARCH_WARM_DEBOUNCE_MS without a change): the top

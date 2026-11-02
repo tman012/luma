@@ -1182,7 +1182,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
     showFullShow,
     onEpisodeClick,
   } = props;
-  const titleState = useTitleReveal(logoInput(liveShow), liveShow?.title, liveShow?.backdropUrl || liveShow?.posterUrl);
+  const titleState = useTitleReveal(logoInput(liveShow), liveShow?.title, finalBackdropUrl(liveShow?.backdropUrl) || liveShow?.posterUrl);
   // ONE backdrop per open (useSheetBackdrop): the text-free pick when it arrives before the latch, never swapped after.
   const artCandidate = finalBackdropUrl(liveShow?.backdropTextlessUrl ?? liveShow?.backdropUrl);
   const sheetHero = useSheetHero(artCandidate, !!liveShow && !liveShow.backdropPending, liveShow?.clearLogoUrl, logoInput(liveShow) !== undefined, props.openKey, !!liveShow);

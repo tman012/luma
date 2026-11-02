@@ -7,6 +7,8 @@ export interface Card {
   key: string; type: string; title: string; subtitle: string;
   show_key?: string; season?: number; episode?: number;
   poster: string | null; art?: string | null; progress?: number;
+  /** The Plex art's raw path (the sheet's backdrop), loaded from the tap. */
+  art_path?: string | null;
   /** Trakt rail cards: open the TMDB detail popup (no Plex rating key). */
   tmdb_id?: number;
   /** Watchlist rail cards: prod's digital-release label ('Jan 9'), shown above the title. */

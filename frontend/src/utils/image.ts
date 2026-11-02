@@ -93,7 +93,14 @@ export function phoneMinimal(): boolean {
 /** Plex art for the popup backdrop: a 780x439 transcode on phones (minimal). */
 export function plexBackdrop(url: string | null | undefined): string | null {
   if (!url) return null;
+  // One URL per art: an encoded path (Home's cards) and the raw one (the details) load the same image once.
+  url = url.replace(/([?&]url=)(%2F[^&]*)/i, (_m, k: string, v: string) => k + decodeURIComponent(v));
   return phoneMinimal() ? sizedPlexImg(url, 780, 439) : url;
+}
+
+/** The Plex art as the sheet shows it (finalBackdropUrl of plexBackdrop): a tap or a warm-up preloads this exact URL. */
+export function plexSheetArt(url: string | null | undefined): string | null {
+  return finalBackdropUrl(plexBackdrop(url));
 }
 
 /** A clearlogo URL as the popup loads it: w300 (TMDb or Plex) on phones

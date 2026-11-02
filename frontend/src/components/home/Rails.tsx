@@ -1,6 +1,7 @@
 import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
 /** Phone-first rails on Luma's purple-navy glass. */
 import { CARD_SIZES, cardSrcSet, img, type Card, type Rail } from './homeApi';
+import { plexSheetArt } from '@/utils/image';
 import { FONT } from '@/components/start/StartUI';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MOTION, reducedMotion } from '@/theme/motion';
@@ -24,14 +25,21 @@ export function RailRow({ title, children, testId, prod }: { title: string; chil
 /** The ids openDetail will open a card's popup with. */
 export function cardIds(c: Card): { kind: 'movie' | 'tv'; ratingKey?: number; tmdbId?: number } {
   const kind = c.type === 'movie' ? 'movie' : 'tv';
-  if (c.tmdb_id) return { kind, tmdbId: c.tmdb_id };
+  // A Plex card (numeric key) that also names its TMDb id opens with both: owned, so its Plex art loads from the tap.
+  if (c.tmdb_id) return Number(c.key) ? { kind, tmdbId: c.tmdb_id, ratingKey: Number(c.key) } : { kind, tmdbId: c.tmdb_id };
   return { kind, ratingKey: Number(kind === 'movie' ? c.key : (c.show_key || c.key)) };
 }
 
 /** Warm the detail popup (metadata, backdrop, logo, color blur). */
 export function warmCard(c: Card, ratings = false): Promise<void> {
   const { kind, ratingKey, tmdbId } = cardIds(c);
-  return warmDetail(kind, ratingKey, tmdbId, { ratings }).catch(() => {});
+  return warmDetail(kind, ratingKey, tmdbId, { ratings, art: cardArt(c) }).catch(() => {});
+}
+
+/** The card's Plex art as its sheet loads it (none for a TMDb-keyed card). */
+export function cardArt(c: Card): string[] {
+  const u = c.art_path ? plexSheetArt(`/api/img/plex?url=${c.art_path}`) : null;
+  return u ? [u] : [];
 }
 
 /** Ratings are warmed only for the first rail and cards on screen (each counts against the load's cap). */

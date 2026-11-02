@@ -6,7 +6,7 @@ import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { FONT, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
-import { HomeRails, SkeletonCrossfade, SkeletonRails, WYM_RAIL_ID, cardIds, railCss } from '@/components/home/Rails';
+import { HomeRails, SkeletonCrossfade, SkeletonRails, WYM_RAIL_ID, cardArt, cardIds, railCss } from '@/components/home/Rails';
 import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
 import { useModalHost } from '@/contexts/ModalHostContext';
@@ -43,7 +43,7 @@ export function MinimalHomePage() {
   // tapped poster shows a pressed state meanwhile, 600 ms cap).
   const openCard = (c: Card, el?: HTMLElement | null) => {
     const { kind, ratingKey, tmdbId } = cardIds(c);
-    void openWhenReady(kind, ratingKey, tmdbId, el ?? null, () => openDetail(modals, c));
+    void openWhenReady(kind, ratingKey, tmdbId, el ?? null, () => openDetail(modals, c), undefined, cardArt(c));
   };
 
   const ready = !loading && authenticated && !startInProgress;
@@ -279,7 +279,7 @@ export function recentAdded(data: HomeData | null): Card[] {
 export function openDetail(modals: { openMovie: (o: object) => void; openTv: (o: object) => void }, c: Card) {
   if (c.tmdb_id) {
     return c.type === 'movie'
-      ? modals.openMovie({ tmdbId: c.tmdb_id, origin: 'trakt_movies' })
+      ? modals.openMovie({ tmdbId: c.tmdb_id, ...(Number(c.key) ? { ratingKey: Number(c.key) } : {}), origin: 'trakt_movies' })
       // An owned show (a Plex card) also passes its Plex key: the sheet opens over the Plex art (see openIds).
       : modals.openTv({ tmdbId: c.tmdb_id, ...(Number(c.key) ? { ratingKey: Number(c.key) } : {}), origin: 'trakt_shows' });
   }

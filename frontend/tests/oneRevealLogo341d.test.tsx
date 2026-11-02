@@ -48,10 +48,10 @@ describe('v341d: the clearlogo never pops in or moves the block', () => {
       expect(s, k).toMatch(/sheetHero\.deadline && !reveal\.revealed && !error && \(\s*<div data-sheet-spinner/);
     }
   });
-  it('an owned show opens with its Plex key as well as the TMDb id (the Plex art path); movies are unchanged', () => {
+  it('an owned title opens with its Plex key as well as the TMDb id (the Plex art path), movies too (v341i)', () => {
     expect(openIds(95396, 6003, 'tv')).toEqual({ ratingKey: 6003, tmdbId: 95396 });
     expect(openIds(95396, undefined, 'tv')).toEqual({ ratingKey: undefined, tmdbId: 95396 });
-    expect(openIds(329865, 5003, 'movie')).toEqual({ ratingKey: undefined, tmdbId: 329865 });
+    expect(openIds(329865, 5003, 'movie')).toEqual({ ratingKey: 5003, tmdbId: 329865 });
   });
 });
 
