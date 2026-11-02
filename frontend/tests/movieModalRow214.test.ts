@@ -23,7 +23,7 @@ function pills(code: string, state: 'notin' | 'in' | 'owned'): string[] {
     const m = primary.match(/label=\{inWatchlist \? '([^']+)' : '([^']+)'\}/);
     out.push(m ? (state === 'in' ? m[1] : m[2]) : '?');
   }
-  const re = /label=(?:"([^"]+)"|\{topReviews\.length > 0 \? '([^']+)')/g;
+  const re = /label=(?:"([^"]+)"|\{(?:topReviews\.length > 0|castRow\?\.reviews) \? '([^']+)')/g;
   let m: RegExpExecArray | null;
   const rest = r.slice(r.indexOf('{trailerKey &&'));
   while ((m = re.exec(rest))) {

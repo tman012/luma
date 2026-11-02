@@ -9,6 +9,7 @@ import { assetUrl } from '@/urlHelpers';
 import { HomeRails, SkeletonCrossfade, SkeletonRails, WYM_RAIL_ID, cardArt, cardIds, railCss } from '@/components/home/Rails';
 import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
+import { pageDecode } from '@/loading/sheetPriority';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { Card } from '@/components/home/homeApi';
 import { LUMA_BLUE } from '@/ui/lumaButton';
@@ -250,12 +251,8 @@ export function firstPosterUrls(data: HomeData | null, vw: number): string[] {
 /** Load and decode each URL (an error counts as done); resolves when all are done or after *capMs*. */
 export function decodeAll(urls: string[], capMs: number): Promise<void> {
   if (!urls.length || typeof Image === 'undefined') return Promise.resolve();
-  const each = urls.map(u => {
-    const im = new Image();
-    im.decoding = 'async';
-    im.src = u;
-    return typeof im.decode === 'function' ? im.decode().catch(() => {}) : Promise.resolve();
-  });
+  // Through the sheet hold (v341l): a tap cancels the ones still downloading and they start again after its reveal.
+  const each = urls.map(u => pageDecode(u));
   return new Promise<void>(resolve => {
     const t = window.setTimeout(resolve, capMs);
     void Promise.all(each).then(() => { window.clearTimeout(t); resolve(); });
