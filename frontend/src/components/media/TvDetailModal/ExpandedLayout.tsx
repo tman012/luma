@@ -1224,6 +1224,10 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const show = useRevealFreeze(liveShow, reveal.revealed, props.openKey, TV_TEXT);
   const ratingsRow = useRef(ratingsExpectedAtTap(false)).current || !!ratingsSettle.ratings;
+  // v341n: the TV button row is decided at the reveal, as the movie castRow (v341l): Seasons comes from Plex
+  // childCount (or the season list) and Cast from Plex's cast/creators; a late TMDb answer never adds either.
+  const tvRow = useRevealFreeze({ seasons: seasons.length > 0 || (liveShow?.numberOfSeasons ?? 0) > 0,
+    cast: (liveShow?.cast?.length ?? 0) > 0 || (liveShow?.creators?.length ?? 0) > 0 }, reveal.revealed, props.openKey, ['seasons', 'cast'] as const);
 
   // Trigger reviews fetch when detail loads
   useEffect(() => {
@@ -1520,6 +1524,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     transition: 'none', // the container's single reveal fades it
                     willChange: 'opacity',
                   }}
+                  data-modal-logo=""
                 >
                   <div style={{
                     maxWidth: t.logo.maxWidth,
@@ -1744,7 +1749,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
 
                           {/* Seasons — available as soon as show meta or light
                               season summary is known; do not wait on full grid. */}
-                          {(seasons.length > 0 || (show?.numberOfSeasons ?? 0) > 0) && (
+                          {!!tvRow?.seasons && (
                             <span data-modal-keep="" style={{ display: 'contents' }}>
                             <PillButton
                               focusKey="tm-seasons"
@@ -1790,7 +1795,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
 
                           {/* Cast */}
                           {/* v217: Seasons and Cast show in minimal builds too, as prod 1b4ea74. */}
-                          {(castForDisplay.length > 0 || creatorsForDisplay.length > 0) && (
+                          {!!tvRow?.cast && (castForDisplay.length > 0 || creatorsForDisplay.length > 0) && (
                             <span data-modal-keep="" style={{ display: 'contents' }}>
                             <PillButton
                               focusKey="tm-cast"
