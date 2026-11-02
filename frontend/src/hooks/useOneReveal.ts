@@ -23,6 +23,11 @@ export function useOneReveal(openKey: unknown, detailsIn: boolean, heroLatched: 
   return cur ? { revealed: true, trailer: cur.trailer, owned: cur.owned } : { revealed: false, trailer: hasTrailer, owned };
 }
 
+/** A sheet whose details failed never reveals: its priority window ends at once, not at the 6 s cap (v341n). */
+export function useEndPriorityOnError(failed: boolean): void {
+  useEffect(() => { if (failed) endSheetPriority(); }, [failed]);
+}
+
 /** The text the one reveal showed (meta, overview, seasons) stays for that open: a TMDb answer landing after the
  *  reveal (a capped open over Plex data) updates nothing visible. Other fields (ids, ownership, trailer) stay live. */
 export function useRevealFreeze<T extends object>(v: T | null, revealed: boolean, openKey: unknown, keys: readonly (keyof T)[]): T | null {

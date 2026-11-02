@@ -25,7 +25,7 @@ import { useEffectiveRatingsState } from './effectiveRatings';
 import { RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
 import { useRatingsSettle } from '@/hooks/useRatingsSettle';
 import { RatingsSettle } from '@/components/media/RatingsSettle';
-import { useOneReveal, useRevealFreeze, MOVIE_TEXT } from '@/hooks/useOneReveal';
+import { useOneReveal, useEndPriorityOnError, useRevealFreeze, MOVIE_TEXT } from '@/hooks/useOneReveal';
 import { BackdropHero } from '@/components/media/BackdropHero';
 import { useBackdropEffects } from '@/hooks/useBackdropEffects';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
@@ -169,6 +169,7 @@ export function CompactLayout(props: MovieModalViewProps) {
     !!liveDetail && !ratingsLoading && props.ratingsSettled !== false && effRatings.settled, props.openKey, !!liveDetail);
   const hasRatings = !!ratingsSettle.ratings;
   // ONE reveal: backdrop, title/logo, meta, ratings and buttons together, in one fade (useOneReveal).
+  useEndPriorityOnError(!loading && !!error && !liveDetail);
   const reveal = useOneReveal(props.openKey, !loading && !error && !!liveDetail, sheetHero.state !== 'hold', ratingsSettle.shown,
     sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey), sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.

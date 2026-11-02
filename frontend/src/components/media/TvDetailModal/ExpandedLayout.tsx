@@ -1,4 +1,4 @@
-import { useOneReveal, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
+import { useOneReveal, useEndPriorityOnError, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
 import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO, useArtWaitCap } from '@/hooks/useSheetBackdrop';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
@@ -1219,6 +1219,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // ONE settled row, faded in once (useRatingsSettle); a later answer is dropped for this open.
   const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!liveShow && ratingsDone(ratingsState, liveShow?.title), props.openKey, !!liveShow);
   // ONE reveal (useOneReveal): backdrop, logo or title, meta, ratings and buttons together.
+  useEndPriorityOnError(!loading && !!error && !liveShow);
   const reveal = useOneReveal(props.openKey, !loading && !!liveShow, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.

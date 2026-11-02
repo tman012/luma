@@ -153,6 +153,20 @@ export function clearlogoPath(kind: 'movie' | 'tv', tmdbId: number): string {
 /** Warm everything a movie/TV popup opened with these ids will need. */
 /** `ratings`: also warm the title ratings (background warm-ups: capped per load, flagged for the server's
  *  budget guard); `open`: a user's open, which fetches them unflagged and uncapped. */
+const skippedWarms = new Map<string, () => void>();
+const MAX_SKIPPED_WARMS = 12;
+function queueWarm(kind: 'movie' | 'tv', ratingKey: number | undefined, tmdbId: number | undefined,
+  opts: Parameters<typeof warmDetail>[3]): void {
+  const k = `${kind}:${ratingKey ?? ''}:${tmdbId ?? ''}`;
+  skippedWarms.delete(k);
+  skippedWarms.set(k, () => { void warmDetail(kind, ratingKey, tmdbId, opts).catch(() => {}); });
+  while (skippedWarms.size > MAX_SKIPPED_WARMS) skippedWarms.delete(skippedWarms.keys().next().value as string);
+  afterSheetPriority(flushSkippedWarms); // one listener (a Set) however many are queued
+}
+function flushSkippedWarms(): void {
+  const fns = Array.from(skippedWarms.values()); skippedWarms.clear();
+  for (const f of fns) f();
+}
 export async function warmDetail(
   kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number,
   opts: { images?: boolean; ratings?: boolean; open?: boolean; search?: boolean; art?: (string | null | undefined)[] } = {},
@@ -160,7 +174,8 @@ export async function warmDetail(
   if (!ratingKey && !tmdbId) return;
   // A background warm-up (hover, row focus) never starts while a sheet opens: the open's art and details own the
   // connections until its reveal (v341l: hover warms of other rows held the sockets the tapped art needed).
-  if (!opts.open && sheetOpening()) return;
+  // v341n: it is queued, not dropped: it runs once the window ends (one per title; the newest options win).
+  if (!opts.open && sheetOpening()) { queueWarm(kind, ratingKey, tmdbId, opts); return; }
   // The card's or row's own art (the sheet's exact URLs): loading from the warm-up or the tap, not after the details.
   if (opts.images !== false) for (const u of opts.art ?? []) if (u) void preloadImage(u, opts.open ? 'high' : 'low');
   // Background detail requests carry the warm id: their inline ratings stay inside the server's OMDb guards.
