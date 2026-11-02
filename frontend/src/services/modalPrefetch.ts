@@ -66,17 +66,21 @@ export const DETAIL_TTL_MS = 5 * 60 * 1000;
 const MAX_ENTRIES = 150;
 
 interface Cached { ok: boolean; status: number; body: string; type: string; warm?: boolean }
-const cache = new Map<string, { at: number; p: Promise<Cached> }>();
+const cache = new Map<string, { at: number; p: Promise<Cached>; ac?: AbortController | null }>();
 
 /** Detail requests still on the wire, so an open can drop other titles' warm-ups (an HTTP/1.1 origin has 6
  *  connections; slow TMDb warm-ups held them all and the sheet's backdrop waited behind them). */
 const inflight = new Map<string, AbortController>();
 /** Aborts in-flight detail requests that aren't for this title (they're forgotten, so a later open refetches). */
-function dropOtherWarms(ids: (number | undefined)[]): void {
+function dropOtherWarms(ids: (number | undefined)[], title?: string): void {
   const keep = ids.filter((x): x is number => !!x).map((x) => new RegExp(`/${x}(?:[/?&]|$)`));
+  // The opened title's own ratings warm is keyed by title, not id: it stays.
+  const ratingsOfTitle = title ? titleRatingsPath(title).split('?')[0] + '?' : null;
   for (const [url, ac] of Array.from(inflight)) {
-    if (keep.some((re) => re.test(url))) continue;
-    inflight.delete(url); cache.delete(url); ac.abort();
+    if (keep.some((re) => re.test(url)) || (ratingsOfTitle && url.startsWith(ratingsOfTitle))) continue;
+    inflight.delete(url); ac.abort();
+    // Only this request's own entry is forgotten (a newer one for the same URL stays).
+    const e = cache.get(url); if (e && e.ac === ac) cache.delete(url);
   }
 }
 
@@ -89,11 +93,14 @@ function load(url: string, warmHeaders?: Record<string, string>): Promise<Cached
     ok: r.ok, status: r.status, body: await r.text(), type: r.headers?.get?.('Content-Type') || 'application/json',
     warm: !!warmHeaders,
   }));
-  cache.set(url, { at: Date.now(), p });
+  const entry = { at: Date.now(), p, ac };
+  cache.set(url, entry);
   if (ac) { inflight.set(url, ac); const done = () => { if (inflight.get(url) === ac) inflight.delete(url); }; p.then(done, done); }
   if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value as string);
   // Errors aren't kept: the next open retries.
-  p.then((c) => { if (!c.ok) cache.delete(url); }, () => cache.delete(url));
+  // Only if the stored entry is still this one (an aborted request never deletes a newer entry for the URL).
+  const forget = () => { if (cache.get(url) === entry) cache.delete(url); };
+  p.then((c) => { if (!c.ok) forget(); }, forget);
   return p;
 }
 
@@ -411,7 +418,7 @@ export async function openWhenReady(
   pending = true;
   tapAt = now();
   beginSheetPriority();
-  dropOtherWarms([ratingKey, tmdbId]);
+  dropOtherWarms([ratingKey, tmdbId], card ? tapTitle(card) : undefined);
   const img = card?.querySelector('img') ?? null;
   const seed = colorsFromImage(img);
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);

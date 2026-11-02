@@ -1,6 +1,6 @@
 import { useOneReveal, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
-import { useSheetHero, HERO_FADE, HERO_ANIM } from '@/hooks/useSheetBackdrop';
+import { useSheetHero, HERO_FADE, HERO_ANIM, CONTENT_WITH_HERO, useArtWaitCap } from '@/hooks/useSheetBackdrop';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -1194,7 +1194,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // Per open: a reopen mounts a new img, so the last open's load doesn't count.
   const [artPaintedAt, setArtPaintedAt] = useState<{ key: unknown; url: string } | null>(null);
   const setArtPainted = (url: string) => setArtPaintedAt({ key: props.openKey, url });
-  const artInFrame = !sheetArt || (!!artPaintedAt && artPaintedAt.key === props.openKey && artPaintedAt.url === sheetArt);
+  // Capped (Reviewer F2): never past the 1.6s art deadline waiting for the element's load.
+  const artWaitCapped = useArtWaitCap(props.openKey);
+  const artInFrame = !sheetArt || artWaitCapped || (!!artPaintedAt && artPaintedAt.key === props.openKey && artPaintedAt.url === sheetArt);
 
   // Determine if we're in active episode-mode display
   const isEpisodeIntent = !showFullShow && !!episodeContext;
@@ -1417,7 +1419,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                   src={perf.limitBackdropResolution && artEl.includes('/t/p/original')
                     ? artEl.replace('/t/p/original', '/t/p/w1280')
                     : artEl}
-                  alt="" fetchPriority="high" onLoad={() => setArtPainted(artEl)} onError={() => setArtPainted(artEl)}
+                  alt="" fetchPriority="high" onLoad={(e) => { const im = e.currentTarget; void (typeof im.decode === 'function' ? im.decode() : Promise.resolve()).catch(() => {}).then(() => setArtPainted(artEl)); }} onError={() => setArtPainted(artEl)}
                   style={{
                     ...revealStyle(reveal.revealed ? sheetHero.state : 'hold'), animation: reveal.revealed ? HERO_ANIM : 'none',
                     width: '100%',
@@ -1458,7 +1460,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
           <div data-reveal={loading || titleState !== 'hold' ? 'shown' : 'hold'} style={{
             // The one gate: shown at the reveal with the one fade; while the details are out (spinner) as before. It
             // hides at once when the details land (no fade-out frame with the content before the reveal).
-            ...(loading || error || reveal.revealed ? revealStyle('text') : { opacity: 0, transition: 'none' }),
+            // One trigger: the content runs the backdrop's fade in the same commit (CONTENT_WITH_HERO), from 0; it is
+            // never shown on data ready (a warm open's cached details used to show it at full opacity through `loading`).
+            ...((loading && !liveShow) || error ? revealStyle('text') : reveal.revealed ? { opacity: 1, ...CONTENT_WITH_HERO } : { opacity: 0, transition: 'none' }),
             position: 'relative',
             zIndex: 3,
             display: 'flex',

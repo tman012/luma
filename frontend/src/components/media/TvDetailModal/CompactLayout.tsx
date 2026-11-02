@@ -207,8 +207,8 @@ export function CompactLayout(props: TvModalViewProps) {
   // so a stale card orb can't keep Watch in place of Add.
   const showOwnedNow = (loading || !liveShow) ? (showOwned || seedOwned === true) : (showOwned || !!liveShow.isOwned);
   const titleState = useTitleReveal(logoInput(liveShow), liveShow?.title, liveShow?.backdropUrl || liveShow?.posterUrl);
-  // Phone: the sheet stays off-screen until it can liveShow fully composed
-  // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
+  // Phone: `composed` once the details are in (or an error); the sheet itself moves on the seeded hero (useSeededHero),
+  // and the one reveal (useOneReveal) decides when its content shows.
   const composed = !!error || (!loading && !!liveShow && titleState !== 'hold');
   // Past the open budget the sheet starts on the tapped card's own art, colors and title (useSeededHero).
   const hero = useSeededHero(composed, detailColors);
