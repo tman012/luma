@@ -11127,7 +11127,7 @@ def _rt_scores(title, year, media_type, warm=None):
         from app import omdb as _omdb
         if cached is None and not _omdb.warm_allowed(warm, source='rt'):
             return None
-    r = rt_scraper.get_reviews(title, year, 1, media_type) or {}
+    r = rt_scraper.get_reviews(title, year, 1, media_type, with_reviews=False) or {}
     return {'critic': r.get('critic_score'), 'audience': r.get('audience_score')} if r.get('success', True) else None
 
 

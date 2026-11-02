@@ -13,6 +13,69 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+_SECRET_QS = re.compile(r'(?i)([?&](?:api[_-]?key|key|token|access[_-]?token|auth|signature|sig)=)[^&#\s]+')
+
+
+def redact_url(url: str) -> str:
+    """Strip credential-like query values from a URL before it is logged."""
+    return _SECRET_QS.sub(r'\1REDACTED', str(url or ''))
+
+
+class RTCFBreaker:
+    """Circuit breaker for RT's RTCF reviews API.
+
+    RTCF answers 401/403 to non-browser clients (bot protection). On such a
+    status the breaker opens: RTCF is skipped for `cooldown` seconds (doubling
+    on each consecutive denial, capped at `max_cooldown`), callers fall back
+    to the page scrape, and one warning is logged per opening with a count of
+    calls skipped since the last one instead of one line per request.
+    """
+
+    DENY = (401, 403, 429)
+
+    def __init__(self, cooldown: float = 900.0, max_cooldown: float = 6 * 3600.0, clock=time.monotonic):
+        self.base = cooldown
+        self.max = max_cooldown
+        self.clock = clock
+        self.reset()
+
+    def reset(self):
+        self.open_until = 0.0
+        self.cooldown = self.base
+        self.denials = 0
+        self.skipped = 0
+        self.last_status = None
+
+    def allow(self) -> bool:
+        if self.clock() < self.open_until:
+            self.skipped += 1
+            return False
+        return True
+
+    def record(self, status: int):
+        if status in self.DENY:
+            if self.denials:
+                self.cooldown = min(self.cooldown * 2, self.max)
+            self.denials += 1
+            self.last_status = status
+            self.open_until = self.clock() + self.cooldown
+            logger.warning(
+                "RTCF API unavailable (status %s, %d consecutive); using page scrape for %ds "
+                "(%d RTCF calls skipped since last check)",
+                status, self.denials, int(self.cooldown), self.skipped)
+            self.skipped = 0
+        elif status == 200:
+            if self.denials:
+                logger.info("RTCF API recovered after %d denials", self.denials)
+            self.reset()
+
+    def state(self) -> dict:
+        return {'open': self.clock() < self.open_until, 'denials': self.denials,
+                'last_status': self.last_status, 'skipped': self.skipped}
+
+
+rtcf_breaker = RTCFBreaker()
+
 
 class RTScraper:
     """Scraper for Rotten Tomatoes movie and TV show reviews using RTCF API"""
@@ -220,18 +283,21 @@ class RTScraper:
             max_pages = (max_reviews // 10) + 1  # API returns ~10 per page
 
             while len(reviews) < max_reviews and pages_fetched < max_pages:
+                if not rtcf_breaker.allow():
+                    break
                 # Build URL with type=critic and optional cursor
                 url = f"{base_url}?type=critic"
                 if cursor:
                     url += f"&after={cursor}"
 
-                logger.info(f"Fetching RT critic reviews: {url}")
+                logger.debug("Fetching RT critic reviews: %s", redact_url(url))
 
                 response = self.session.get(url, timeout=15, headers=headers)
-                logger.info(f"RT RTCF response status: {response.status_code}")
+                rtcf_breaker.record(response.status_code)
 
                 if response.status_code != 200:
-                    logger.warning(f"RTCF API returned status {response.status_code}")
+                    if response.status_code not in RTCFBreaker.DENY:
+                        logger.warning("RTCF API returned status %s", response.status_code)
                     break
 
                 try:
@@ -326,13 +392,15 @@ class RTScraper:
             max_pages = (max_reviews // 10) + 1  # API returns ~10 per page
 
             while len(reviews) < max_reviews and pages_fetched < max_pages:
+                if not rtcf_breaker.allow():
+                    break
                 url = f"{base_url}?type=audience"
                 if cursor:
                     url += f"&after={cursor}"
 
-                logger.info(f"Fetching RT audience reviews: {url}")
+                logger.debug("Fetching RT audience reviews: %s", redact_url(url))
                 response = self.session.get(url, timeout=15, headers=headers)
-                logger.info(f"RT RTCF audience response status: {response.status_code}")
+                rtcf_breaker.record(response.status_code)
 
                 if response.status_code != 200:
                     break
@@ -502,8 +570,11 @@ class RTScraper:
 
         return reviews
 
-    def get_reviews(self, title: str, year: Optional[int] = None, max_reviews: int = 100, media_type: str = 'movie') -> dict:
+    def get_reviews(self, title: str, year: Optional[int] = None, max_reviews: int = 100, media_type: str = 'movie',
+                    with_reviews: bool = True) -> dict:
         """
+        with_reviews=False returns the scores from the title page only and never
+        touches the review APIs/pages (the ratings path needs just the scores).
         Main method to fetch RT reviews for a movie or TV show.
         media_type: 'movie' or 'tv'
         Returns aggregated review data or empty dict if not found.
@@ -545,7 +616,9 @@ class RTScraper:
                         'reviews_url': f"{url}/reviews"
                     }
 
-                    if media_type == 'tv':
+                    if not with_reviews or max_reviews <= 0:
+                        pass
+                    elif media_type == 'tv':
                         # --- TV shows: reviews are per-season on RT ---
                         # The series page has scores but the emsId is series-level.
                         # We need a season-level emsId for the RTCF reviews API.
@@ -608,7 +681,7 @@ class RTScraper:
                         return result
 
             except requests.RequestException as e:
-                logger.debug(f"RT request failed for {url}: {e}")
+                logger.debug("RT request failed for %s: %s", redact_url(url), type(e).__name__)
                 continue
             except Exception as e:
                 logger.debug(f"RT parse failed for {url}: {e}")
