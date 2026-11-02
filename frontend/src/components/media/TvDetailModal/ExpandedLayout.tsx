@@ -1227,8 +1227,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
   const ratingsRow = useRef(ratingsExpectedAtTap(false)).current || !!ratingsSettle.ratings;
   // v341n: the TV button row is decided at the reveal, as the movie castRow (v341l): Seasons comes from Plex
   // childCount (or the season list) and Cast from Plex's cast/creators; a late TMDb answer never adds either.
-  const tvRow = useRevealFreeze({ seasons: seasons.length > 0 || (liveShow?.numberOfSeasons ?? 0) > 0,
-    cast: (liveShow?.cast?.length ?? 0) > 0 || (liveShow?.creators?.length ?? 0) > 0 }, reveal.revealed, props.openKey, ['seasons', 'cast'] as const);
+  // v341o (Reviewer): nothing is frozen before the show's data exists (a reveal with no data never hides them for good).
+  const tvRow = useRevealFreeze(liveShow ? { seasons: seasons.length > 0 || (liveShow.numberOfSeasons ?? 0) > 0,
+    cast: (liveShow.cast?.length ?? 0) > 0 || (liveShow.creators?.length ?? 0) > 0 } : null, reveal.revealed, props.openKey, ['seasons', 'cast'] as const);
 
   // Trigger reviews fetch when detail loads
   useEffect(() => {

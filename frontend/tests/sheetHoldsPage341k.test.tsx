@@ -66,9 +66,9 @@ describe('v341l: the hold covers only the page under the sheet; nested opens and
   });
 });
 
-describe('v341l headroom: an open cancels off-page poster decodes still downloading, restarted after the reveal', () => {
+describe('v341o: an in-flight first-viewport decode keeps loading through an open; a new one waits for the reveal (R1/(y))', () => {
   beforeEach(() => { _resetSheetPriority(); });
-  it('drops the src of an in-flight decode at the tap and loads it again after endSheetPriority', async () => {
+  it('keeps the src of an in-flight decode at the tap; a decode asked for during the open starts after endSheetPriority', async () => {
     const made: HTMLImageElement[] = [];
     const Real = globalThis.Image;
     class FakeImage {
@@ -86,11 +86,12 @@ describe('v341l headroom: an open cancels off-page poster decodes still download
       expect(made.length).toBe(1);
       beginSheetPriority();
       await flush();
-      expect(made[0]!.src).toBe('');
-      expect(made.length).toBe(1);          // nothing starts while the sheet opens
+      expect(made[0]!.src).toBe('/poster.jpg'); // its bytes are kept (v341o)
+      void pageDecode('/later.jpg');
+      expect(made.length).toBe(1);          // a new one doesn't start while the sheet opens
       endSheetPriority();
       expect(made.length).toBe(2);
-      expect(made[1]!.src).toBe('/poster.jpg');
+      expect(made[1]!.src).toBe('/later.jpg');
     } finally { (globalThis as { Image: unknown }).Image = Real; }
   });
 });
