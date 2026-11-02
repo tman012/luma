@@ -1,6 +1,6 @@
 import { useOneReveal, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
-import { useSheetHero, HERO_FADE, HERO_ANIM, CONTENT_WITH_HERO, useArtWaitCap } from '@/hooks/useSheetBackdrop';
+import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO, useArtWaitCap } from '@/hooks/useSheetBackdrop';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -1527,7 +1527,10 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     alignItems: 'center',
                     justifyContent: 'center',
                     opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1,
-                    transition: `transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), ${HERO_FADE}`,
+                    // v341l: the backdrop's HERO_ANIM in the reveal commit (as the movie sheet); transform keeps its transition.
+                    transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
+                    animation: sheetHero.state !== 'hold' && reveal.revealed ? HERO_ANIM : 'none',
+                    willChange: 'opacity', // its own layer, as CONTENT_WITH_HERO: one start time with the backdrop
                     transform: shelfOpen ? 'translateY(-15vh)' : 'translateY(0)',
                   }}>
                     {sheetHero.state === 'logo' && sheetHero.logo ? (

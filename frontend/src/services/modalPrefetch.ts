@@ -11,7 +11,7 @@ import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import { colorsFromImage } from '@/utils/posterColors';
 import { finalBackdropUrl, plexSheetArt } from '@/utils/image';
 import { parsePlexResponse, parsePlexTvResponse } from '@/utils/modalParsers';
-import { getSeedColors, modalColors, prefetchModalColors, setSeedColors } from '@/services/modalColors';
+import { dropOtherColors, getSeedColors, modalColors, prefetchModalColors, setSeedColors } from '@/services/modalColors';
 import { isMinimal } from '@/minimal';
 
 /** The sheet's ratings requests (the detail hooks read them through detailFetch, so a warm-up serves them). */
@@ -77,6 +77,7 @@ type TitleIds = Set<number>;
 const owners = new Map<string, TitleIds[]>();
 /** Aborts in-flight detail requests that aren't for this title (they're forgotten, so a later open refetches). */
 function dropOtherWarms(ids: (number | undefined)[], title?: string): void {
+  dropOtherColors(ids.filter((x): x is number => !!x));
   const keep = ids.filter((x): x is number => !!x).map((x) => new RegExp(`/${x}(?:[/?&]|$)`));
   // The opened title's own ratings warm is keyed by title, not id: it stays.
   const ratingsOfTitle = title ? titleRatingsPath(title).split('?')[0] + '?' : null;
@@ -157,6 +158,9 @@ export async function warmDetail(
   opts: { images?: boolean; ratings?: boolean; open?: boolean; search?: boolean; art?: (string | null | undefined)[] } = {},
 ): Promise<void> {
   if (!ratingKey && !tmdbId) return;
+  // A background warm-up (hover, row focus) never starts while a sheet opens: the open's art and details own the
+  // connections until its reveal (v341l: hover warms of other rows held the sockets the tapped art needed).
+  if (!opts.open && sheetOpening()) return;
   // The card's or row's own art (the sheet's exact URLs): loading from the warm-up or the tap, not after the details.
   if (opts.images !== false) for (const u of opts.art ?? []) if (u) void preloadImage(u, opts.open ? 'high' : 'low');
   // Background detail requests carry the warm id: their inline ratings stay inside the server's OMDb guards.
@@ -452,6 +456,10 @@ export async function openWhenReady(
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);
   shell = card ? { title: tapTitle(card), year: tapYear(card), poster: img?.currentSrc || img?.src || null, at: now(), owned: tapOwned(card, ratingKey), plex: !!ratingKey } : null;
   if (card) { if (pressed && pressed !== card) release(); pressed = card; card.setAttribute('data-pressed', 'true'); holdFor(card, SHEET_MOUNT_WAIT_MS); }
+  // The art first (v341l): its request is queued before this open's detail calls, so a slow TMDb holding the
+  // other connections never leaves it waiting for a socket (Tester I1440: art at +3.7 s behind TMDb calls).
+  const first = (art ?? []).filter((u): u is string => !!u);
+  if (first.length) { for (const u of first) void preloadImage(u, 'high'); await new Promise<void>((r) => window.setTimeout(r, 0)); }
   let timer = 0;
   try {
     await Promise.race([

@@ -163,7 +163,8 @@ describe('one backdrop per sheet open', () => {
       expect(c).toMatch(/data-hero-title=\{sheetHero\.state\}[\s\S]{0,200}opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1, transition: reducedMotion\(\) \? 'none' : HERO_FADE/);
       const e = src(`components/media/${k}/ExpandedLayout.tsx`);
       expect(e).toMatch(/revealStyle\(reveal\.revealed \? sheetHero\.state : 'hold'\), animation: reveal\.revealed \? HERO_ANIM : 'none'/);
-      expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1,\s*transition: `transform [^`]*\$\{HERO_FADE\}`/);
+      // v341l: the desktop title runs the backdrop's HERO_ANIM in the reveal commit (same 0.45s ease-out fade).
+      expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1,[\s\S]{0,600}animation: sheetHero\.state !== 'hold' && reveal\.revealed \? HERO_ANIM : 'none'/);
     }
     expect(src('components/media/BackdropHero.tsx')).toMatch(/transition: reducedMotion\(\) \? 'none' : 'opacity 0\.45s ease-out'/);
   });

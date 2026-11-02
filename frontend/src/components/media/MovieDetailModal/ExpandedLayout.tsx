@@ -5,7 +5,7 @@ import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatRuntime, finalBackdropUrl } from '@/utils/image';
-import { useSheetHero, HERO_FADE, HERO_ANIM, CONTENT_WITH_HERO, useArtWaitCap } from '@/hooks/useSheetBackdrop';
+import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO, useArtWaitCap } from '@/hooks/useSheetBackdrop';
 import {
   CARD_BG,
   PERSON_FALLBACK_SVG,
@@ -374,7 +374,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   useDownloadClientReady();
   // Each opening re-reads /api/sources/config (qBit set up or not).
   useEffect(() => { if (showSourcesShelf) fetchIndexerConfigured(); }, [showSourcesShelf]);
-  const collectionId = liveDetail?.collectionId ?? null;
   // File Info sheet (ⓘ above the meta line)
   const [showFileInfo, setShowFileInfo] = useState(false);
   // Ratings & Reviews (Rotten Tomatoes critics → audience) — row lives in the Cast shelf
@@ -421,6 +420,10 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);
   const actionsTrailer = reveal.trailer;
+  // The button row is decided at the reveal (v341l): Collection and the Cast label never change after it.
+  const collectionId = detail?.collectionId ?? null;
+  const castRow = useRevealFreeze({ reviews: topReviews.length > 0,
+    show: (liveDetail?.cast?.length ?? 0) > 0 || (liveDetail?.directors?.length ?? 0) > 0 || topReviews.length > 0 }, reveal.revealed, props.openKey, ['reviews', 'show'] as const);
   const ratingsRow = useRef(ratingsExpectedAtTap(true)).current || !!ratingsSettle.ratings;
 
 
@@ -940,13 +943,19 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1,
-                    transition: `transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), ${HERO_FADE}`,
+                // v341l: the title/logo runs the backdrop's own HERO_ANIM in the reveal commit (a transition started a
+                // frame after the content's animation: title +20-30 ms); the cast-shelf transform keeps its transition.
+                transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
+                animation: sheetHero.state !== 'hold' && reveal.revealed ? HERO_ANIM : 'none',
+                willChange: 'opacity', // its own layer, as CONTENT_WITH_HERO: one start time with the backdrop
                 transform: showCastShelf ? 'translateY(-15vh)' : 'translateY(0)',
               }}>
-                {sheetHero.state === 'logo' && sheetHero.logo ? (
+                {/* v341l: the candidate logo is mounted (hidden: the row is at opacity 0) while the hero holds, so the
+                    same <img> is complete when the latch picks it and paints in the reveal frame (no +30 ms logo). */}
+                {(sheetHero.state === 'logo' && sheetHero.logo) || (sheetHero.state === 'hold' && liveDetail?.clearLogoUrl) ? (
                   <img
                     decoding="sync"
-                    src={sheetHero.logo}
+                    src={(sheetHero.state === 'logo' ? sheetHero.logo : liveDetail?.clearLogoUrl) ?? undefined}
                     alt={detail.title}
                     style={{
                       maxWidth: '100%',
@@ -1186,7 +1195,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                       onClick={() => setShowCollection(true)}
                     />
                   )}
-                  {(detail.cast?.length > 0 || detail.directors?.length > 0 || topReviews.length > 0) && (
+                  {!!castRow?.show && (
                     <PillButton
                       focusKey="mm-info-cast"
                       zoneId="movie-detail-modal"
@@ -1200,7 +1209,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                         </svg>
                       }
-                      label={topReviews.length > 0 ? 'Cast & Reviews' : 'Cast'}
+                      label={castRow?.reviews ? 'Cast & Reviews' : 'Cast'}
                       onClick={handleCastOpen}
                     />
                   )}

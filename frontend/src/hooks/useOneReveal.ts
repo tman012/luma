@@ -5,7 +5,7 @@
  *  the reveal: the trailer known by then (or left out for that open) and the ownership then, so the action row
  *  never re-flows. */
 import { useEffect, useRef, useState } from 'react';
-import { endSheetPriority } from '@/loading/sheetPriority';
+import { endSheetPriority, sheetOpens } from '@/loading/sheetPriority';
 
 export interface OneReveal { revealed: boolean; trailer: boolean; owned: boolean }
 export function useOneReveal(openKey: unknown, detailsIn: boolean, heroLatched: boolean, ratingsShown: boolean,
@@ -15,6 +15,9 @@ export function useOneReveal(openKey: unknown, detailsIn: boolean, heroLatched: 
   const ready = !cur && detailsIn && heroLatched && (ratingsShown || deadline) && (ownedKnown || artDeadline);
   useEffect(() => { if (ready) setSt({ key: openKey, trailer: hasTrailer, owned }); }, [ready, openKey, hasTrailer, owned]);
   useEffect(() => { if (ready) endSheetPriority(); }, [ready]);
+  // Closed before its reveal: its window ends too (unless a newer open has begun its own; v341l).
+  const opensAt = useRef(sheetOpens());
+  useEffect(() => { opensAt.current = sheetOpens(); return () => { if (sheetOpens() === opensAt.current) endSheetPriority(); }; }, [openKey]);
   // The render that latches already shows everything (no frame with the details but no title).
   if (ready) return { revealed: true, trailer: hasTrailer, owned };
   return cur ? { revealed: true, trailer: cur.trailer, owned: cur.owned } : { revealed: false, trailer: hasTrailer, owned };
@@ -38,4 +41,5 @@ export function useRevealFreeze<T extends object>(v: T | null, revealed: boolean
   return out;
 }
 export const TV_TEXT = ['title', 'year', 'summary', 'contentRating', 'rating', 'genres', 'network', 'numberOfSeasons', 'numberOfEpisodes', 'status', 'inProduction', 'creators'] as const;
-export const MOVIE_TEXT = ['title', 'year', 'summary', 'contentRating', 'rating', 'durationMs', 'genres', 'directors'] as const;
+// collectionId: the Collection button is decided at the reveal (a late TMDb answer never adds it; v341l).
+export const MOVIE_TEXT = ['title', 'year', 'summary', 'contentRating', 'rating', 'durationMs', 'genres', 'directors', 'collectionId'] as const;

@@ -14,7 +14,7 @@ describe('minimal builds match prod 1b4ea74 (v217)', () => {
     expect(read('components/media/TopReviews.tsx')).toContain('/api/reviews/top');
   });
   it('the wide movie popup labels the pill Cast & Reviews when reviews load', () => {
-    expect(read('components/media/MovieDetailModal/ExpandedLayout.tsx')).toContain("label={topReviews.length > 0 ? 'Cast & Reviews' : 'Cast'}");
+    expect(read('components/media/MovieDetailModal/ExpandedLayout.tsx')).toMatch(/label=\{(?:topReviews\.length > 0|castRow\?\.reviews) \? 'Cast & Reviews' : 'Cast'\}/);  // v341l: frozen at reveal
   });
   it('the RT fill runs in minimal builds; OMDb stays off (no connector)', () => {
     const s = read('hooks/useMovieDetail.ts');

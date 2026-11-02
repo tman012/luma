@@ -20,6 +20,17 @@ const has = (c: UltraBlurColors | null | undefined): c is UltraBlurColors =>
 export const MISS_TTL_MS = 60_000;
 const missAt = new Map<string, number>();
 
+/** Palette requests in flight (abortable): a tap drops other titles' ones so they never hold the connections the
+ *  opened title's art needs (v341l: four background /api/tmdb/colors calls behind a slow TMDb starved the art). */
+const inflight = new Map<string, AbortController | null>();
+export function dropOtherColors(keepIds: number[]): void {
+  const keep = keepIds.map((x) => new RegExp(`/${x}(?:[/?&]|$)`));
+  for (const [url, ac] of Array.from(inflight)) {
+    if (keep.some((re) => re.test(url))) continue;
+    inflight.delete(url); cache.delete(url); missAt.delete(url); ac?.abort();
+  }
+}
+
 function cached(url: string): Promise<UltraBlurColors | null> {
   let p = cache.get(url);
   const miss = missAt.get(url);
@@ -27,16 +38,20 @@ function cached(url: string): Promise<UltraBlurColors | null> {
     cache.delete(url); missAt.delete(url); p = undefined;
   }
   if (!p) {
-    p = apiFetch(url)
+    const ac = typeof AbortController === 'undefined' ? null : new AbortController();
+    if (ac) { inflight.set(url, ac); }
+    const done = () => { if (inflight.get(url) === ac) inflight.delete(url); };
+    p = apiFetch(url, ac ? { signal: ac.signal } : undefined)
       .then(r => (r.ok ? (r.json() as Promise<UltraBlurColors>) : null))
       .then(c => {
         if (has(c)) return c;
         missAt.set(url, Date.now()); // answered, but nothing to show
         return null;
       }, () => {
-        cache.delete(url); // offline / aborted: may work on the next try
+        if (cache.get(url) === p) cache.delete(url); // offline / aborted: may work on the next try
         return null;
       });
+    p.then(done, done);
     cache.set(url, p);
     if (cache.size > MAX_ENTRIES) {
       const k = cache.keys().next().value as string;
