@@ -9,7 +9,7 @@ import { afterSheetPriority, onSheetPriority, sheetOpening } from './sheetPriori
 export const LOW_CAP = 2;
 
 interface Entry { img: HTMLImageElement; ready: Promise<void>; done: boolean }
-interface Low { url: string; start: (p: 'high' | 'low') => void; img?: HTMLImageElement }
+interface Low { url: string; entry: Entry; start: (p: 'high' | 'low', l?: Low) => void; img?: HTMLImageElement }
 const lowQueue: Low[] = [];
 const lowActive = new Set<Low>();
 const lowByUrl = new Map<string, Low>();
@@ -19,7 +19,7 @@ function pumpLow(): void {
   while (lowActive.size < LOW_CAP && lowQueue.length) {
     const l = lowQueue.shift()!;
     lowActive.add(l);
-    l.start('low');
+    l.start('low', l);
   }
 }
 onSheetPriority(() => {
@@ -48,35 +48,38 @@ export function loadImage(url: string | null | undefined, priority?: 'high' | 'l
     touch(url, hit);
     // A queued or in-flight warm-up asked for now (the tap): it starts at once, at high priority.
     const l = lowByUrl.get(url);
-    if (l && priority !== 'low') { const q = lowQueue.indexOf(l); if (q >= 0) lowQueue.splice(q, 1); lowActive.delete(l); lowByUrl.delete(url); l.start('high'); pumpLow(); }
+    if (l && l.entry === hit && priority !== 'low') { const q = lowQueue.indexOf(l); if (q >= 0) lowQueue.splice(q, 1); lowActive.delete(l); lowByUrl.delete(url); if (l.img) { l.img.onload = null; l.img.removeAttribute('src'); l.img = undefined; } l.start('high'); pumpLow(); }
     return hit.ready;
   }
   const entry: Entry = { img: new Image(), ready: Promise.resolve(), done: false };
   let settle: (ok: boolean) => void = () => {};
   const settled = new Promise<boolean>((res) => { settle = res; });
-  const start = (p: 'high' | 'low') => {
+  // `low`: the queue slot this load holds; it is freed by this load's own image only (never by a lookup, so an
+  // evicted-and-requested-again URL or an aborted image can't leak or free another load's slot).
+  const start = (p: 'high' | 'low', low?: Low) => {
     const img = new Image();
     entry.img = img;
     img.decoding = 'async';
     (img as HTMLImageElement & { fetchPriority?: string }).fetchPriority = p;
     img.src = url;
-    const l = lowByUrl.get(url);
-    if (l) l.img = img;
+    if (low) low.img = img;
     // decode() waits for the load itself and rejects on a broken image; without it, the load event.
     (typeof img.decode === 'function'
       ? img.decode().then(() => true, () => false)
       : new Promise<boolean>((res) => { img.onload = () => res(true); img.onerror = () => res(false); })
     ).then((ok) => {
-      if (entry.img !== img) return; // dropped by an open (or restarted at high): its own result is the one
-      const w = lowByUrl.get(url);
-      if (w) { lowByUrl.delete(url); lowActive.delete(w); pumpLow(); }
+      // An image an open dropped (low.img cleared, the load requeued) or one superseded by a restart at high:
+      // its result (an abort's error included) is never the entry's, and it holds no slot.
+      if (low && low.img !== img) return;
+      if (low) { low.img = undefined; lowActive.delete(low); if (lowByUrl.get(url) === low) lowByUrl.delete(url); pumpLow(); }
+      if (entry.img !== img) return;
       settle(ok);
     });
   };
   entry.ready = settled.then((ok) => { entry.done = ok; if (!ok && entries.get(url) === entry) entries.delete(url); });
   touch(url, entry);
   if (priority === 'low') {
-    const l: Low = { url, start };
+    const l: Low = { url, entry, start };
     lowByUrl.set(url, l);
     lowQueue.push(l);
     pumpLow();

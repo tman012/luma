@@ -18,7 +18,7 @@ import { resolveOwnership, mediaKey } from '@/services/ownership';
 import { detailFetch, remainingCap, preloadImage } from '@/services/modalPrefetch';
 import { TMDB_BACKDROP_WAIT_MS } from './useMovieDetail';
 import { useModalColors } from './useModalColors';
-import { logoImg, finalBackdropUrl } from '@/utils/image';
+import { logoImg, finalBackdropUrl, plexArtFromPath } from '@/utils/image';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -193,6 +193,16 @@ export function useTvDetail(
           if (!cancelled) {
             const parsed = parseTmdbTvResponse(data);
             parsed.tmdbId = tmdbId;
+            // The server found it in the Plex library (plex_rating_key): owned from this answer, on its Plex art
+            // (owned titles always show Plex art; TMDb's only when Plex names none). Never unowned after this.
+            const ownedRk = Number(data.plex_rating_key) || 0;
+            if (ownedRk) {
+              parsed.isOwned = true;
+              parsed.ratingKey = ownedRk;
+              setShowOwned(true);
+              const art = plexArtFromPath(data.plex_art_path);
+              if (art) { parsed.backdropUrl = art; parsed.backdropTextlessUrl = null; void preloadImage(finalBackdropUrl(art), 'high'); }
+            }
             // Show modal immediately, fetch clearlogo in background
             setShow(parsed);
             // Unblock ownership + Sonarr fetches immediately (no longer waits for seasons)
@@ -443,7 +453,8 @@ export function useTvDetail(
     seasons,
     tvdbId,
     ownership,
-    showOwned,
+    // Once owned (Plex key, the server's answer, or the ownership check), never shown as unowned for this show.
+    showOwned: showOwned || !!show?.isOwned,
     sonarrStatus,
     loading: loading || (!colorsSettled && !error),
     error,

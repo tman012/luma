@@ -16,7 +16,8 @@ const typeOf = (c: Card): 'movie' | 'tv' => (c.type === 'movie' ? 'movie' : 'tv'
 
 /** Ownership known without a request: a Plex library card is in the library. */
 export function plexOwned(c: Card): CardOwnership | null {
-  return c.tmdb_id ? null : { owned: true, ownerType: 'self' };
+  // A TMDb card the server marked as in the library (rating_key) is owned too, with no batch check.
+  return c.tmdb_id && !c.rating_key ? null : { owned: true, ownerType: 'self' };
 }
 
 export function useRailOwnership(cards: Card[]): Record<string, CardOwnership> {

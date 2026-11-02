@@ -9,6 +9,9 @@ export interface Card {
   poster: string | null; art?: string | null; progress?: number;
   /** The Plex art's raw path (the sheet's backdrop), loaded from the tap. */
   art_path?: string | null;
+  /** A TMDb-keyed card for a title in the Plex library: its Plex key, set by the server at serve time. */
+  rating_key?: number | null;
+  owned?: boolean;
   /** Trakt rail cards: open the TMDB detail popup (no Plex rating key). */
   tmdb_id?: number;
   /** Watchlist rail cards: prod's digital-release label ('Jan 9'), shown above the title. */

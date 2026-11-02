@@ -71,9 +71,32 @@ _ART_PATH = re.compile(r'/library/metadata/[0-9]+/art(?:/[0-9]+)?', re.ASCII)
 def init(*, get_plex: Callable[[], Any], get_current_user: Callable[[], Optional[dict]],
          trakt_connected: Callable[[], bool] = lambda: False,
          fetch_trakt: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
-         fetch_poster: Optional[Callable[[int], Optional[str]]] = None):
+         fetch_poster: Optional[Callable[[int], Optional[str]]] = None,
+         owned_lookup: Optional[Callable[[int, str], Optional[Dict[str, Any]]]] = None):
     _cfg.update(get_plex=get_plex, get_current_user=get_current_user,
-                trakt_connected=trakt_connected, fetch_trakt=fetch_trakt, fetch_poster=fetch_poster)
+                trakt_connected=trakt_connected, fetch_trakt=fetch_trakt, fetch_poster=fetch_poster,
+                owned_lookup=owned_lookup)
+
+
+def owned_card(card: Dict[str, Any]) -> Dict[str, Any]:
+    """A TMDb-keyed card (Trakt, Watchlist, What you're missing) for a title in the Plex library, marked as owned at
+    serve time: its Plex `rating_key` and `art_path` (the proxy's art pattern only; never a token or a full URL),
+    so the popup opens by the Plex key on the Plex art from the tap, whatever the client's own checks did. A copy;
+    the saved card is untouched (ownership is read fresh on every load)."""
+    look = _cfg.get('owned_lookup')
+    tid = card.get('tmdb_id') if isinstance(card, dict) else None
+    if not look or not tid or str(card.get('key') or '').isdigit():
+        return card
+    try:
+        hit = look(tid, 'movie' if card.get('type') == 'movie' else 'show')
+    except Exception:  # noqa: BLE001 - ownership is a hint here; a failed lookup leaves the card as it was
+        hit = None
+    if not hit or not hit.get('rating_key'):
+        return card
+    rk = int(hit['rating_key'])
+    art = str(hit.get('art') or '')
+    art = art if _ART_PATH.fullmatch(art) else f'/library/metadata/{rk}/art'
+    return {**card, 'rating_key': rk, 'owned': True, 'art_path': art}
 
 
 def extra_rails() -> List[Dict[str, Any]]:
@@ -612,6 +635,7 @@ def home():
         for l, f in rails:
             items = take(l['id'], f, l['source'])
             if items is not None:
+                items = [owned_card(c) for c in items]
                 rail = {'id': l['id'], 'title': l['title'], 'type': l['type'], 'items': items}
                 if l['source'] == 'wym' and items and _can_dismiss():
                     rail['dismiss'] = True

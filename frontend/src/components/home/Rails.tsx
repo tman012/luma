@@ -2,7 +2,7 @@ import { ownedKey } from '@/services/ownership';
 import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
 /** Phone-first rails on Luma's purple-navy glass. */
 import { CARD_SIZES, cardSrcSet, img, type Card, type Rail } from './homeApi';
-import { plexSheetArt } from '@/utils/image';
+import { plexSheetArt, PLEX_ART_PATH } from '@/utils/image';
 import { FONT } from '@/components/start/StartUI';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MOTION, reducedMotion } from '@/theme/motion';
@@ -29,7 +29,7 @@ export function cardIds(c: Card): { kind: 'movie' | 'tv'; ratingKey?: number; tm
   // A Plex card (numeric key) that also names its TMDb id opens with both: owned, so its Plex art loads from the tap.
   // A TMDb card the ownership check found owned opens with its Plex key too: owned titles always show Plex art.
   if (c.tmdb_id) {
-    const rk = Number(c.key) || (c.title ? ownedKey({ title: c.title, year: /^\d{4}$/.test(c.subtitle || '') ? Number(c.subtitle) : null, mediaType: kind }) : undefined);
+    const rk = Number(c.key) || Number(c.rating_key) || (c.title ? ownedKey({ title: c.title, year: /^\d{4}$/.test(c.subtitle || '') ? Number(c.subtitle) : null, mediaType: kind, tmdbId: c.tmdb_id }) : undefined);
     return rk ? { kind, tmdbId: c.tmdb_id, ratingKey: rk } : { kind, tmdbId: c.tmdb_id };
   }
   return { kind, ratingKey: Number(kind === 'movie' ? c.key : (c.show_key || c.key)) };
@@ -42,7 +42,7 @@ export function warmCard(c: Card, ratings = false): Promise<void> {
 }
 
 /** The proxy's exact art pattern (app/main.py _PLEX_IMG_PATH, art only). */
-const ART_PATH = /^\/library\/metadata\/[0-9]+\/art(?:\/[0-9]+)?$/;
+const ART_PATH = PLEX_ART_PATH;
 
 /** The card's Plex art as its sheet loads it (none for a TMDb-keyed card). */
 export function cardArt(c: Card): string[] {
