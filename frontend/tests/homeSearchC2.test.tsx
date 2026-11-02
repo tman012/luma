@@ -1,3 +1,4 @@
+import { resultIds } from '@/services/searchApi';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -192,7 +193,9 @@ describe('C2 Enter/Space on a focused control is that control only (Tester MED)'
   it('Enter in the input still opens the highlighted row', async () => {
     await setup();
     fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Enter' });
-    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ tmdbId: 438631 })));  // v340: Home's ids (v341i: an owned row adds its Plex key)
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ ratingKey: 1, tmdbId: 438631 })));  // v340: Home's ids (v341i: an owned row adds its Plex key)
+    // F3: an unowned row carries no Plex key.
+    expect(resultIds({ media_type: 'movie', id: 438631, title: 'Dune' } as never)).toEqual(expect.objectContaining({ ratingKey: undefined, tmdbId: 438631 }));
   });
 });
 

@@ -1,3 +1,4 @@
+import { resultIds } from '@/services/searchApi';
 /** v227 R3 (Taylor's pick): desktop and tablet Home search at the top of the page. */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -100,7 +101,9 @@ describe('R3 layout (1440 and 1024)', () => {
     fireEvent.click(cards[0]!);
     // v324: Home's openWhenReady path (pressed card, then the popup).
     expect(cards[0]!.getAttribute('data-pressed')).toBe('true');
-    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ tmdbId: 438631, origin: 'search' })));
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 1, tmdbId: 438631, origin: 'search' }));
+    // F3: an unowned row carries no Plex key.
+    expect(resultIds({ media_type: 'movie', id: 438631, title: 'Dune' } as never)).toEqual(expect.objectContaining({ ratingKey: undefined, tmdbId: 438631 }));
     fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Escape' });
     expect(screen.queryByTestId('r3-results')).toBeNull();
   });

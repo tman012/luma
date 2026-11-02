@@ -10,7 +10,8 @@ describe('text-free backdrop over Plex art', () => {
   it('useTvDetail offers the TMDb text-free backdrop (backdropTextlessUrl) only when TMDb reports a logo and a text-free pick', () => {
     const s = src('hooks/useTvDetail.ts');
     expect(s).toMatch(/tmdbData\.has_logo && tmdbData\.backdrop_textless \? parsed\.backdropUrl : null/);
-    expect(s).toMatch(/backdropTextlessUrl: textless && textless !== prev\.backdropUrl \? textless : null/);
+    // v341i: never over owned Plex art (owned titles always show Plex art); only when Plex has none.
+    expect(s).toMatch(/backdropTextlessUrl: !plexArtNow && textless && textless !== prev\.backdropUrl \? textless : null/);
   });
 
   it('phone and desktop TV sheets pick the text-free backdrop as their one backdrop', () => {

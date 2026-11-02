@@ -51,6 +51,12 @@ export function mediaKey(ref: {
 const OWNERSHIP_TTL = 60_000; // 60s — matches the ownership-accuracy guardrail
 const _cache = new Map<string, { entry: OwnedResult; ts: number }>();
 
+/** The Plex key of a title this session already found owned (no request; ownership can't age into a different key). */
+export function ownedKey(ref: { title: string; year: number | null; mediaType?: 'movie' | 'tv' | 'episode' }): number | undefined {
+  const e = _cache.get(mediaKey(ref))?.entry;
+  return e?.owned && e.ratingKey ? e.ratingKey : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Core resolver
 // ---------------------------------------------------------------------------

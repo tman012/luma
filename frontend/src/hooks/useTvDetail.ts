@@ -15,10 +15,10 @@ import {
   type OwnershipMap,
 } from '@/services/sonarrApi';
 import { resolveOwnership, mediaKey } from '@/services/ownership';
-import { detailFetch, remainingCap } from '@/services/modalPrefetch';
+import { detailFetch, remainingCap, preloadImage } from '@/services/modalPrefetch';
 import { TMDB_BACKDROP_WAIT_MS } from './useMovieDetail';
 import { useModalColors } from './useModalColors';
-import { logoImg } from '@/utils/image';
+import { logoImg, finalBackdropUrl } from '@/utils/image';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -220,7 +220,10 @@ export function useTvDetail(
           // prefetch) so the first backdrop shown is the final one; without
           // it, render from Plex right away. Either way nothing swaps later.
           let earlyTmdb: Response | null = null;
-          if (plexTmdbId) {
+          // Owned: Plex art is the art, every time (requested now, never waits on TMDb); TMDb's only when Plex has none.
+          const plexArtNow = finalBackdropUrl(parsePlexTvResponse(plexData).backdropUrl);
+          if (plexArtNow) void preloadImage(plexArtNow, 'high');
+          if (plexTmdbId && !plexArtNow) {
             let timer = 0;
             earlyTmdb = await Promise.race([
               detailFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal }).catch(() => null),
@@ -234,7 +237,7 @@ export function useTvDetail(
             const plexParsed = parsePlexTvResponse(plexData);
             plexParsed.ratingKey = ratingKey;
             plexParsed.isOwned = true;
-            plexParsed.backdropPending = !!plexTmdbId;
+            plexParsed.backdropPending = !!plexTmdbId && !plexArtNow;
             setShow(plexParsed);
             setLoading(false);
             const plexTvdbEarly = plexData.tvdb_id as number | null;
@@ -257,7 +260,7 @@ export function useTvDetail(
                 // (the sheet takes it only if its one backdrop hasn't shown yet; see useSheetBackdrop).
                 const textless = tmdbData.has_logo && tmdbData.backdrop_textless ? parsed.backdropUrl : null;
                 setShow((prev) => (plexBackdropShown && prev?.backdropUrl
-                  ? { ...parsed, backdropUrl: prev.backdropUrl, backdropTextlessUrl: textless && textless !== prev.backdropUrl ? textless : null }
+                  ? { ...parsed, backdropUrl: prev.backdropUrl, backdropTextlessUrl: !plexArtNow && textless && textless !== prev.backdropUrl ? textless : null }
                   : parsed));
                 setLoading(false);
                 if (parsed.tvdbId) setTvdbId(parsed.tvdbId);
