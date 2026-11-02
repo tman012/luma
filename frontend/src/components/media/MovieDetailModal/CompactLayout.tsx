@@ -142,8 +142,8 @@ export function CompactLayout(props: MovieModalViewProps) {
     onWatchlistRemoved,
   } = props;
   const titleState = useTitleReveal(logoInput(liveDetail), liveDetail?.title, liveDetail?.backdropUrl || liveDetail?.posterUrl);
-  // Phone: the sheet stays off-screen until it can show fully composed
-  // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
+  // Phone: `composed` once the details are in (or an error); the sheet itself moves on the seeded hero (useSeededHero),
+  // and the one reveal (useOneReveal) decides when its content shows.
   const composed = !!error || (!loading && !!liveDetail && titleState !== 'hold');
   // Past the open budget the sheet starts on the tapped card's own art, colors and title (useSeededHero).
   const hero = useSeededHero(composed, paletteColors);

@@ -47,7 +47,7 @@ describe('v341c: the TV hero is capped while TMDb is pending', () => {
     expect(tv).toMatch(/A TMDb network error falls back to the Plex details/);
     expect(tv).toMatch(/if \(tmdbResp\?\.ok\)/);
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
-      expect(src(`components/media/${k}/ExpandedLayout.tsx`), k).toMatch(/\.\.\.\(loading \|\| error \|\| reveal\.revealed \? revealStyle\('text'\)/);
+      expect(src(`components/media/${k}/ExpandedLayout.tsx`), k).toMatch(/\.\.\.\(\(loading && !\w+\) \|\| error \? revealStyle\('text'\) : reveal\.revealed/);
     }
     for (const k of ['CompactLayout', 'ExpandedLayout']) {
       expect(src(`components/media/TvDetailModal/${k}.tsx`), k).toMatch(/!!liveShow && !liveShow\.backdropPending, [^\n]*props\.openKey, !!liveShow\);/);

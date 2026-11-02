@@ -108,3 +108,17 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
 }
 /** The same fade for an element that mounts at the latch (the desktop backdrop img). */
 export const HERO_ANIM = 'm-crossfade 0.45s ease-out both';
+
+/** Desktop: one trigger for the content and the backdrop layer. The content runs the backdrop's own HERO_ANIM, in
+ *  the same commit, on its own compositor layer (will-change), so Chrome gives both pending animations one start
+ *  time: a warm open's large art that takes frames to raster no longer leaves the content fading in alone. */
+export const CONTENT_WITH_HERO = { transition: 'none', animation: HERO_ANIM, willChange: 'opacity' } as const;
+/** Desktop: the reveal waits for its backdrop img element at most until BACKDROP_ART_DEADLINE_MS after the tap. */
+export function useArtWaitCap(openKey: unknown): boolean {
+  const [k, setK] = useState<unknown>(undefined);
+  useEffect(() => {
+    const t = window.setTimeout(() => setK(openKey), capLeft(BACKDROP_ART_DEADLINE_MS));
+    return () => window.clearTimeout(t);
+  }, [openKey]);
+  return k === openKey;
+}
