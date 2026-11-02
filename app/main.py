@@ -6361,6 +6361,25 @@ def _plex_details(kind: str, tmdb_id: int) -> Optional[Dict]:
     return out
 
 
+def _with_plex_owned(details, kind: str, tmdb_id: int):
+    """A TMDb detail answer plus, for a title in the Plex library, its Plex key and art path (plex_rating_key,
+    plex_art_path: the proxy's art pattern only, never a token): the popup opened by a TMDb id shows it as owned,
+    on its Plex art, from this answer (no ownership round trip). The cached TMDb answer is never modified."""
+    if not isinstance(details, dict):
+        return details
+    try:
+        hit = fast_search_index.find_by_tmdb(tmdb_id, kind)
+    except Exception:  # noqa: BLE001 - a hint; the popup's own checks still run
+        hit = None
+    if not hit:
+        return details
+    from app.home_rails import _ART_PATH
+    rk = int(hit['rating_key'])
+    art = hit.get('art') or ''
+    return {**details, 'plex_rating_key': rk,
+            'plex_art_path': art if _ART_PATH.fullmatch(art) else f'/library/metadata/{rk}/art'}
+
+
 @app.route('/api/movie/<int:tmdb_id>')
 def movie_details(tmdb_id):
     """Get detailed information about a specific movie (cached 30m)."""
@@ -6371,7 +6390,7 @@ def movie_details(tmdb_id):
     if cached:
         ts, data = cached
         if time.time() - ts < _TMDB_DETAIL_TTL:
-            return jsonify(data)
+            return jsonify(_with_plex_owned(data, 'movie', tmdb_id))
 
     details = tmdb.get_movie_details(tmdb_id) or _plex_details('movie', tmdb_id)
     if not details:
@@ -6381,7 +6400,7 @@ def movie_details(tmdb_id):
 
     with _tmdb_detail_cache_lock:
         _tmdb_detail_cache[cache_key] = (time.time(), details)
-    return jsonify(details)
+    return jsonify(_with_plex_owned(details, 'movie', tmdb_id))
 
 @app.route('/api/movie/<int:tmdb_id>/similar')
 def movie_similar(tmdb_id):
@@ -6795,7 +6814,7 @@ def tv_details(tmdb_id):
             # Seasons light warm can populate this cache without credits — refetch
             # so Cast & Crew always gets TMDb tv credits when available.
             if isinstance(data, dict) and data.get("credits") is not None:
-                return jsonify(data)
+                return jsonify(_with_plex_owned(data, 'show', tmdb_id))
 
     details = tmdb.get_tv_details(tmdb_id) or _plex_details('tv', tmdb_id)
     if not details:
@@ -6805,7 +6824,7 @@ def tv_details(tmdb_id):
 
     with _tmdb_detail_cache_lock:
         _tmdb_detail_cache[cache_key] = (time.time(), details)
-    return jsonify(details)
+    return jsonify(_with_plex_owned(details, 'show', tmdb_id))
 
 @app.route('/api/plex/tv/<int:rating_key>/seasons')
 def plex_tv_seasons(rating_key):
@@ -22173,7 +22192,8 @@ app.register_blueprint(_hero_source.bp)
 from app import home_rails as _home_rails
 _home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user,
                  trakt_connected=_connectors.trakt_connected, fetch_trakt=_fetch_trakt_rail,
-                 fetch_poster=_watchlist_rail_poster)
+                 fetch_poster=_watchlist_rail_poster,
+                 owned_lookup=lambda tid, kind: fast_search_index.find_by_tmdb(tid, kind))
 app.register_blueprint(_home_rails.bp)
 
 

@@ -1,7 +1,7 @@
 import { isMinimal } from '@/minimal';
 import { useState, useEffect, useRef } from 'react';
 import { pickBestTrailer } from '@/utils/pickBestTrailer';
-import { backdropUrl as tmdbBackdrop, logoImg, plexBackdrop, plexSheetArt, finalBackdropUrl } from '@/utils/image';
+import { backdropUrl as tmdbBackdrop, logoImg, plexBackdrop, plexSheetArt, finalBackdropUrl, plexArtFromPath } from '@/utils/image';
 import {
   parsePlexResponse,
   parseTmdbResponse,
@@ -192,6 +192,15 @@ export function useMovieDetail(
             tmdbFetchedRef.current = true;
             const parsed = parseTmdbResponse(data);
             parsed.tmdbId = tmdbId;
+            // The server found it in the Plex library: owned from this answer, on its Plex art (see useTvDetail).
+            const ownedRk = Number(data.plex_rating_key) || 0;
+            if (ownedRk) {
+              parsed.isOwned = true;
+              parsed.ownershipSettled = true;
+              parsed.ratingKey = ownedRk;
+              const art = plexArtFromPath(data.plex_art_path);
+              if (art) { parsed.backdropUrl = art; parsed.plexArtUrl = art; void preloadImage(finalBackdropUrl(art), 'high'); }
+            }
 
             // Set trailer from same response
             const videos = (data.videos as Record<string, unknown> | undefined)?.results;

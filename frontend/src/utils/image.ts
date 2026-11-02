@@ -156,3 +156,11 @@ export function castThumb(url: string | null | undefined): string | null {
   if (PLEX_PEOPLE.test(url)) return withBase(`/api/img/plex?url=${encodeURIComponent(url)}&w=${CAST_THUMB_W}`);
   return tmdbImg(url.replace('/t/p/original/', '/t/p/w185/'));
 }
+
+/** The Plex art of an owned title the server named by its library path (plex_rating_key/plex_art_path on a TMDb
+ *  detail answer, art_path on a Home card): the sheet's backdrop URL (plexBackdrop form), or null for anything
+ *  that isn't a library art path. */
+export const PLEX_ART_PATH = /^\/library\/metadata\/[0-9]+\/art(?:\/[0-9]+)?$/;
+export function plexArtFromPath(path: unknown): string | null {
+  return typeof path === 'string' && PLEX_ART_PATH.test(path) ? plexBackdrop(`/api/img/plex?url=${encodeURIComponent(path)}`) : null;
+}

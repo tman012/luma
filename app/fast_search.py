@@ -391,6 +391,7 @@ class FastSearchIndex:
                     'viewCount': item.get('viewCount', 0),
                     'viewOffset': item.get('viewOffset', 0),
                     'thumb': thumb,
+                    'art': item.get('art', '') or '',
                     'tmdb_id': tmdb_id_from_guids(item.get('Guid'), item.get('guid')),
                 })
 
@@ -887,6 +888,24 @@ class FastSearchIndex:
             return title_map[best_match_norm]
         
         return None
+
+    def find_by_tmdb(self, tmdb_id: Any, media_type: str) -> Optional[Dict[str, Any]]:
+        """The library item ('movie' or 'show') with this TMDb id, from the in-memory index (no Plex call):
+        {'rating_key': int, 'art': str}, or None when not owned or the index isn't built yet."""
+        try:
+            tid = int(tmdb_id)
+        except (TypeError, ValueError):
+            return None
+        with self._lock:
+            if getattr(self, '_tmdb_map_src', None) is not self._index:
+                m: Dict[Any, Dict[str, Any]] = {}
+                for it in self._index:
+                    if it.get('tmdb_id'):
+                        m.setdefault((it.get('media_type'), it['tmdb_id']), it)   # first wins (as the batch check)
+                self._tmdb_map, self._tmdb_map_src = m, self._index
+            it = self._tmdb_map.get((media_type, tid))
+        rk = str((it or {}).get('rating_key') or '')
+        return {'rating_key': int(rk), 'art': it.get('art') or ''} if it and rk.isdigit() else None
 
     def status(self) -> Dict[str, Any]:
         """Return index status info."""

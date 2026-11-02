@@ -49,12 +49,15 @@ export function mediaKey(ref: {
 // ---------------------------------------------------------------------------
 
 const OWNERSHIP_TTL = 60_000; // 60s — matches the ownership-accuracy guardrail
-const _cache = new Map<string, { entry: OwnedResult; ts: number }>();
+const _cache = new Map<string, { entry: OwnedResult; ts: number; tmdbId?: number | null }>();
 
-/** The Plex key of a title this session already found owned (no request; ownership can't age into a different key). */
-export function ownedKey(ref: { title: string; year: number | null; mediaType?: 'movie' | 'tv' | 'episode' }): number | undefined {
-  const e = _cache.get(mediaKey(ref))?.entry;
-  return e?.owned && e.ratingKey ? e.ratingKey : undefined;
+/** The Plex key of a title the ownership check found owned within OWNERSHIP_TTL, matched on its TMDb id (no request). */
+export function ownedKey(ref: { title: string; year: number | null; mediaType?: 'movie' | 'tv' | 'episode'; tmdbId?: number | null }): number | undefined {
+  const c = _cache.get(mediaKey(ref));
+  if (!c || Date.now() - c.ts >= OWNERSHIP_TTL) return undefined;
+  // Same title and year but another TMDb id is another title: never its key.
+  if (ref.tmdbId && c.tmdbId && c.tmdbId !== ref.tmdbId) return undefined;
+  return c.entry.owned && c.entry.ratingKey ? c.entry.ratingKey : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +76,7 @@ export async function resolveOwnership(
     // Fast path: ratingKey present → already owned
     if (ref.ratingKey) {
       const entry: OwnedResult = { owned: true, ratingKey: ref.ratingKey };
-      _cache.set(key, { entry, ts: Date.now() });
+      _cache.set(key, { entry, ts: Date.now(), tmdbId: ref.tmdbId });
       result.set(key, entry);
       continue;
     }
@@ -128,7 +131,7 @@ export async function resolveOwnership(
               ownerName: (match as any).owner_name as string | undefined,
             }
           : { owned: false, ratingKey: null };
-        _cache.set(key, { entry, ts: Date.now() });
+        _cache.set(key, { entry, ts: Date.now(), tmdbId: ref.tmdbId });
         result.set(key, entry);
       }
     } catch {

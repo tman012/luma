@@ -5,7 +5,7 @@ import { _resetImageLoader, loadImage } from '@/loading/imageLoader';
  * logo URLs and starts loading those images, plus the color blur. When the
  * popup opens it reads the same cached responses, so images are already on
  * their way instead of waiting on a metadata round-trip. */
-import { _resetSheetPriority, afterSheetPriority, beginSheetPriority, sheetOpening } from '@/loading/sheetPriority';
+import { _resetSheetPriority, afterSheetPriority, beginSheetPriority, sheetOpening, sheetOpens } from '@/loading/sheetPriority';
 import { apiFetch } from '@/apiClient';
 import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import { colorsFromImage } from '@/utils/posterColors';
@@ -239,7 +239,10 @@ export async function warmDetail(
 // ---------------------------------------------------------------------------
 
 export const WARM_CONCURRENCY = 4;
-const queue: { key: string; run: () => Promise<void> }[] = [];
+const queue: { key: string; run: () => Promise<void>; retries?: number }[] = [];
+/** A warm-up an open cut short (dropOtherWarms aborts its requests, yieldToSheet stops it) runs again after the
+ *  reveal, at most this often; its finished requests are cache hits. */
+export const WARM_RETRIES = 2;
 const started = new Set<string>();
 /** Warm-ups remembered so a title isn't warmed twice; the oldest are
  *  forgotten past this (Set keeps insertion order). */
@@ -257,9 +260,12 @@ function pump(): void {
     if (started.size > STARTED_MAX) started.delete(started.values().next().value as string);
     active += 1;
     const g = gen;
+    const o = sheetOpens();
     job.run().catch(() => {}).finally(() => {
       if (g !== gen) return; // reset meanwhile: its slot was already freed
       active -= 1;
+      // Ran across an open: queued again so the title stays warm (a warm open, not a cold one, on its tap).
+      if (sheetOpens() !== o && (job.retries ?? 0) < WARM_RETRIES) { job.retries = (job.retries ?? 0) + 1; started.delete(job.key); queue.push(job); }
       pump();
     });
   }

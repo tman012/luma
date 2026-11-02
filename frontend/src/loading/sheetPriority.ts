@@ -11,6 +11,10 @@ const onBegin = new Set<() => void>();
 /** Runs `fn` at every open's start (the image loader drops its background art there). */
 export function onSheetPriority(fn: () => void): void { onBegin.add(fn); }
 
+let opens = 0;
+/** Opens so far this session (a warm-up that ran across one may have been cut short by it). */
+export function sheetOpens(): number { return opens; }
+
 export function sheetOpening(): boolean { return Date.now() < until; }
 /** Runs `fn` once the current open's priority window ends (now when none). */
 export function afterSheetPriority(fn: () => void): void { if (!sheetOpening()) fn(); else listeners.add(fn); }
@@ -38,6 +42,7 @@ function resume(): void {
 
 export function beginSheetPriority(): void {
   if (typeof window === 'undefined') return;
+  opens += 1;
   until = Date.now() + SHEET_PRIORITY_MS;
   window.clearTimeout(timer);
   timer = window.setTimeout(endSheetPriority, SHEET_PRIORITY_MS);
