@@ -21,7 +21,7 @@ import type {
 import { autoSearchSeason } from '@/services/sonarrApi';
 import { isSeasonMonitored } from './tvSourcesUtils';
 import { UltraBlurOverlay } from '../UltraBlurOverlay';
-import { useOneReveal, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
+import { useOneReveal, useEndPriorityOnError, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
 import { BackdropHero } from '../BackdropHero';
 import { useBackdropEffects } from '@/hooks/useBackdropEffects';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
@@ -233,6 +233,7 @@ export function CompactLayout(props: TvModalViewProps) {
   const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!liveShow && ratingsDone(ratingsState, liveShow?.title), props.openKey, !!liveShow);
   const hasRatings = !!ratingsSettle.ratings;
   // ONE reveal: backdrop, title/logo, meta, ratings and buttons together, in one fade (useOneReveal).
+  useEndPriorityOnError(!loading && !!error && !liveShow);
   const reveal = useOneReveal(props.openKey, !loading && !error && !!liveShow, sheetHero.state !== 'hold', ratingsSettle.shown,
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.

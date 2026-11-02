@@ -1,4 +1,4 @@
-import { useOneReveal, useRevealFreeze, MOVIE_TEXT } from '@/hooks/useOneReveal';
+import { useOneReveal, useEndPriorityOnError, useRevealFreeze, MOVIE_TEXT } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
@@ -415,6 +415,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const ratingsSettle = useRatingsSettle(effectiveRatings, !!liveDetail && !props.ratingsLoading && props.ratingsSettled !== false, props.openKey, !!liveDetail);
   // ONE reveal (useOneReveal): backdrop, logo or title, meta, ratings and buttons together; the button set
   // (trailer, ownership) is decided at the reveal so the row never re-flows.
+  useEndPriorityOnError(!loading && !!error && !liveDetail);
   const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
     sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey), sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.

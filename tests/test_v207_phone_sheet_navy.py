@@ -27,4 +27,32 @@ def test_prod_palette_path_unchanged():
         cur = cur.replace("// The sheet base mixes into the app surface #111318 (MOTION §7 #12), not the navy token.\nconst NAVY: [number, number, number] = [0x11, 0x13, 0x18];",
                           "const NAVY: [number, number, number] = [0x15, 0x10, 0x2a];")
         cur = re.sub(r"              // No will-change: the blobs never move;[^\n]*\n", "              willChange: lite ? undefined : 'transform',\n", cur)
+        if f.endswith('modalColors.ts'):
+            cur = _undo_colors_abort(cur)
         assert prod == cur, f
+
+
+# v341l: modalColors.ts adds only an abort path (dropOtherColors + an AbortController per palette fetch) so a tap
+# frees the connections its art needs. Each piece is removed by exact text; the palette logic (cache, miss TTL,
+# has(), the fetch/parse chain) must still equal prod 1b4ea74 byte for byte.
+_ABORT_EDITS = [
+    ("const inflight = new Map<string, AbortController | null>();\nexport function dropOtherColors(", None),
+    ("    const ac = typeof AbortController === 'undefined' ? null : new AbortController();\n"
+     "    if (ac) { inflight.set(url, ac); }\n"
+     "    const done = () => { if (inflight.get(url) === ac) inflight.delete(url); };\n", ""),
+    ("apiFetch(url, ac ? { signal: ac.signal } : undefined)", "apiFetch(url)"),
+    ("        if (cache.get(url) === p) cache.delete(url); // offline / aborted", "        cache.delete(url); // offline / aborted"),
+    ("    p.then(done, done);\n", ""),
+]
+
+
+def _undo_colors_abort(cur):
+    i = cur.index('/** Palette requests in flight (abortable)')
+    j = cur.index('function cached(url: string)')
+    block = cur[i:j]
+    assert _ABORT_EDITS[0][0] in block and block.count('\n}\n') == 1, 'dropOtherColors block grew beyond the abort'
+    cur = cur[:i] + cur[j:]
+    for old, new in _ABORT_EDITS[1:]:
+        assert cur.count(old) == 1, old
+        cur = cur.replace(old, new)
+    return cur
