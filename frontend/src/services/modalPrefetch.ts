@@ -226,7 +226,8 @@ export async function warmDetail(
   const path = tm?.backdrop_path as string | undefined;
   await Promise.all([
     // The sheet's one backdrop (finalBackdropUrl): decoding it from the tap overlaps the sheet's enter motion.
-    preloadImage(finalBackdropUrl(path ? tmdbBackdrop(path) : plexBackdrop), opts.open ? 'high' : 'low'),
+    // An owned title whose Plex art the card/row named shows that art only: never TMDb's backdrop too (v341k).
+    preloadImage((ratingKey && (opts.art ?? []).find(Boolean)) || finalBackdropUrl(path ? tmdbBackdrop(path) : plexBackdrop), opts.open ? 'high' : 'low'),
     preloadImage(logoImg((logo?.clearlogo_url as string | undefined) ?? null), opts.open ? 'high' : 'low'),
     // With a poster-derived seed the palette never gates the reveal.
     getSeedColors(kind, ratingKey, tmdbId) ? Promise.resolve(null) : modalColors(kind, ratingKey, tmdbId),

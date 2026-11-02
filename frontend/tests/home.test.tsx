@@ -17,6 +17,9 @@ import { LibrariesEditor, LibrariesRedirect } from '@/pages/LibrariesPage';
 import { Route, Routes } from 'react-router';
 import { move } from '@/components/home/homeApi';
 import { _resetModalPrefetch } from '@/services/modalPrefetch';
+import { _resetSheetPriority } from '@/loading/sheetPriority';
+// v341k: a sheet open started by an earlier test holds page images until its reveal; each test starts with none.
+beforeEach(() => { _resetSheetPriority(); });
 
 const HOME = {
   plex: true,

@@ -6361,6 +6361,9 @@ def _plex_details(kind: str, tmdb_id: int) -> Optional[Dict]:
     return out
 
 
+from app.home_rails import _ART_PATH as _PLEX_ART_PATH_RE  # noqa: E402
+
+
 def _with_plex_owned(details, kind: str, tmdb_id: int):
     """A TMDb detail answer plus, for a title in the Plex library, its Plex key and art path (plex_rating_key,
     plex_art_path: the proxy's art pattern only, never a token): the popup opened by a TMDb id shows it as owned,
@@ -9077,6 +9080,9 @@ def library_search():
                     'backdrop_url': f"{script_root}/api/img/plex?url={urllib.parse.quote(item['art'], safe='/')}" if item.get('art') else None,
                     'clearlogo_url': None,
                 }
+                _art = item.get('art') or ''
+                if _PLEX_ART_PATH_RE.fullmatch(_art):
+                    formatted['art_path'] = _art   # v341k: the sheet's Plex art, started at the tap (as Home's art_path)
                 # Results carry their tmdb_id so the modal can start /api/movie
                 # or /api/tv alongside /api/plex/* (which still validates it).
                 # An id already known to be the wrong type is left out.

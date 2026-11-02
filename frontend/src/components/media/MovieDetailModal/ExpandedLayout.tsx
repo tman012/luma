@@ -945,6 +945,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               }}>
                 {sheetHero.state === 'logo' && sheetHero.logo ? (
                   <img
+                    decoding="sync"
                     src={sheetHero.logo}
                     alt={detail.title}
                     style={{

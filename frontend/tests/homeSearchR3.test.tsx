@@ -9,6 +9,9 @@ vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => modals }));
 import { HomeSearchR3, buildR3, r3Css, R3_BAND } from '@/components/search/HomeSearchR3';
 import { HomeSearchPalette } from '@/components/search/HomeSearchPalette';
 import { openSearch } from '@/components/search/MinimalSearchHost';
+import { _resetSheetPriority } from '@/loading/sheetPriority';
+// v341k: a sheet open started by an earlier test holds page images until its reveal; each test starts with none.
+beforeEach(() => { _resetSheetPriority(); });
 
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
 const LIB = { movies: [{ rating_key: 1, title: 'Dune', year: 2021, tmdb_id: 438631, backdrop_url: '/api/img/plex?url=/art/1' },

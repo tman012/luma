@@ -414,7 +414,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   <div data-hero-title={sheetHero.state} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
                     opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1, transition: reducedMotion() ? 'none' : HERO_FADE }}>
                   {sheetHero.state === 'logo' && sheetHero.logo ? (
-                    <img data-hero-logo="" src={sheetHero.logo} onError={sheetHero.logoFailed} alt={detail?.title}
+                    <img data-hero-logo="" decoding="sync" src={sheetHero.logo} onError={sheetHero.logoFailed} alt={detail?.title}
                         width={300} height={140}
                         // Held to the fixed title box: the logo's intrinsic size never drives layout (iOS grew the box).
                         style={{ display: 'block', width: 'calc(100% - 32px)', height: '100%', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', objectPosition: 'center bottom', filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }} />

@@ -22,6 +22,8 @@ export interface SearchMovie {
   poster_url?: string | null;
   poster_path?: string | null;
   backdrop_url?: string | null;
+  /** v341k: an owned row's Plex art path (the server's, proxy pattern only): the sheet's art from the tap. */
+  art_path?: string | null;
   backdrop_path?: string | null;
   clearlogo_url?: string | null;
   library_name?: string;
@@ -88,7 +90,7 @@ export const TMDB_BUSY_TEXT = 'TMDB is busy. Try again in a minute.';
 // Helpers
 // ---------------------------------------------------------------------------
 
-import { posterUrl as tmdbPosterUrl, tmdbImg, backdropUrl as tmdbBackdrop, finalBackdropUrl, plexSheetArt } from '@/utils/image';
+import { posterUrl as tmdbPosterUrl, tmdbImg, backdropUrl as tmdbBackdrop, finalBackdropUrl, plexSheetArt, plexArtFromPath } from '@/utils/image';
 import { openWhenReady, resetWarmGroup, scheduleWarm, startSearchWarms, warmDetail } from '@/services/modalPrefetch';
 
 function titleKey(title: string, year: number | string | null | undefined): string {
@@ -267,7 +269,9 @@ export function resultIds(item: SearchMovie): { kind: 'movie' | 'tv'; ratingKey?
 export function resultArt(item: SearchMovie): (string | null)[] {
   const { ratingKey } = resultIds(item);
   // Owned: its Plex art is the art (TMDb's only when Plex has none), so only that one is requested.
-  const plex = ratingKey && item.backdrop_url?.includes('/api/img/plex') ? plexSheetArt(item.backdrop_url) : null;
+  const plex = !ratingKey ? null
+    : finalBackdropUrl(plexArtFromPath(item.art_path))
+      ?? (item.backdrop_url?.includes('/api/img/plex') ? plexSheetArt(item.backdrop_url) : null);
   return plex ? [plex] : [item.backdrop_path ? finalBackdropUrl(tmdbBackdrop(item.backdrop_path)) : null];
 }
 
