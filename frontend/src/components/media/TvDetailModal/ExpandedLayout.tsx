@@ -1560,7 +1560,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
 
                 {/* === CONTENT — meta+plot+pills at bottom === */}
                 <div style={{
-                  opacity: shelfOpen ? 0 : (phase === 'visible' ? 1 : 0),
+                  opacity: shelfOpen ? 0 : 1, // the one reveal fades it (a warm open mounts it before `phase`: no second fade)
                   transition: shelfOpen ? 'none' : 'opacity 1s ease-in-out 0.8s',
                   willChange: 'opacity',
                   display: 'flex',

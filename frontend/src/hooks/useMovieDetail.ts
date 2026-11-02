@@ -1,7 +1,7 @@
 import { isMinimal } from '@/minimal';
 import { useState, useEffect, useRef } from 'react';
 import { pickBestTrailer } from '@/utils/pickBestTrailer';
-import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
+import { backdropUrl as tmdbBackdrop, logoImg, plexBackdrop } from '@/utils/image';
 import {
   parsePlexResponse,
   parseTmdbResponse,
@@ -99,6 +99,9 @@ export function useMovieDetail(
           // Opened with only a Plex key (Home rails): get TMDb now, briefly,
           // so the first backdrop shown is the final one (no swap later).
           let tmdbData = tmdbFirst;
+          // The Plex art is this open's backdrop if TMDb misses its wait: start loading it now, not at the reveal.
+          const plexArt = plexBackdrop(parsed.plexBackdropUrl);
+          if (!tmdbData && plexArt) new Image().src = plexArt;
           if (!tmdbData && parsed.tmdbId && parsed.tmdbId !== tmdbId) {
             let timer = 0;
             tmdbData = await Promise.race([
@@ -159,6 +162,8 @@ export function useMovieDetail(
           }
           // No art yet and TMDb still out (missed the brief wait): the sheet's art deadline keeps waiting for it, so a
           // backdrop that lands by then is in the one fade (useSheetHero `artSettled`).
+          // With Plex art in hand that art is the one backdrop (a late TMDb answer never swaps it, as on TV).
+          if (!tmdbData && !parsed.backdropUrl && plexArt) parsed.backdropUrl = plexArt;
           if (!tmdbData && parsed.tmdbId && !parsed.backdropUrl) parsed.backdropPending = true;
 
           setDetail(parsed);
