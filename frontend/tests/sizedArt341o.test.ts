@@ -16,7 +16,7 @@ describe('v341o desktop Plex art is the 1280x720 transcode (Tester N1440/I1440, 
   });
 });
 
-describe('v341q the hold: decoded images never touched, the rest held; on-screen ones resume first', () => {
+describe('v341q/r the hold: decoded and on-screen images never stripped, off-screen held; on-screen ones resume first', () => {
   afterEach(() => { _resetSheetPriority(); document.body.innerHTML = ''; vi.useRealTimers(); });
   const img = (src: string, rect: Partial<DOMRect>, complete = false) => {
     const card = document.createElement('div'); card.setAttribute('data-testid', 'card-1'); document.body.appendChild(card);
@@ -29,10 +29,14 @@ describe('v341q the hold: decoded images never touched, the rest held; on-screen
     const d = img('/d.jpg', {}, true); beginSheetPriority();
     expect(d.getAttribute('src')).toBe('/d.jpg'); expect(d.hasAttribute('data-sheet-held')).toBe(false); expect(d.hasAttribute('fetchpriority')).toBe(false);
   });
-  it('an on-screen poster still loading is held, Home and search alike, and gets its own priority back', () => {
+  it('v341r: an on-screen poster still loading is never stripped: low while the sheet opens, its own priority back after', () => {
     const on = img('/on.jpg', {}); on.setAttribute('fetchpriority', 'auto');
-    beginSheetPriority(); expect(on.getAttribute('src')).toBeNull(); expect(on.getAttribute('fetchpriority')).toBe('low');
+    beginSheetPriority(); expect(on.getAttribute('src')).toBe('/on.jpg'); expect(on.hasAttribute('data-sheet-held')).toBe(false); expect(on.getAttribute('fetchpriority')).toBe('low');
     endSheetPriority(); expect(on.getAttribute('src')).toBe('/on.jpg'); expect(on.getAttribute('fetchpriority')).toBe('auto');
+  });
+  it('v341r: an off-screen one is held until the reveal', () => {
+    const off = img('/off.jpg', { top: 5000, bottom: 5150 });
+    beginSheetPriority(); expect(off.getAttribute('src')).toBeNull(); endSheetPriority(); expect(off.getAttribute('src')).toBe('/off.jpg');
   });
   it('off-screen ones resume after the on-screen ones load, or after 400 ms', () => {
     vi.useFakeTimers();

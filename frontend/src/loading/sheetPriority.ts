@@ -7,6 +7,8 @@ export const SHEET_PRIORITY_MS = 6000;
 let until = 0;
 let timer = 0;
 const listeners = new Set<() => void>();
+/** On-screen page images lowered for the open (their own fetchpriority, restored at the reveal or Close). */
+const lowered: { img: HTMLImageElement; prio: string | null }[] = [];
 type Paused = { img: HTMLImageElement; src: string | null; srcset: string | null; prio: string | null; vis: boolean };
 const paused: Paused[] = [];
 
@@ -35,8 +37,10 @@ function holdAll(imgs: HTMLImageElement[]): void {
   const vis = imgs.map(onScreen);
   imgs.forEach((img, i) => hold(img, vis[i] === true));
 }
-/** A decoded image is never touched (it stays mounted and shows at once on Close); one not yet loaded is held, Home
- *  and search alike (v341q: on an early Home tap ten on-screen posters took the sockets, reveal 1.47 s). */
+/** A decoded image is never touched (it stays mounted and shows at once on Close). An on-screen one still loading is
+ *  never stripped or restarted either (v341r, Tester real WXY on 411fe470: restarted posters came back 0.5-0.75 s
+ *  after Close, 0.9-1.0 s after the reveal); it only drops to fetchpriority=low while the sheet's art loads at high.
+ *  Off-screen ones (lazy margin) are held until the reveal. */
 function hold(img: HTMLImageElement, vis: boolean): void {
   // Only the page under the sheet: never a sheet, dialog or panel over it (search palette, person sheet; v341l F1).
   if (img.closest('[data-modal]') || img.closest('[role="dialog"]') || img.closest('[data-seed-layer]')) return;
@@ -51,6 +55,10 @@ function hold(img: HTMLImageElement, vis: boolean): void {
   }
   if (img.complete && src) return;
   if (src == null && srcset == null) return;
+  if (vis) {
+    if (!lowered.some((l) => l.img === img)) { lowered.push({ img, prio: img.getAttribute('fetchpriority') }); img.setAttribute('fetchpriority', 'low'); }
+    return;
+  }
   paused.push({ img, src, srcset, prio: img.getAttribute('fetchpriority'), vis });
   img.setAttribute('data-sheet-held', '');
   img.setAttribute('fetchpriority', 'low');
@@ -112,17 +120,19 @@ let restTimer = 0;
 function resume(then: () => void): void {
   watcher?.disconnect(); watcher = null;
   const all = paused.splice(0);
+  const low = lowered.splice(0);
+  for (const l of low) { if (l.prio == null) l.img.removeAttribute('fetchpriority'); else l.img.setAttribute('fetchpriority', l.prio); }
   const first = all.filter((p) => p.vis), rest = all.filter((p) => !p.vis);
   first.forEach(restore);
-  let left = first.filter((p) => !p.img.complete).length, done = false;
+  const wait = [...first.map((p) => p.img), ...low.map((l) => l.img)].filter((i) => !i.complete);
+  let left = wait.length, done = false;
   const go = () => { if (done) return; done = true; if (typeof window !== 'undefined') window.clearTimeout(restTimer); rest.forEach(restore); then(); };
   if (!left || typeof window === 'undefined') { go(); return; }
   restTimer = window.setTimeout(go, RESUME_REST_MS);
   const one = () => { left -= 1; if (left <= 0) go(); };
-  for (const p of first) {
-    if (p.img.complete) continue;
-    p.img.addEventListener('load', one, { once: true });
-    p.img.addEventListener('error', one, { once: true });
+  for (const i of wait) {
+    i.addEventListener('load', one, { once: true });
+    i.addEventListener('error', one, { once: true });
   }
 }
 
@@ -144,4 +154,4 @@ export function endSheetPriority(): void {
   const fns = Array.from(listeners); listeners.clear();
   resume(() => { for (const f of fns) { try { f(); } catch { /* a listener's error stays its own */ } } });
 }
-export function _resetSheetPriority(): void { if (typeof window !== 'undefined') window.clearTimeout(restTimer); until = 0; listeners.clear(); paused.length = 0; offPage.clear(); watcher?.disconnect(); watcher = null; }
+export function _resetSheetPriority(): void { if (typeof window !== 'undefined') window.clearTimeout(restTimer); until = 0; listeners.clear(); paused.length = 0; lowered.length = 0; offPage.clear(); watcher?.disconnect(); watcher = null; }
