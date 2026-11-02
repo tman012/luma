@@ -71,6 +71,10 @@ const cache = new Map<string, { at: number; p: Promise<Cached>; ac?: AbortContro
 /** Detail requests still on the wire, so an open can drop other titles' warm-ups (an HTTP/1.1 origin has 6
  *  connections; slow TMDb warm-ups held them all and the sheet's backdrop waited behind them). */
 const inflight = new Map<string, AbortController>();
+/** The warm-up chains (their title ids) each in-flight request serves: a chain warming the opened title keeps its
+ *  requests (a Home card known only by its Plex key still owns its TMDb details request). */
+type TitleIds = Set<number>;
+const owners = new Map<string, TitleIds[]>();
 /** Aborts in-flight detail requests that aren't for this title (they're forgotten, so a later open refetches). */
 function dropOtherWarms(ids: (number | undefined)[], title?: string): void {
   const keep = ids.filter((x): x is number => !!x).map((x) => new RegExp(`/${x}(?:[/?&]|$)`));
@@ -78,6 +82,7 @@ function dropOtherWarms(ids: (number | undefined)[], title?: string): void {
   const ratingsOfTitle = title ? titleRatingsPath(title).split('?')[0] + '?' : null;
   for (const [url, ac] of Array.from(inflight)) {
     if (keep.some((re) => re.test(url)) || (ratingsOfTitle && url.startsWith(ratingsOfTitle))) continue;
+    if ((owners.get(url) ?? []).some((o) => ids.some((x) => !!x && o.has(x)))) continue;
     inflight.delete(url); ac.abort();
     // Only this request's own entry is forgotten (a newer one for the same URL stays).
     const e = cache.get(url); if (e && e.ac === ac) cache.delete(url);
@@ -95,7 +100,7 @@ function load(url: string, warmHeaders?: Record<string, string>): Promise<Cached
   }));
   const entry = { at: Date.now(), p, ac };
   cache.set(url, entry);
-  if (ac) { inflight.set(url, ac); const done = () => { if (inflight.get(url) === ac) inflight.delete(url); }; p.then(done, done); }
+  if (ac) { inflight.set(url, ac); owners.delete(url); const done = () => { if (inflight.get(url) === ac) { inflight.delete(url); owners.delete(url); } }; p.then(done, done); }
   if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value as string);
   // Errors aren't kept: the next open retries.
   // Only if the stored entry is still this one (an aborted request never deletes a newer entry for the URL).
@@ -124,9 +129,11 @@ export function detailFetch(url: string, init?: { signal?: AbortSignal }): Promi
   });
 }
 
-async function json(url: string, warmHeaders?: Record<string, string>): Promise<Record<string, unknown> | null> {
+async function json(url: string, warmHeaders?: Record<string, string>, owner?: TitleIds): Promise<Record<string, unknown> | null> {
   try {
-    const c = await load(url, warmHeaders);
+    const pending = load(url, warmHeaders);
+    if (owner && inflight.has(url)) owners.set(url, [...(owners.get(url) ?? []), owner]);
+    const c = await pending;
     return c.ok ? (JSON.parse(c.body) as Record<string, unknown>) : null;
   } catch {
     return null;
@@ -154,6 +161,10 @@ export async function warmDetail(
   const images = opts.images !== false;
   prefetchModalColors(kind, ratingKey, tmdbId);
   let tid = tmdbId;
+  // This chain's title ids (an open keeps the requests of the chain warming its title).
+  const own = new Set<number>([ratingKey, tmdbId].filter((x): x is number => !!x));
+  // A background warm-up stops at its next step while a sheet opens (an aborted step must not start the next).
+  const yieldToSheet = () => !opts.open && sheetOpening();
   let plexBackdrop: string | null = null;
   // Owned titles: the sheet asks for ratings by the Plex title and year, so the warm-up does too.
   let plexTitle: { title: string; year: number | null } | null = null;
@@ -169,22 +180,24 @@ export async function warmDetail(
   const earlyArt = (u: string | null) => { if (opts.open && images && u) void preloadImage(finalBackdropUrl(u), 'high'); };
   let plexDone: Promise<unknown> = Promise.resolve();
   if (plexPath && !tmdbId) {
-    const plex = await json(plexPath, bg);
+    const plex = await json(plexPath, bg, own);
+    if (yieldToSheet()) return;
     const parsed = readPlex(plex);
     if (parsed && plex) {
       tid = (parsed.tmdbId as number | undefined) || (plex.tmdb_id as number | undefined) || undefined;
       plexBackdrop = parsed.backdropUrl || parsed.posterUrl || null;
     }
+    if (tid) own.add(tid);
     earlyArt(plexBackdrop);
   } else if (plexPath) {
     // Both ids (owned search results): warm Plex too, which runs the
     // server-side tmdb_id type check the popup waits on.
-    plexDone = json(plexPath, bg).then(readPlex).then((p) => { earlyArt((p?.backdropUrl as string | undefined) ?? null); return p; });
+    plexDone = json(plexPath, bg, own).then(readPlex).then((p) => { earlyArt((p?.backdropUrl as string | undefined) ?? null); return p; });
   }
   if (kind === 'movie' && ratingKey) void json(plexRatingsPath(ratingKey));
   const [tm, logo] = await Promise.all([
-    tid ? json(kind === 'movie' ? `/api/movie/${tid}` : `/api/tv/${tid}`, bg) : Promise.resolve(null),
-    tid ? json(clearlogoPath(kind, tid)) : Promise.resolve(null),
+    tid ? json(kind === 'movie' ? `/api/movie/${tid}` : `/api/tv/${tid}`, bg, own) : Promise.resolve(null),
+    tid ? json(clearlogoPath(kind, tid), undefined, own) : Promise.resolve(null),
   ]);
   // Ratings with the details: the title-based ratings the sheet asks for (none in the minimal build).
   // Only when the detail reply carried no inline ratings (an older server) is the ratings endpoint warmed.
@@ -201,6 +214,7 @@ export async function warmDetail(
       if (hdr) void json(url, hdr);
     });
   }
+  if (yieldToSheet()) return;
   if (!images) return; // metadata only (rows further down the list)
   const path = tm?.backdrop_path as string | undefined;
   await Promise.all([
@@ -449,6 +463,7 @@ export function _resetModalPrefetch(): void {
   _resetImageLoader();
   queue.length = 0;
   inflight.clear();
+  owners.clear();
   _resetSheetPriority();
   started.clear();
   groupCount.clear();

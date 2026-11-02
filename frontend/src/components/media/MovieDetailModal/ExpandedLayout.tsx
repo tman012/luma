@@ -342,7 +342,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const titleState = useTitleReveal(logoInput(liveDetail), liveDetail?.title, liveDetail?.backdropUrl || liveDetail?.posterUrl);
   // ONE backdrop per open (useSheetBackdrop): latched once decoded or at the cap, never swapped after.
   const artCandidate = finalBackdropUrl(liveDetail?.backdropUrl);
-  const sheetHero = useSheetHero(artCandidate, !!liveDetail, liveDetail?.clearLogoUrl, logoInput(liveDetail) !== undefined, props.openKey);
+  const sheetHero = useSheetHero(artCandidate, !!liveDetail && !liveDetail.backdropPending, liveDetail?.clearLogoUrl, logoInput(liveDetail) !== undefined, props.openKey, !!liveDetail);
   const sheetArt = sheetHero.art;
   // The backdrop img mounts (hidden) as soon as its URL is known, so it has painted by the one reveal.
   const artEl = sheetArt ?? (sheetHero.state === 'hold' ? artCandidate : null);

@@ -41,6 +41,8 @@ export interface MediaDetail {
   title: string;
   /** The per-item ownership lookup has answered (owned or not); unset while it is out. */
   ownershipSettled?: boolean;
+  /** Plex-keyed open: TMDb (the backdrop pick) still out after its brief wait; the sheet waits to its art deadline. */
+  backdropPending?: boolean;
   year: number | null;
   summary: string;
   contentRating: string | null;

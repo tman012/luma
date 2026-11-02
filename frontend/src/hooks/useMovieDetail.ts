@@ -157,6 +157,9 @@ export function useMovieDetail(
               });
             }
           }
+          // No art yet and TMDb still out (missed the brief wait): the sheet's art deadline keeps waiting for it, so a
+          // backdrop that lands by then is in the one fade (useSheetHero `artSettled`).
+          if (!tmdbData && parsed.tmdbId && !parsed.backdropUrl) parsed.backdropPending = true;
 
           setDetail(parsed);
         } else if (tmdbId) {
@@ -385,10 +388,12 @@ export function useMovieDetail(
   useEffect(() => {
     if (!resolvedTmdbId || tmdbFetchedRef.current) return;
     let cancelled = false;
+    // The answer (or its failure) settles a pending backdrop either way.
+    const settled = () => { if (!cancelled) setDetail((prev) => (prev?.backdropPending ? { ...prev, backdropPending: false } : prev)); };
     detailFetch(`/api/movie/${resolvedTmdbId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled || !data) { settled(); return; }
         const videos = data.videos?.results;
         setTrailerKey(pickBestTrailer(videos));
 
@@ -396,8 +401,9 @@ export function useMovieDetail(
         if (data.backdrop_path) {
           const resolvedBackdrop = tmdbBackdrop(data.backdrop_path as string);
           // Only fill a missing backdrop: never swap one that's on screen.
-          setDetail((prev) => prev && !prev.backdropUrl ? { ...prev, backdropUrl: resolvedBackdrop } : prev);
+          setDetail((prev) => prev && !prev.backdropUrl ? { ...prev, backdropUrl: resolvedBackdrop, backdropPending: false } : prev);
         }
+        settled();
 
         const coll = extractBelongsToCollection(data as Record<string, unknown>);
         if (coll.collectionId != null) {
@@ -434,6 +440,7 @@ export function useMovieDetail(
       })
       .catch(() => {
         if (!cancelled) setTrailerKey(null);
+        settled();
       });
     return () => { cancelled = true; };
   }, [resolvedTmdbId]);
