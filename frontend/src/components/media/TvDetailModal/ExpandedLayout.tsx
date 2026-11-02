@@ -1532,6 +1532,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                   }}>
                     {sheetHero.state === 'logo' && sheetHero.logo ? (
                       <img
+                    decoding="sync"
                         src={sheetHero.logo}
                         alt={show.title}
                         style={{

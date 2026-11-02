@@ -850,6 +850,10 @@ class FastSearchIndex:
                 'viewCount': m.get('viewCount', 0),
                 'viewOffset': m.get('viewOffset', 0),
                 'thumb': m.get('thumb', ''),
+                # v341k: the art path and TMDb id, so an owned search row opens like its Home card (both ids,
+                # Plex art from the tap). Library paths only; the token is added by the image proxy.
+                'art': m.get('art', '') or '',
+                'tmdb_id': m.get('tmdb_id'),
             })
         return clean
 
