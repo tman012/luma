@@ -19,6 +19,9 @@ describe('v341e: the opening sheet\'s art owns the network', () => {
     expect(off.getAttribute('src')).toBeNull();
     let ran = false; afterSheetPriority(() => { ran = true; });
     endSheetPriority();
+    // v341q: on-screen first; the rest once those load.
+    expect(on.getAttribute('src')).toBe('/a.jpg'); expect(off.getAttribute('src')).toBeNull();
+    on.dispatchEvent(new Event('load'));
     expect(off.getAttribute('src')).toBe('/b.jpg'); expect(off.getAttribute('srcset')).toBe('/b2.jpg 2x');
     expect(ran).toBe(true); expect(sheetOpening()).toBe(false);
   });

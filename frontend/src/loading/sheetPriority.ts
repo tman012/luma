@@ -7,7 +7,8 @@ export const SHEET_PRIORITY_MS = 6000;
 let until = 0;
 let timer = 0;
 const listeners = new Set<() => void>();
-const paused: { img: HTMLImageElement; src: string | null; srcset: string | null }[] = [];
+type Paused = { img: HTMLImageElement; src: string | null; srcset: string | null; prio: string | null; vis: boolean };
+const paused: Paused[] = [];
 
 const onBegin = new Set<() => void>();
 /** Runs `fn` at every open's start (the image loader drops its background art there). */
@@ -23,22 +24,20 @@ export function afterSheetPriority(fn: () => void): void { if (!sheetOpening()) 
 
 /** A page image still loading (or not started) outside the sheet: its download is held until the reveal, so the
  *  tapped title's art goes first (v341k: on-screen rail posters too, and ones that mount or start after the tap). */
-/** A Home rail poster on screen under a sheet opened from Home (R1/(y)). Only those keep loading: a search open holds
- *  everything (I1440/I390: on-screen posters behind a slow TMDb would hold every HTTP/1.1 socket the tap needs). */
-let keepHomePosters = false;
 function onScreen(img: HTMLImageElement): boolean {
   if (typeof window === 'undefined' || typeof img.getBoundingClientRect !== 'function') return false;
-  if (!keepHomePosters || !img.closest('[data-testid^="card-"]') || img.closest('[data-testid="r3-card"]')) return false;
   const r = img.getBoundingClientRect();
   return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < window.innerHeight && r.left < window.innerWidth;
 }
-/** All layout reads first, then the writes: a read after each src removal forced a full relayout per image (a 4 s
- *  long task on the 1440 search page). */
+/** All layout reads first, then the writes (a read after each src removal forced a relayout per image). Whether an
+ *  image is on screen is read here, as the user sees the page: at Close the sheet's scroll lock has moved it. */
 function holdAll(imgs: HTMLImageElement[]): void {
   const vis = imgs.map(onScreen);
   imgs.forEach((img, i) => hold(img, vis[i] === true));
 }
-function hold(img: HTMLImageElement, visible: boolean): void {
+/** A decoded image is never touched (it stays mounted and shows at once on Close); one not yet loaded is held, Home
+ *  and search alike (v341q: on an early Home tap ten on-screen posters took the sockets, reveal 1.47 s). */
+function hold(img: HTMLImageElement, vis: boolean): void {
   // Only the page under the sheet: never a sheet, dialog or panel over it (search palette, person sheet; v341l F1).
   if (img.closest('[data-modal]') || img.closest('[role="dialog"]') || img.closest('[data-seed-layer]')) return;
   const src = img.getAttribute('src'), srcset = img.getAttribute('srcset');
@@ -52,10 +51,7 @@ function hold(img: HTMLImageElement, visible: boolean): void {
   }
   if (img.complete && src) return;
   if (src == null && srcset == null) return;
-  // v341o (Tester R1/(y)): a Home poster on screen under the sheet keeps loading: dropping its src threw its bytes
-  // away, and on fast4g the restart at the reveal/close took 2.6-2.9 s (control 0.1-0.2 s).
-  if (visible) return;
-  paused.push({ img, src, srcset });
+  paused.push({ img, src, srcset, prio: img.getAttribute('fetchpriority'), vis });
   img.setAttribute('data-sheet-held', '');
   img.setAttribute('fetchpriority', 'low');
   img.removeAttribute('srcset'); img.removeAttribute('src');
@@ -100,23 +96,38 @@ function quietPageImages(): void {
   });
   watcher.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset'] });
 }
-function resume(): void {
+function restore(p: Paused): void {
+  p.img.removeAttribute('data-sheet-held');
+  // Its own priority back (held images were low; left low, the on-screen posters queued behind the margin's: 3.7 s).
+  if (p.prio == null) p.img.removeAttribute('fetchpriority'); else p.img.setAttribute('fetchpriority', p.prio);
+  // Only an image still paused is restored (a re-render that set a new src while paused wins).
+  if (p.srcset != null && !p.img.hasAttribute('srcset')) p.img.setAttribute('srcset', p.srcset);
+  if (p.src != null && !p.img.hasAttribute('src')) p.img.setAttribute('src', p.src);
+}
+/** On-screen images first (the posters Close shows); the rest, and the work queued behind the sheet (warm-ups,
+ *  Home decodes), once those load or after RESUME_REST_MS: all at once, the viewport's posters shared six sockets with
+ *  every lazy image in the margin and the queued warm-ups (y: 1.05 s after Close). */
+const RESUME_REST_MS = 400;
+let restTimer = 0;
+function resume(then: () => void): void {
   watcher?.disconnect(); watcher = null;
-  for (const p of paused.splice(0)) {
-    p.img.removeAttribute('data-sheet-held');
-    // Only an image still paused is restored (a re-render that set a new src while paused wins).
-    if (p.srcset != null && !p.img.hasAttribute('srcset')) p.img.setAttribute('srcset', p.srcset);
-    if (p.src != null && !p.img.hasAttribute('src')) p.img.setAttribute('src', p.src);
+  const all = paused.splice(0);
+  const first = all.filter((p) => p.vis), rest = all.filter((p) => !p.vis);
+  first.forEach(restore);
+  let left = first.filter((p) => !p.img.complete).length, done = false;
+  const go = () => { if (done) return; done = true; if (typeof window !== 'undefined') window.clearTimeout(restTimer); rest.forEach(restore); then(); };
+  if (!left || typeof window === 'undefined') { go(); return; }
+  restTimer = window.setTimeout(go, RESUME_REST_MS);
+  const one = () => { left -= 1; if (left <= 0) go(); };
+  for (const p of first) {
+    if (p.img.complete) continue;
+    p.img.addEventListener('load', one, { once: true });
+    p.img.addEventListener('error', one, { once: true });
   }
 }
 
-/** Set by the tap just before beginSheetPriority: whether it came from a Home card. Consumed by that begin. */
-let nextFromHome = false;
-export function keepHomePostersOnOpen(fromHome: boolean): void { nextFromHome = fromHome; }
-
 export function beginSheetPriority(): void {
   if (typeof window === 'undefined') return;
-  keepHomePosters = nextFromHome; nextFromHome = false;
   opens += 1;
   until = Date.now() + SHEET_PRIORITY_MS;
   window.clearTimeout(timer);
@@ -130,8 +141,7 @@ export function endSheetPriority(): void {
   if (!until) return;
   until = 0;
   if (typeof window !== 'undefined') window.clearTimeout(timer);
-  resume();
   const fns = Array.from(listeners); listeners.clear();
-  for (const f of fns) { try { f(); } catch { /* a listener's error stays its own */ } }
+  resume(() => { for (const f of fns) { try { f(); } catch { /* a listener's error stays its own */ } } });
 }
-export function _resetSheetPriority(): void { until = 0; listeners.clear(); paused.length = 0; offPage.clear(); watcher?.disconnect(); watcher = null; }
+export function _resetSheetPriority(): void { if (typeof window !== 'undefined') window.clearTimeout(restTimer); until = 0; listeners.clear(); paused.length = 0; offPage.clear(); watcher?.disconnect(); watcher = null; }

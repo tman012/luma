@@ -1,6 +1,6 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { plexBackdrop, plexSheetArt, plexArtFromPath, finalBackdropUrl, PLEX_ART_W, PLEX_ART_H } from '@/utils/image';
-import { keepHomePostersOnOpen, beginSheetPriority, endSheetPriority, _resetSheetPriority } from '@/loading/sheetPriority';
+import { beginSheetPriority, endSheetPriority, _resetSheetPriority } from '@/loading/sheetPriority';
 
 describe('v341o desktop Plex art is the 1280x720 transcode (Tester N1440/I1440, Designer O2)', () => {
   it('desktop never names the unsized original', () => {
@@ -16,29 +16,30 @@ describe('v341o desktop Plex art is the 1280x720 transcode (Tester N1440/I1440, 
   });
 });
 
-describe('v341o the hold leaves on-screen page images loading (R1/(y))', () => {
-  afterEach(() => { _resetSheetPriority(); document.body.innerHTML = ''; });
-  const img = (src: string, rect: Partial<DOMRect>) => {
+describe('v341q the hold: decoded images never touched, the rest held; on-screen ones resume first', () => {
+  afterEach(() => { _resetSheetPriority(); document.body.innerHTML = ''; vi.useRealTimers(); });
+  const img = (src: string, rect: Partial<DOMRect>, complete = false) => {
     const card = document.createElement('div'); card.setAttribute('data-testid', 'card-1'); document.body.appendChild(card);
     const i = document.createElement('img'); i.setAttribute('src', src); card.appendChild(i);
+    Object.defineProperty(i, 'complete', { value: complete, configurable: true });
     i.getBoundingClientRect = () => ({ x: 0, y: 0, width: 100, height: 150, top: 0, left: 0, bottom: 150, right: 100, toJSON: () => ({}), ...rect }) as DOMRect;
     return i;
   };
-  it('a search open holds on-screen Home posters too (I390)', () => {
-    const on = img('/on.jpg', {}); beginSheetPriority(); expect(on.getAttribute('src')).toBeNull(); endSheetPriority(); expect(on.getAttribute('src')).toBe('/on.jpg');
+  it('a decoded poster keeps its src and priority (Close shows it at once)', () => {
+    const d = img('/d.jpg', {}, true); beginSheetPriority();
+    expect(d.getAttribute('src')).toBe('/d.jpg'); expect(d.hasAttribute('data-sheet-held')).toBe(false); expect(d.hasAttribute('fetchpriority')).toBe(false);
   });
-  it('a search-grid poster on screen is still held (I1440)', () => {
-    const s = document.createElement('div'); s.setAttribute('data-testid', 'r3-card'); document.body.appendChild(s);
-    const i = document.createElement('img'); i.setAttribute('src', '/s.jpg'); s.appendChild(i);
-    i.getBoundingClientRect = () => ({ x: 0, y: 0, width: 100, height: 150, top: 0, left: 0, bottom: 150, right: 100, toJSON: () => ({}) }) as DOMRect;
-    (keepHomePostersOnOpen(true), beginSheetPriority()); expect(i.getAttribute('src')).toBeNull(); endSheetPriority(); expect(i.getAttribute('src')).toBe('/s.jpg');
+  it('an on-screen poster still loading is held, Home and search alike, and gets its own priority back', () => {
+    const on = img('/on.jpg', {}); on.setAttribute('fetchpriority', 'auto');
+    beginSheetPriority(); expect(on.getAttribute('src')).toBeNull(); expect(on.getAttribute('fetchpriority')).toBe('low');
+    endSheetPriority(); expect(on.getAttribute('src')).toBe('/on.jpg'); expect(on.getAttribute('fetchpriority')).toBe('auto');
   });
-  it('on screen: untouched; off screen: held and restored at the end', () => {
+  it('off-screen ones resume after the on-screen ones load, or after 400 ms', () => {
+    vi.useFakeTimers();
     const on = img('/on.jpg', {}); const off = img('/off.jpg', { top: 5000, bottom: 5150 });
-    (keepHomePostersOnOpen(true), beginSheetPriority());
-    expect(on.getAttribute('src')).toBe('/on.jpg'); expect(on.hasAttribute('data-sheet-held')).toBe(false);
-    expect(off.getAttribute('src')).toBeNull(); expect(off.hasAttribute('data-sheet-held')).toBe(true);
-    endSheetPriority();
-    expect(off.getAttribute('src')).toBe('/off.jpg'); expect(off.hasAttribute('data-sheet-held')).toBe(false);
+    beginSheetPriority(); endSheetPriority();
+    expect(on.getAttribute('src')).toBe('/on.jpg'); expect(off.getAttribute('src')).toBeNull();
+    vi.advanceTimersByTime(399); expect(off.getAttribute('src')).toBeNull();
+    vi.advanceTimersByTime(1); expect(off.getAttribute('src')).toBe('/off.jpg'); expect(off.hasAttribute('fetchpriority')).toBe(false);
   });
 });
