@@ -266,8 +266,9 @@ export function resultIds(item: SearchMovie): { kind: 'movie' | 'tv'; ratingKey?
 /** The backdrops a row's sheet may show, as the sheet loads them: TMDb's, and an owned title's Plex art. */
 export function resultArt(item: SearchMovie): (string | null)[] {
   const { ratingKey } = resultIds(item);
-  return [item.backdrop_path ? finalBackdropUrl(tmdbBackdrop(item.backdrop_path)) : null,
-    ratingKey && item.backdrop_url?.includes('/api/img/plex') ? plexSheetArt(item.backdrop_url) : null];
+  // Owned: its Plex art is the art (TMDb's only when Plex has none), so only that one is requested.
+  const plex = ratingKey && item.backdrop_url?.includes('/api/img/plex') ? plexSheetArt(item.backdrop_url) : null;
+  return plex ? [plex] : [item.backdrop_path ? finalBackdropUrl(tmdbBackdrop(item.backdrop_path)) : null];
 }
 
 function warmResult(item: SearchMovie, opts?: { images?: boolean; ratings?: boolean; search?: boolean }): Promise<void> {

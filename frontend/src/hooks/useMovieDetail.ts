@@ -114,7 +114,7 @@ export function useMovieDetail(
           // The Plex art is this open's backdrop if TMDb misses its wait: start loading it now, not at the reveal.
           const plexArt = plexBackdrop(parsed.plexBackdropUrl);
           // The exact URL the sheet shows (one download, decoded before the reveal), at high priority.
-          if (!tmdbData && plexArt) void preloadImage(finalBackdropUrl(plexArt), 'high');
+          if (plexArt) void preloadImage(finalBackdropUrl(plexArt), 'high');
           // The Plex art is the sheet's fallback: shown when TMDb's backdrop hasn't decoded by the reveal.
           parsed.plexArtUrl = plexArt;
           if (!tmdbData && parsed.tmdbId && parsed.tmdbId !== tmdbId) {
@@ -132,7 +132,8 @@ export function useMovieDetail(
           // Merge TMDb HD backdrop + trailer immediately (no second flash)
           if (tmdbData) {
             tmdbFetchedRef.current = true;
-            if (tmdbData.backdrop_path) {
+            // Owned: Plex art always (same art every open); TMDb's backdrop only when Plex has none.
+            if (tmdbData.backdrop_path && !plexArt) {
               parsed.backdropUrl = tmdbBackdrop(tmdbData.backdrop_path as string);
             }
             const videos = (tmdbData.videos as Record<string, unknown> | undefined)?.results;
@@ -178,7 +179,7 @@ export function useMovieDetail(
           // No art yet and TMDb still out (missed the brief wait): the sheet's art deadline keeps waiting for it, so a
           // backdrop that lands by then is in the one fade (useSheetHero `artSettled`).
           // With Plex art in hand that art is the one backdrop (a late TMDb answer never swaps it, as on TV).
-          if (!tmdbData && !parsed.backdropUrl && plexArt) parsed.backdropUrl = plexArt;
+          if (plexArt) parsed.backdropUrl = plexArt;
           if (!tmdbData && parsed.tmdbId && !parsed.backdropUrl) parsed.backdropPending = true;
 
           setDetail(parsed);

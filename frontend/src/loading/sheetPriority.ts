@@ -7,6 +7,10 @@ let timer = 0;
 const listeners = new Set<() => void>();
 const paused: { img: HTMLImageElement; src: string | null; srcset: string | null }[] = [];
 
+const onBegin = new Set<() => void>();
+/** Runs `fn` at every open's start (the image loader drops its background art there). */
+export function onSheetPriority(fn: () => void): void { onBegin.add(fn); }
+
 export function sheetOpening(): boolean { return Date.now() < until; }
 /** Runs `fn` once the current open's priority window ends (now when none). */
 export function afterSheetPriority(fn: () => void): void { if (!sheetOpening()) fn(); else listeners.add(fn); }
@@ -38,6 +42,7 @@ export function beginSheetPriority(): void {
   window.clearTimeout(timer);
   timer = window.setTimeout(endSheetPriority, SHEET_PRIORITY_MS);
   quietPageImages();
+  for (const f of Array.from(onBegin)) { try { f(); } catch { /* its own */ } }
 }
 export function endSheetPriority(): void {
   if (!until) return;

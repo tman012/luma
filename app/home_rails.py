@@ -13,6 +13,7 @@ only sees titles and proxied image paths (/api/img/plex, no token).
 from __future__ import annotations
 
 import json
+import re
 import logging
 import os
 import threading
@@ -63,6 +64,9 @@ KEEP_IDS = TRAKT_IDS | {WATCHLIST_ID, WYM_ID}
 WATCHLIST_LIMIT = 25  # prod useHomeRails: slice(0, 25)
 TMDB_POSTER = 'https://image.tmdb.org/t/p/w342'
 
+
+# The proxy's exact art pattern (main._PLEX_IMG_PATH, art only): anything else never reaches a card.
+_ART_PATH = re.compile(r'/library/metadata/[0-9]+/art(?:/[0-9]+)?', re.ASCII)
 
 def init(*, get_plex: Callable[[], Any], get_current_user: Callable[[], Optional[dict]],
          trakt_connected: Callable[[], bool] = lambda: False,
@@ -461,7 +465,7 @@ def _card(el: ET.Element, wide: bool = False) -> Optional[Dict[str, Any]]:
         card['season'], card['episode'] = int(el.get('parentIndex')), int(el.get('index'))
     # The sheet's Plex art (its raw path, as the detail answer names it): a tap starts loading it at once.
     art_path = el.get('grandparentArt') if kind == 'episode' else (el.get('parentArt') if kind == 'season' else el.get('art'))
-    if art_path and str(art_path).startswith('/library/'):
+    if art_path and _ART_PATH.fullmatch(str(art_path)):
         card['art_path'] = art_path
     if wide:
         card['art'] = _img(el.get('art') or el.get('grandparentArt'), WIDE_W)

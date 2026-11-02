@@ -108,8 +108,10 @@ describe('v341g: Tester PREP B1/B2', () => {
 describe('v341h: Designer NO on 876af98b', () => {
   it('B1: a Plex-card movie whose TMDb misses the wait reveals on its Plex art, loading from the Plex answer', () => {
     const m = src('hooks/useMovieDetail.ts');
-    expect(m).toMatch(/if \(!tmdbData && plexArt\) void preloadImage\(finalBackdropUrl\(plexArt\), 'high'\);/);
-    expect(m).toMatch(/if \(!tmdbData && !parsed\.backdropUrl && plexArt\) parsed\.backdropUrl = plexArt;/);
+    // v341i art consistency: owned (Plex key) always shows its Plex art, loaded from the Plex answer.
+    expect(m).toMatch(/if \(plexArt\) void preloadImage\(finalBackdropUrl\(plexArt\), 'high'\);/);
+    expect(m).toMatch(/if \(plexArt\) parsed\.backdropUrl = plexArt;/);
+    expect(m).toMatch(/if \(tmdbData\.backdrop_path && !plexArt\)/);
   });
   it('B2: an owned show has its Plex season count, so Seasons is in the one reveal', () => {
     expect(src('utils/modalParsers.ts')).toMatch(/numberOfSeasons: \(data\.childCount as number\) \|\| 0,/);
