@@ -276,6 +276,11 @@ export function useTvDetail(
               setShow(parsed);
               setLoading(false);
               setTrailerKey(null);
+              // Ownership comes from Plex, never TMDb: a show opened by its Plex key is in the library, and the
+              // episode ownership lookup runs on Plex's tvdb id.
+              setShowOwned(true);
+              const plexTvdb = plexData.tvdb_id as number | null | undefined;
+              if (plexTvdb) setTvdbId(plexTvdb);
               if (!parsed.clearLogoUrl && plexTmdbId) {
                 fetchClearlogo(plexTmdbId, controller.signal).then((logo) => {
                   if (!cancelled) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo ?? prev.clearLogoUrl, logoSettled: true } : prev);
@@ -287,7 +292,9 @@ export function useTvDetail(
             const parsed = parsePlexTvResponse(plexData);
             parsed.ratingKey = ratingKey;
             parsed.logoSettled = true; // no TMDb id: Plex's logo (or none) is final
+            parsed.isOwned = true;   // opened by its Plex key: owned (Plex decides, never TMDb)
             setShow(parsed);
+            setShowOwned(true);
             setTrailerKey(null); // No TMDb data, no trailer
 
             // If Plex provided a tvdb_id directly, use it for ownership/Sonarr
@@ -394,7 +401,7 @@ export function useTvDetail(
       const result = await fetchTvOwnership(tvdbId!, show?.title, show?.year ?? undefined, ratingKey);
       if (!cancelled) {
         setOwnership(result.episodes);
-        setShowOwned(result.is_owned);
+        setShowOwned(result.is_owned || !!ratingKey);   // a Plex key: in the library (Plex decides)
       }
     }
 

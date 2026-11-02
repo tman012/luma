@@ -85,3 +85,22 @@ describe('v341f: Reviewer F1/F2/F4', () => {
     expect(src('hooks/useSheetBackdrop.ts')).toMatch(/capLeft\(BACKDROP_ART_DEADLINE_MS\)\);\n    return \(\) => window\.clearTimeout\(t\);\n  \}, \[openKey\]\);\n  return k === openKey;/);
   });
 });
+describe('v341g: Tester PREP B1/B2', () => {
+  it('B1: the open keeps the requests of the chain warming its own title; background chains stop while a sheet opens', () => {
+    const m = src('services/modalPrefetch.ts');
+    expect(m).toMatch(/if \(\(owners\.get\(url\) \?\? \[\]\)\.some\(\(o\) => ids\.some\(\(x\) => !!x && o\.has\(x\)\)\)\) continue;/);
+    expect(m).toMatch(/const yieldToSheet = \(\) => !opts\.open && sheetOpening\(\);/);
+    expect(m).toMatch(/if \(yieldToSheet\(\)\) return;\n  if \(!images\) return;/);
+  });
+  it('B1: a Plex-keyed movie whose TMDb missed the brief wait keeps the art deadline waiting (backdropPending)', () => {
+    expect(src('hooks/useMovieDetail.ts')).toMatch(/if \(!tmdbData && parsed\.tmdbId && !parsed\.backdropUrl\) parsed\.backdropPending = true;/);
+    for (const k of ['CompactLayout', 'ExpandedLayout']) {
+      expect(src(`components/media/MovieDetailModal/${k}.tsx`), k).toMatch(/!!liveDetail && !liveDetail\.backdropPending, liveDetail\?\.clearLogoUrl/);
+    }
+  });
+  it('B2: a show opened by its Plex key is owned whatever TMDb does', () => {
+    const t = src('hooks/useTvDetail.ts');
+    expect(t.match(/setShowOwned\(true\);/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(t).toMatch(/setShowOwned\(result\.is_owned \|\| !!ratingKey\);/);
+  });
+});
