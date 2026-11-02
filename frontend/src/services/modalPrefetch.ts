@@ -9,7 +9,7 @@ import { _resetSheetPriority, afterSheetPriority, beginSheetPriority, sheetOpeni
 import { apiFetch } from '@/apiClient';
 import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import { colorsFromImage } from '@/utils/posterColors';
-import { finalBackdropUrl } from '@/utils/image';
+import { finalBackdropUrl, plexSheetArt } from '@/utils/image';
 import { parsePlexResponse, parsePlexTvResponse } from '@/utils/modalParsers';
 import { getSeedColors, modalColors, prefetchModalColors, setSeedColors } from '@/services/modalColors';
 import { isMinimal } from '@/minimal';
@@ -153,9 +153,12 @@ export function clearlogoPath(kind: 'movie' | 'tv', tmdbId: number): string {
 /** `ratings`: also warm the title ratings (background warm-ups: capped per load, flagged for the server's
  *  budget guard); `open`: a user's open, which fetches them unflagged and uncapped. */
 export async function warmDetail(
-  kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number, opts: { images?: boolean; ratings?: boolean; open?: boolean; search?: boolean } = {},
+  kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number,
+  opts: { images?: boolean; ratings?: boolean; open?: boolean; search?: boolean; art?: (string | null | undefined)[] } = {},
 ): Promise<void> {
   if (!ratingKey && !tmdbId) return;
+  // The card's or row's own art (the sheet's exact URLs): loading from the warm-up or the tap, not after the details.
+  if (opts.images !== false) for (const u of opts.art ?? []) if (u) void preloadImage(u, opts.open ? 'high' : 'low');
   // Background detail requests carry the warm id: their inline ratings stay inside the server's OMDb guards.
   const bg = opts.open ? undefined : warmHeaders(!!opts.search);
   const images = opts.images !== false;
@@ -188,11 +191,15 @@ export async function warmDetail(
       plexBackdrop = parsed.backdropUrl || parsed.posterUrl || null;
     }
     if (tid) own.add(tid);
-    earlyArt(plexBackdrop);
+    // A movie with a TMDb id parses no backdrop (TMDb's is the pick): its Plex art is still the art to start now.
+    earlyArt(parsed?.backdropUrl ?? plexSheetArt((parsed as { plexBackdropUrl?: string | null } | null)?.plexBackdropUrl));
   } else if (plexPath) {
     // Both ids (owned search results): warm Plex too, which runs the
     // server-side tmdb_id type check the popup waits on.
-    plexDone = json(plexPath, bg, own).then(readPlex).then((p) => { earlyArt((p?.backdropUrl as string | undefined) ?? null); return p; });
+    plexDone = json(plexPath, bg, own).then(readPlex).then((p) => {
+      earlyArt((p?.backdropUrl as string | undefined) ?? plexSheetArt((p as { plexBackdropUrl?: string | null } | null)?.plexBackdropUrl));
+      return p;
+    });
   }
   if (kind === 'movie' && ratingKey) void json(plexRatingsPath(ratingKey));
   const [tm, logo] = await Promise.all([
@@ -426,7 +433,7 @@ if (typeof window !== 'undefined' && !(window as { __lumaPress?: boolean }).__lu
  *  come back). */
 export async function openWhenReady(
   kind: 'movie' | 'tv', ratingKey: number | undefined, tmdbId: number | undefined,
-  card: HTMLElement | null, open: () => void, onClosed?: () => void,
+  card: HTMLElement | null, open: () => void, onClosed?: () => void, art?: (string | null | undefined)[],
 ): Promise<void> {
   if (pending) return;
   pending = true;
@@ -441,7 +448,7 @@ export async function openWhenReady(
   let timer = 0;
   try {
     await Promise.race([
-      warmDetail(kind, ratingKey, tmdbId, { open: true }).catch(() => {}),
+      warmDetail(kind, ratingKey, tmdbId, { open: true, art }).catch(() => {}),
       new Promise<void>((res) => { timer = window.setTimeout(res, OPEN_WAIT_MS); }),
     ]);
   } finally {

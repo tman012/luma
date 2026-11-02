@@ -459,6 +459,10 @@ def _card(el: ET.Element, wide: bool = False) -> Optional[Dict[str, Any]]:
         card['show_key'] = show_key
     if kind == 'episode' and el.get('parentIndex') and el.get('index'):
         card['season'], card['episode'] = int(el.get('parentIndex')), int(el.get('index'))
+    # The sheet's Plex art (its raw path, as the detail answer names it): a tap starts loading it at once.
+    art_path = el.get('grandparentArt') if kind == 'episode' else (el.get('parentArt') if kind == 'season' else el.get('art'))
+    if art_path and str(art_path).startswith('/library/'):
+        card['art_path'] = art_path
     if wide:
         card['art'] = _img(el.get('art') or el.get('grandparentArt'), WIDE_W)
         duration = int(el.get('duration') or 0)

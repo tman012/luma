@@ -56,7 +56,7 @@ describe('v341e: an open frees the connections and starts its Plex art early', (
   });
   it('the art deadline latches the last backdrop that decoded for the open when the newer pick is still decoding', () => {
     const s = src('hooks/useSheetBackdrop.ts');
-    expect(s).toMatch(/const fallback = cur\.artCapped && present && !artIn \? good\.current\.url : null;/);
+    expect(s).toMatch(/const fallback = altIn \? alt : cur\.artCapped && present && !artIn \? good\.current\.url : null;/);
   });
 });
 describe('v341f: desktop content and backdrop start their fade on one trigger', () => {
@@ -108,7 +108,7 @@ describe('v341g: Tester PREP B1/B2', () => {
 describe('v341h: Designer NO on 876af98b', () => {
   it('B1: a Plex-card movie whose TMDb misses the wait reveals on its Plex art, loading from the Plex answer', () => {
     const m = src('hooks/useMovieDetail.ts');
-    expect(m).toMatch(/if \(!tmdbData && plexArt\) new Image\(\)\.src = plexArt;/);
+    expect(m).toMatch(/if \(!tmdbData && plexArt\) void preloadImage\(finalBackdropUrl\(plexArt\), 'high'\);/);
     expect(m).toMatch(/if \(!tmdbData && !parsed\.backdropUrl && plexArt\) parsed\.backdropUrl = plexArt;/);
   });
   it('B2: an owned show has its Plex season count, so Seasons is in the one reveal', () => {
@@ -117,5 +117,25 @@ describe('v341h: Designer NO on 876af98b', () => {
   it('B2b: the desktop bottom content has no second fade of its own (the one reveal fades it)', () => {
     expect(src('components/media/TvDetailModal/ExpandedLayout.tsx')).toMatch(/opacity: shelfOpen \? 0 : 1, \/\/ the one reveal fades it/);
     expect(src('components/media/MovieDetailModal/ExpandedLayout.tsx')).toMatch(/opacity: \(showSourcesShelf \|\| showCastShelf\) \? 0 : 1, \/\/ the one reveal fades it/);
+  });
+});
+
+describe('v341i: Tester PREP on 58ed7e21 (Plex art from the tap, one URL)', () => {
+  it('a tap and the P1 warm-up start the row or card art (the sheet URL) before the details', () => {
+    const m = src('services/modalPrefetch.ts');
+    expect(m).toMatch(/for \(const u of opts\.art \?\? \[\]\) if \(u\) void preloadImage\(u, opts\.open \? 'high' : 'low'\);/);
+    expect(src('services/searchApi.ts')).toMatch(/openWhenReady\(kind, ratingKey, tmdbId, el \?\? null, open, onClosed, resultArt\(item\)\)/);
+    expect(src('pages/MinimalHomePage.tsx')).toMatch(/openDetail\(modals, c\), undefined, cardArt\(c\)\)/);
+  });
+  it('one URL per Plex art: Home encoded paths and detail raw paths are the same image', async () => {
+    const { plexBackdrop } = await import('@/utils/image');
+    expect(plexBackdrop('/api/img/plex?url=%2Flibrary%2Fmetadata%2F92145%2Fart%2F1')).toBe(plexBackdrop('/api/img/plex?url=/library/metadata/92145/art/1'));
+  });
+  it('a movie never waits on TMDb first; the reveal takes TMDb art if decoded, else the Plex art', () => {
+    expect(src('hooks/useMovieDetail.ts')).not.toMatch(/Promise\.all\(\[plexPromise, tmdbPromise\]\)/);
+    expect(src('hooks/useSheetBackdrop.ts')).toMatch(/const altReady = cur\.capped && present && !artIn && altIn;/);
+    for (const k of ['CompactLayout', 'ExpandedLayout']) {
+      expect(src(`components/media/MovieDetailModal/${k}.tsx`), k).toMatch(/props\.openKey, !!liveDetail, finalBackdropUrl\(liveDetail\?\.plexArtUrl\)\);/);
+    }
   });
 });

@@ -1,7 +1,7 @@
 import { isMinimal } from '@/minimal';
 import { useState, useEffect, useRef } from 'react';
 import { pickBestTrailer } from '@/utils/pickBestTrailer';
-import { backdropUrl as tmdbBackdrop, logoImg, plexBackdrop } from '@/utils/image';
+import { backdropUrl as tmdbBackdrop, logoImg, plexBackdrop, plexSheetArt, finalBackdropUrl } from '@/utils/image';
 import {
   parsePlexResponse,
   parseTmdbResponse,
@@ -12,7 +12,7 @@ import {
 } from '@/utils/modalParsers';
 import { apiFetch } from '../apiClient';
 import type { Ratings as InlineRatings } from '@/utils/modalParsers';
-import { detailFetch, plexRatingsPath, remainingCap, titleRatingsPath } from '@/services/modalPrefetch';
+import { detailFetch, plexRatingsPath, preloadImage, remainingCap, titleRatingsPath } from '@/services/modalPrefetch';
 import { useModalColors } from './useModalColors';
 
 // ---------------------------------------------------------------------------
@@ -83,8 +83,20 @@ export function useMovieDetail(
                 .catch(() => null)
             : Promise.resolve(null);
 
-          const [plexData, tmdbRaced] = await Promise.all([plexPromise, tmdbPromise]);
+          // Never wait on TMDb first: the Plex answer names the Plex art, which starts loading now; TMDb gets the
+          // same brief wait as a Plex-only open.
+          const plexData = await plexPromise;
           if (cancelled) return;
+          let tmdbRaced: Record<string, unknown> | null = null;
+          if (tmdbId) {
+            const early = plexSheetArt(parsePlexResponse(plexData).plexBackdropUrl);
+            if (early) void preloadImage(early, 'high');
+            let t0 = 0;
+            tmdbRaced = await Promise.race([tmdbPromise,
+              new Promise<null>((res) => { t0 = window.setTimeout(() => res(null), remainingCap(TMDB_BACKDROP_WAIT_MS)); })]);
+            window.clearTimeout(t0);
+            if (cancelled) return;
+          }
 
           const parsed = parsePlexResponse(plexData);
           parsed.ratingKey = ratingKey;
@@ -101,7 +113,10 @@ export function useMovieDetail(
           let tmdbData = tmdbFirst;
           // The Plex art is this open's backdrop if TMDb misses its wait: start loading it now, not at the reveal.
           const plexArt = plexBackdrop(parsed.plexBackdropUrl);
-          if (!tmdbData && plexArt) new Image().src = plexArt;
+          // The exact URL the sheet shows (one download, decoded before the reveal), at high priority.
+          if (!tmdbData && plexArt) void preloadImage(finalBackdropUrl(plexArt), 'high');
+          // The Plex art is the sheet's fallback: shown when TMDb's backdrop hasn't decoded by the reveal.
+          parsed.plexArtUrl = plexArt;
           if (!tmdbData && parsed.tmdbId && parsed.tmdbId !== tmdbId) {
             let timer = 0;
             tmdbData = await Promise.race([

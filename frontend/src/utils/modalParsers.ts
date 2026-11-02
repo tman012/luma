@@ -43,6 +43,8 @@ export interface MediaDetail {
   ownershipSettled?: boolean;
   /** Plex-keyed open: TMDb (the backdrop pick) still out after its brief wait; the sheet waits to its art deadline. */
   backdropPending?: boolean;
+  /** Owned movie: the Plex art (sheet size), the reveal's backdrop when TMDb's hasn't decoded by then. */
+  plexArtUrl?: string | null;
   year: number | null;
   summary: string;
   contentRating: string | null;

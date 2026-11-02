@@ -100,7 +100,7 @@ describe('R3 layout (1440 and 1024)', () => {
     fireEvent.click(cards[0]!);
     // v324: Home's openWhenReady path (pressed card, then the popup).
     expect(cards[0]!.getAttribute('data-pressed')).toBe('true');
-    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: undefined, tmdbId: 438631, origin: 'search' }));
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ tmdbId: 438631, origin: 'search' })));
     fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Escape' });
     expect(screen.queryByTestId('r3-results')).toBeNull();
   });

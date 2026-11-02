@@ -206,7 +206,7 @@ export function CompactLayout(props: TvModalViewProps) {
   // The tap-time seed only stands in until the details load; after that the details (or the ownership lookup) decide,
   // so a stale card orb can't keep Watch in place of Add.
   const showOwnedNow = (loading || !liveShow) ? (showOwned || seedOwned === true) : (showOwned || !!liveShow.isOwned);
-  const titleState = useTitleReveal(logoInput(liveShow), liveShow?.title, liveShow?.backdropUrl || liveShow?.posterUrl);
+  const titleState = useTitleReveal(logoInput(liveShow), liveShow?.title, finalBackdropUrl(liveShow?.backdropUrl) || liveShow?.posterUrl);
   // Phone: `composed` once the details are in (or an error); the sheet itself moves on the seeded hero (useSeededHero),
   // and the one reveal (useOneReveal) decides when its content shows.
   const composed = !!error || (!loading && !!liveShow && titleState !== 'hold');

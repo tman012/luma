@@ -141,7 +141,7 @@ export function CompactLayout(props: MovieModalViewProps) {
     onUpgradeAdded,
     onWatchlistRemoved,
   } = props;
-  const titleState = useTitleReveal(logoInput(liveDetail), liveDetail?.title, liveDetail?.backdropUrl || liveDetail?.posterUrl);
+  const titleState = useTitleReveal(logoInput(liveDetail), liveDetail?.title, finalBackdropUrl(liveDetail?.backdropUrl) || liveDetail?.posterUrl);
   // Phone: `composed` once the details are in (or an error); the sheet itself moves on the seeded hero (useSeededHero),
   // and the one reveal (useOneReveal) decides when its content shows.
   const composed = !!error || (!loading && !!liveDetail && titleState !== 'hold');
@@ -151,7 +151,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   // ONE backdrop per open: the final (sharp) image, latched once decoded or at the cap, never swapped (useSheetBackdrop).
   // The hero (backdrop + title) is ONE unit: logo vs. text and the backdrop are decided together before the reveal
   // (1.2s cap from the tap), fade in once together, and never change for that open.
-  const sheetHero = useSheetHero(finalBackdropUrl(liveDetail?.backdropUrl), !!liveDetail && !liveDetail.backdropPending, liveDetail?.clearLogoUrl, logoInput(liveDetail) !== undefined, props.openKey, !!liveDetail);
+  const sheetHero = useSheetHero(finalBackdropUrl(liveDetail?.backdropUrl), !!liveDetail && !liveDetail.backdropPending, liveDetail?.clearLogoUrl, logoInput(liveDetail) !== undefined, props.openKey, !!liveDetail, finalBackdropUrl(liveDetail?.plexArtUrl));
   const sheetArt = sheetHero.art;
   const posterFill = liveDetail && !liveDetail.backdropUrl && !sheetArt ? liveDetail.posterUrl : null;
   // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
