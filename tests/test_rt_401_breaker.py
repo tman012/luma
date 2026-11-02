@@ -115,3 +115,60 @@ def test_redact_url():
     u = 'https://x/y?type=critic&api_key=abc123&token=zz&after=c1'
     out = rs.redact_url(u)
     assert 'abc123' not in out and 'zz' not in out and 'after=c1' in out
+
+
+def test_scores_only_cache_does_not_satisfy_reviews(scraper):
+    s, br, clock = scraper
+    s.session.rtcf_status = 200
+    s.get_reviews('Escape from L.A.', 1996, 1, 'movie', with_reviews=False)
+    assert s._get_cached(s.cache_key('Escape from L.A.', 1996, 1, 'movie', False))
+    assert s._get_cached(s.cache_key('Escape from L.A.', 1996, 1, 'movie')) is None
+    n = len(rtcf(s))
+    s.get_reviews('Escape from L.A.', 1996, 1, 'movie')
+    assert len(rtcf(s)) > n  # reviews request did its own fetch
+
+
+def test_rt_scores_warm_check_reads_scores_key(monkeypatch):
+    from app import main
+    keys = []
+    monkeypatch.setattr(main.rt_scraper, '_get_cached', lambda k: keys.append(k) or {'x': 1})
+    monkeypatch.setattr(main.rt_scraper, 'get_reviews',
+                        lambda *a, **k: {'success': True, 'critic_score': 1, 'audience_score': 2})
+    main._rt_scores('X', 2000, 'movie', warm='w')
+    assert keys and keys[0].endswith('_scores')
+
+
+def test_half_open_single_probe(scraper):
+    s, br, clock = scraper
+    br.record(401)
+    assert not br.allow()
+    clock.t += 61
+    assert br.allow() is True          # the one probe
+    assert br.allow() is False and br.allow() is False
+    br.record(401)                     # probe denied -> reopen, doubled
+    assert br.cooldown == 120 and not br.allow()
+    clock.t += 121
+    assert br.allow()
+    br.record(200)
+    assert br.allow() and br.allow()   # closed: everyone through
+
+
+def test_stale_probe_frees_slot(scraper):
+    s, br, clock = scraper
+    br.record(401)
+    clock.t += 61
+    assert br.allow()
+    assert not br.allow()
+    clock.t += br.PROBE_TIMEOUT + 1
+    assert br.allow()
+
+
+def test_breaker_thread_safe(scraper):
+    import threading
+    s, br, clock = scraper
+    br.record(401)
+    clock.t += 61
+    got = []
+    ts = [threading.Thread(target=lambda: got.append(br.allow())) for _ in range(50)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert got.count(True) == 1

@@ -11146,7 +11146,7 @@ def _rt_scores(title, year, media_type, warm=None):
     # A background warm-up scrapes RT only when the answer isn't cached and the warm cap/budget allow it.
     if warm:
         try:
-            cached = rt_scraper._get_cached(f"{media_type}_{str(title).lower()}_{year}_1")
+            cached = rt_scraper._get_cached(rt_scraper.cache_key(title, year, 1, media_type, False))
         except Exception:
             cached = None
         from app import omdb as _omdb
