@@ -7,6 +7,7 @@ Fetches critic and audience reviews from Rotten Tomatoes using the RTCF API
 import copy
 import re
 import time
+import threading
 import logging
 import requests
 from typing import Dict, List, Optional
@@ -29,17 +30,26 @@ class RTCFBreaker:
     on each consecutive denial, capped at `max_cooldown`), callers fall back
     to the page scrape, and one warning is logged per opening with a count of
     calls skipped since the last one instead of one line per request.
+    When the window ends the breaker is half-open: exactly one caller probes
+    RTCF; others keep skipping until that probe's status is recorded.
+
+    Note: breaker state is in-memory and per-process only; it resets on
+    restart and is not shared between worker processes.
     """
 
     DENY = (401, 403, 429)
+    PROBE_TIMEOUT = 60.0  # a probe that never records (exception) frees the slot after this
 
     def __init__(self, cooldown: float = 900.0, max_cooldown: float = 6 * 3600.0, clock=time.monotonic):
         self.base = cooldown
         self.max = max_cooldown
         self.clock = clock
+        self._lock = threading.Lock()
         self.reset()
 
     def reset(self):
+        self.probing = False
+        self.probe_started = 0.0
         self.open_until = 0.0
         self.cooldown = self.base
         self.denials = 0
@@ -47,12 +57,23 @@ class RTCFBreaker:
         self.last_status = None
 
     def allow(self) -> bool:
-        if self.clock() < self.open_until:
-            self.skipped += 1
-            return False
-        return True
+        with self._lock:
+            now = self.clock()
+            stale_probe = self.probing and now - self.probe_started > self.PROBE_TIMEOUT
+            if now < self.open_until or (self.probing and not stale_probe):
+                self.skipped += 1
+                return False
+            if self.denials:
+                self.probe_started = now
+                self.probing = True  # half-open: this caller is the single probe
+            return True
 
     def record(self, status: int):
+        with self._lock:
+            self._record(status)
+
+    def _record(self, status: int):
+        self.probing = False
         if status in self.DENY:
             if self.denials:
                 self.cooldown = min(self.cooldown * 2, self.max)
@@ -70,7 +91,8 @@ class RTCFBreaker:
             self.reset()
 
     def state(self) -> dict:
-        return {'open': self.clock() < self.open_until, 'denials': self.denials,
+        with self._lock:
+            return {'open': self.clock() < self.open_until, 'denials': self.denials,
                 'last_status': self.last_status, 'skipped': self.skipped}
 
 
@@ -136,6 +158,12 @@ class RTScraper:
             slugs.append(f"the_{slug}")
 
         return slugs
+
+    @staticmethod
+    def cache_key(title, year, max_reviews, media_type='movie', with_reviews=True) -> str:
+        """Scores-only results get their own key so they never satisfy a reviews request."""
+        key = f"{media_type}_{str(title).lower()}_{year}_{max_reviews}"
+        return key if with_reviews else key + "_scores"
 
     def _get_cached(self, cache_key: str) -> Optional[dict]:
         """Get cached result if still valid.
@@ -579,7 +607,8 @@ class RTScraper:
         media_type: 'movie' or 'tv'
         Returns aggregated review data or empty dict if not found.
         """
-        cache_key = f"{media_type}_{title.lower()}_{year}_{max_reviews}"
+        cache_key = self.cache_key(title, year, max_reviews, media_type,
+                                   with_reviews and max_reviews > 0)
 
         # Check cache first
         cached = self._get_cached(cache_key)
@@ -684,7 +713,7 @@ class RTScraper:
                 logger.debug("RT request failed for %s: %s", redact_url(url), type(e).__name__)
                 continue
             except Exception as e:
-                logger.debug(f"RT parse failed for {url}: {e}")
+                logger.debug("RT parse failed for %s: %s", redact_url(url), type(e).__name__)
                 continue
 
         # Not found - cache empty result to avoid repeated lookups
