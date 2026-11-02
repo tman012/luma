@@ -104,3 +104,18 @@ describe('v341g: Tester PREP B1/B2', () => {
     expect(t).toMatch(/setShowOwned\(result\.is_owned \|\| !!ratingKey\);/);
   });
 });
+
+describe('v341h: Designer NO on 876af98b', () => {
+  it('B1: a Plex-card movie whose TMDb misses the wait reveals on its Plex art, loading from the Plex answer', () => {
+    const m = src('hooks/useMovieDetail.ts');
+    expect(m).toMatch(/if \(!tmdbData && plexArt\) new Image\(\)\.src = plexArt;/);
+    expect(m).toMatch(/if \(!tmdbData && !parsed\.backdropUrl && plexArt\) parsed\.backdropUrl = plexArt;/);
+  });
+  it('B2: an owned show has its Plex season count, so Seasons is in the one reveal', () => {
+    expect(src('utils/modalParsers.ts')).toMatch(/numberOfSeasons: \(data\.childCount as number\) \|\| 0,/);
+  });
+  it('B2b: the desktop bottom content has no second fade of its own (the one reveal fades it)', () => {
+    expect(src('components/media/TvDetailModal/ExpandedLayout.tsx')).toMatch(/opacity: shelfOpen \? 0 : 1, \/\/ the one reveal fades it/);
+    expect(src('components/media/MovieDetailModal/ExpandedLayout.tsx')).toMatch(/opacity: \(showSourcesShelf \|\| showCastShelf\) \? 0 : 1, \/\/ the one reveal fades it/);
+  });
+});

@@ -497,7 +497,8 @@ export function parsePlexTvResponse(data: Record<string, unknown>): TvShowDetail
     cast,
     creators,
     network: null,
-    numberOfSeasons: 0,
+    // Plex's season count (childCount): the owned show's Seasons button is in the one reveal without TMDb.
+    numberOfSeasons: (data.childCount as number) || 0,
     ratingKey: (data.rating_key as number) ?? (data.ratingKey as number) ?? undefined,
     tmdbId: (data.tmdb_id as number) ?? undefined,
     tvdbId: (data.tvdb_id as number) ?? undefined,
