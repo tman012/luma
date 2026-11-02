@@ -5,7 +5,7 @@ import { _resetImageLoader, loadImage } from '@/loading/imageLoader';
  * logo URLs and starts loading those images, plus the color blur. When the
  * popup opens it reads the same cached responses, so images are already on
  * their way instead of waiting on a metadata round-trip. */
-import { _resetSheetPriority, afterSheetPriority, beginSheetPriority, sheetOpening, sheetOpens } from '@/loading/sheetPriority';
+import { _resetSheetPriority, afterSheetPriority, beginSheetPriority, keepHomePostersOnOpen, sheetOpening, sheetOpens } from '@/loading/sheetPriority';
 import { apiFetch } from '@/apiClient';
 import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import { colorsFromImage } from '@/utils/posterColors';
@@ -463,6 +463,8 @@ export async function openWhenReady(
 ): Promise<void> {
   if (pending) return;
   pending = true;
+  // A Home card's tap keeps the on-screen Home posters loading under it (v341o R1); a search row's holds them all.
+  keepHomePostersOnOpen(!!card?.closest('[data-testid^="card-"]') && !card.closest('[data-testid="r3-card"],[data-testid="phone-search-row"],[role="dialog"]'));
   tapAt = now();
   beginSheetPriority();
   dropOtherWarms([ratingKey, tmdbId], card ? tapTitle(card) : undefined);
