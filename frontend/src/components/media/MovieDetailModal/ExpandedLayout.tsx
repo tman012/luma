@@ -416,7 +416,11 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // ONE reveal (useOneReveal): backdrop, logo or title, meta, ratings and buttons together; the button set
   // (trailer, ownership) is decided at the reveal so the row never re-flows.
   useEndPriorityOnError(!loading && !!error && !liveDetail);
-  const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
+  // The card's own enter motion (scale 0.96 -> rest, 320 ms) runs first: a warm open revealed inside it, so the
+  // buttons crept 1-3 px as the scale finished (N1440 Tulsa). The reveal waits for the card to rest.
+  const cardRef = useRef<HTMLDivElement>(null);
+  const modalEntering = useModalMotion(phase, overlayRef, cardRef);
+  const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold' && artInFrame && !modalEntering, ratingsSettle.shown,
     sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey), sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);
@@ -661,8 +665,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // ---------------------------------------------------------------------------
   // Animation — tablet: opacity-only (skip scale/transform for GPU savings)
   // ---------------------------------------------------------------------------
-  const cardRef = useRef<HTMLDivElement>(null);
-  const modalEntering = useModalMotion(phase, overlayRef, cardRef);
 
   if (phase === 'gone') return null;
 

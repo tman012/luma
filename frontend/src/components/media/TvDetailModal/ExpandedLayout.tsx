@@ -1220,7 +1220,11 @@ export function ExpandedLayout(props: TvModalViewProps) {
   const ratingsSettle = useRatingsSettle(ratingsState.ratings, !!liveShow && ratingsDone(ratingsState, liveShow?.title), props.openKey, !!liveShow);
   // ONE reveal (useOneReveal): backdrop, logo or title, meta, ratings and buttons together.
   useEndPriorityOnError(!loading && !!error && !liveShow);
-  const reveal = useOneReveal(props.openKey, !loading && !!liveShow, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
+  // The card's own enter motion (scale 0.96 -> rest, 320 ms) runs first: a warm open revealed inside it, so the
+  // buttons crept 1-3 px as the scale finished (N1440 Tulsa). The reveal waits for the card to rest.
+  const cardRef = useRef<HTMLDivElement>(null);
+  const modalEntering = useModalMotion(phase, overlayRef, cardRef);
+  const reveal = useOneReveal(props.openKey, !loading && !!liveShow, sheetHero.state !== 'hold' && artInFrame && !modalEntering, ratingsSettle.shown,
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const show = useRevealFreeze(liveShow, reveal.revealed, props.openKey, TV_TEXT);
@@ -1331,8 +1335,6 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // ---------------------------------------------------------------------------
   // Animation
   // ---------------------------------------------------------------------------
-  const cardRef = useRef<HTMLDivElement>(null);
-  useModalMotion(phase, overlayRef, cardRef);
 
   if (phase === 'gone') return null;
 

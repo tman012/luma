@@ -44,7 +44,7 @@ describe('v341e: desktop reveal waits for its backdrop img element (warm opens: 
   it('movie and TV expanded', () => {
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
       const s = src(`components/media/${k}/ExpandedLayout.tsx`);
-      expect(s, k).toMatch(/sheetHero\.state !== 'hold' && artInFrame, /);
+      expect(s, k).toMatch(/sheetHero\.state !== 'hold' && artInFrame && !modalEntering, /);
       expect(s, k).toMatch(/onLoad=\{\(e\) => \{[^\n]*setArtPainted\(artEl\)\); \}\} onError=\{\(\) => setArtPainted\(artEl\)\}/);
       expect(s, k).toMatch(/!!artPaintedAt && artPaintedAt\.key === props\.openKey && artPaintedAt\.url === sheetArt/);
     }
