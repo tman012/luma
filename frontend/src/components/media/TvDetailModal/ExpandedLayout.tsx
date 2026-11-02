@@ -1529,8 +1529,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1,
                     // v341l: the backdrop's HERO_ANIM in the reveal commit (as the movie sheet); transform keeps its transition.
                     transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
-                    animation: sheetHero.state !== 'hold' && reveal.revealed ? HERO_ANIM : 'none',
-                    willChange: 'opacity', // its own layer, as CONTENT_WITH_HERO: one start time with the backdrop
+                    // v341m: no fade of its own: the row sits in the content layer and rides its CONTENT_WITH_HERO fade (one
+                    // compositor start for title and content; its own animation/transition started a frame or two late, B3/I1440).
+                    animation: 'none',
                     transform: shelfOpen ? 'translateY(-15vh)' : 'translateY(0)',
                   }}>
                     {sheetHero.state === 'logo' && sheetHero.logo ? (
@@ -1548,7 +1549,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
                       />
                     ) : null}
                     <h1 style={{
-                      ...titleTextStyle(sheetHero.state),
+                      // v341m: rastered while holding (the row is at opacity 0), so the reveal commit only flips opacity: a hidden
+                    // title first painted at the reveal landed a frame or two after the content (B3/I1440 +20-35 ms).
+                    ...(sheetHero.state === 'hold' ? { display: 'block' } : titleTextStyle(sheetHero.state)),
                       fontSize: t.titleFontSize,
                       fontWeight: 700,
                       color: '#fff',

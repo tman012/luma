@@ -946,8 +946,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 // v341l: the title/logo runs the backdrop's own HERO_ANIM in the reveal commit (a transition started a
                 // frame after the content's animation: title +20-30 ms); the cast-shelf transform keeps its transition.
                 transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
-                animation: sheetHero.state !== 'hold' && reveal.revealed ? HERO_ANIM : 'none',
-                willChange: 'opacity', // its own layer, as CONTENT_WITH_HERO: one start time with the backdrop
+                // v341m: no fade of its own: the row sits in the content layer and rides its CONTENT_WITH_HERO fade (one
+                // compositor start for title and content; its own animation/transition started a frame or two late, B3/I1440).
+                animation: 'none',
                 transform: showCastShelf ? 'translateY(-15vh)' : 'translateY(0)',
               }}>
                 {/* v341l: the candidate logo is mounted (hidden: the row is at opacity 0) while the hero holds, so the
@@ -968,7 +969,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 ) : null}
                 <h1
                   style={{
-                    ...titleTextStyle(sheetHero.state),
+                    // v341m: rastered while holding (the row is at opacity 0), so the reveal commit only flips opacity: a hidden
+                    // title first painted at the reveal landed a frame or two after the content (B3/I1440 +20-35 ms).
+                    ...(sheetHero.state === 'hold' ? { display: 'block' } : titleTextStyle(sheetHero.state)),
                     fontSize: t.titleFontSize,
                     fontWeight: 700,
                     color: '#fff',

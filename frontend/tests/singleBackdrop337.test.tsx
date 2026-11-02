@@ -163,8 +163,8 @@ describe('one backdrop per sheet open', () => {
       expect(c).toMatch(/data-hero-title=\{sheetHero\.state\}[\s\S]{0,200}opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1, transition: reducedMotion\(\) \? 'none' : HERO_FADE/);
       const e = src(`components/media/${k}/ExpandedLayout.tsx`);
       expect(e).toMatch(/revealStyle\(reveal\.revealed \? sheetHero\.state : 'hold'\), animation: reveal\.revealed \? HERO_ANIM : 'none'/);
-      // v341l: the desktop title runs the backdrop's HERO_ANIM in the reveal commit (same 0.45s ease-out fade).
-      expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1,[\s\S]{0,600}animation: sheetHero\.state !== 'hold' && reveal\.revealed \? HERO_ANIM : 'none'/);
+      // v341m: the desktop title has no fade of its own; it rides the content layer's CONTENT_WITH_HERO flip.
+      expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1,[\s\S]{0,600}transition: 'transform 0\.5s cubic-bezier\(0\.22, 1, 0\.36, 1\)',[\s\S]{0,400}animation: 'none'/);
     }
     expect(src('components/media/BackdropHero.tsx')).toMatch(/transition: reducedMotion\(\) \? 'none' : 'opacity 0\.45s ease-out'/);
   });
