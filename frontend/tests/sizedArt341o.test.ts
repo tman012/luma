@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { plexBackdrop, plexSheetArt, plexArtFromPath, finalBackdropUrl, PLEX_ART_W, PLEX_ART_H } from '@/utils/image';
-import { beginSheetPriority, endSheetPriority, _resetSheetPriority } from '@/loading/sheetPriority';
+import { keepHomePostersOnOpen, beginSheetPriority, endSheetPriority, _resetSheetPriority } from '@/loading/sheetPriority';
 
 describe('v341o desktop Plex art is the 1280x720 transcode (Tester N1440/I1440, Designer O2)', () => {
   it('desktop never names the unsized original', () => {
@@ -31,8 +31,11 @@ describe('v341q/r the hold: decoded and on-screen images never stripped, off-scr
   });
   it('v341r: an on-screen poster still loading is never stripped: low while the sheet opens, its own priority back after', () => {
     const on = img('/on.jpg', {}); on.setAttribute('fetchpriority', 'auto');
-    beginSheetPriority(); expect(on.getAttribute('src')).toBe('/on.jpg'); expect(on.hasAttribute('data-sheet-held')).toBe(false); expect(on.getAttribute('fetchpriority')).toBe('low');
+    keepHomePostersOnOpen(true); beginSheetPriority(); expect(on.getAttribute('src')).toBe('/on.jpg'); expect(on.hasAttribute('data-sheet-held')).toBe(false); expect(on.getAttribute('fetchpriority')).toBe('low');
     endSheetPriority(); expect(on.getAttribute('src')).toBe('/on.jpg'); expect(on.getAttribute('fetchpriority')).toBe('auto');
+  });
+  it('v341r: a search open holds on-screen posters (I1440 sockets)', () => {
+    const on = img('/on.jpg', {}); beginSheetPriority(); expect(on.getAttribute('src')).toBeNull(); endSheetPriority(); expect(on.getAttribute('src')).toBe('/on.jpg');
   });
   it('v341r: an off-screen one is held until the reveal', () => {
     const off = img('/off.jpg', { top: 5000, bottom: 5150 });

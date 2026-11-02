@@ -7,6 +7,11 @@ export const SHEET_PRIORITY_MS = 6000;
 let until = 0;
 let timer = 0;
 const listeners = new Set<() => void>();
+/** A tap from a Home card: its on-screen posters are never stripped (R1/y). A search open still holds them: behind a
+ *  slow TMDb the search grid's on-screen posters held all six HTTP/1.1 sockets (I1440: 4.35 s, no art). */
+let keepOnScreen = false;
+let nextFromHome = false;
+export function keepHomePostersOnOpen(fromHome: boolean): void { nextFromHome = fromHome; }
 /** On-screen page images lowered for the open (their own fetchpriority, restored at the reveal or Close). */
 const lowered: { img: HTMLImageElement; prio: string | null }[] = [];
 type Paused = { img: HTMLImageElement; src: string | null; srcset: string | null; prio: string | null; vis: boolean };
@@ -55,7 +60,7 @@ function hold(img: HTMLImageElement, vis: boolean): void {
   }
   if (img.complete && src) return;
   if (src == null && srcset == null) return;
-  if (vis) {
+  if (vis && keepOnScreen) {
     if (!lowered.some((l) => l.img === img)) { lowered.push({ img, prio: img.getAttribute('fetchpriority') }); img.setAttribute('fetchpriority', 'low'); }
     return;
   }
@@ -138,6 +143,7 @@ function resume(then: () => void): void {
 
 export function beginSheetPriority(): void {
   if (typeof window === 'undefined') return;
+  keepOnScreen = nextFromHome; nextFromHome = false;
   opens += 1;
   until = Date.now() + SHEET_PRIORITY_MS;
   window.clearTimeout(timer);
