@@ -283,10 +283,8 @@ export function openDetail(modals: { openMovie: (o: object) => void; openTv: (o:
   const key = Number(c.key);
   if (c.type === 'movie') return modals.openMovie({ ratingKey: key, origin: 'continue_watching' });
   const show = Number(c.show_key || c.key);
-  if (c.type === 'episode' && c.season && c.episode) {
-    return modals.openTv({ ratingKey: show, origin: 'continue_watching',
-      episodeContext: { seasonNumber: c.season, episodeNumber: c.episode, episodeRatingKey: key } });
-  }
+  // A Continue Watching episode opens its show's sheet, as every other rail's TV card does (same sheet, show logo,
+  // one reveal); the episode-intent sheet (episodeContext) hid the show's hero and logo.
   modals.openTv({ ratingKey: show, origin: 'recently_added_tv' });
 }
 

@@ -117,8 +117,7 @@ describe('Home', () => {
     };
     await sheetUpDown();
     fireEvent.click(screen.getByTestId('card-10'));
-    await waitFor(() => expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 9, origin: 'continue_watching',
-      episodeContext: { seasonNumber: 1, episodeNumber: 2, episodeRatingKey: 10 } }), { timeout: 1500 });
+    await waitFor(() => expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 9, origin: 'recently_added_tv' }), { timeout: 1500 });
     await sheetUpDown();
     fireEvent.click(screen.getByTestId('card-31'));
     await waitFor(() => expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 31, origin: 'recently_added_tv' }), { timeout: 1500 });
