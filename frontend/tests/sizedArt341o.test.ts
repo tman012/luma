@@ -50,6 +50,17 @@ describe('v341q/r the hold: decoded and on-screen images never stripped, off-scr
     const off = img('/off.jpg', { top: 5000, bottom: 5150 });
     beginSheetPriority(); expect(off.getAttribute('src')).toBeNull(); endSheetPriority(); expect(off.getAttribute('src')).toBe('/off.jpg');
   });
+  it('Reviewer F1: two overlapping hold-ends each release their own rest at 400 ms', () => {
+    vi.useFakeTimers();
+    img('/on1.jpg', {}); const off1 = img('/off1.jpg', { top: 5000, bottom: 5150 });
+    beginSheetPriority(); endSheetPriority();               // hold-end 1 at t=0: its rest at 400
+    vi.advanceTimersByTime(200);
+    const off2 = img('/off2.jpg', { top: 6000, bottom: 6150 });
+    beginSheetPriority(); endSheetPriority();               // hold-end 2 at t=200: its rest at 600
+    vi.advanceTimersByTime(200); expect(off1.getAttribute('src')).toBe('/off1.jpg'); expect(off2.getAttribute('src')).toBeNull();
+    // A shared timer: hold-end 1's release cleared hold-end 2's, so off2 waited on loads that never came.
+    vi.advanceTimersByTime(200); expect(off2.getAttribute('src')).toBe('/off2.jpg');
+  });
   it('off-screen ones resume after the on-screen ones load, or after 400 ms', () => {
     vi.useFakeTimers();
     const on = img('/on.jpg', {}); const off = img('/off.jpg', { top: 5000, bottom: 5150 });

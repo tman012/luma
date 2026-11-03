@@ -121,7 +121,8 @@ function restore(p: Paused): void {
  *  Home decodes), once those load or after RESUME_REST_MS: all at once, the viewport's posters shared six sockets with
  *  every lazy image in the margin and the queued warm-ups (y: 1.05 s after Close). */
 const RESUME_REST_MS = 400;
-let restTimer = 0;
+/** Each hold-end's own release timer (Reviewer F1: one shared timer let an overlapping hold-end cancel another's). */
+const restTimers = new Set<number>();
 function resume(then: () => void): void {
   watcher?.disconnect(); watcher = null;
   const all = paused.splice(0);
@@ -131,9 +132,10 @@ function resume(then: () => void): void {
   first.forEach(restore);
   const wait = [...first.map((p) => p.img), ...low.map((l) => l.img)].filter((i) => !i.complete);
   let left = wait.length, done = false;
-  const go = () => { if (done) return; done = true; if (typeof window !== 'undefined') window.clearTimeout(restTimer); rest.forEach(restore); then(); };
+  let timer = 0;
+  const go = () => { if (done) return; done = true; if (typeof window !== 'undefined') { window.clearTimeout(timer); restTimers.delete(timer); } rest.forEach(restore); then(); };
   if (!left || typeof window === 'undefined') { go(); return; }
-  restTimer = window.setTimeout(go, RESUME_REST_MS);
+  timer = window.setTimeout(go, RESUME_REST_MS); restTimers.add(timer);
   const one = () => { left -= 1; if (left <= 0) go(); };
   for (const i of wait) {
     i.addEventListener('load', one, { once: true });
@@ -160,4 +162,4 @@ export function endSheetPriority(): void {
   const fns = Array.from(listeners); listeners.clear();
   resume(() => { for (const f of fns) { try { f(); } catch { /* a listener's error stays its own */ } } });
 }
-export function _resetSheetPriority(): void { if (typeof window !== 'undefined') window.clearTimeout(restTimer); until = 0; listeners.clear(); paused.length = 0; lowered.length = 0; offPage.clear(); watcher?.disconnect(); watcher = null; }
+export function _resetSheetPriority(): void { if (typeof window !== 'undefined') restTimers.forEach((t) => window.clearTimeout(t)); restTimers.clear(); until = 0; listeners.clear(); paused.length = 0; lowered.length = 0; offPage.clear(); watcher?.disconnect(); watcher = null; }
