@@ -123,23 +123,29 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: artIn ? art! : fallback, artDone: true });
   }, [art, artOk, alt, altOk, artSettled, present, logo, logoOk, logoSettled, cur, openKey]);
   const logoFailed = useCallback(() => setSt(s => (s.key === openKey && s.title === 'logo' ? { ...s, title: 'text', logo: null } : s)), [openKey]);
-  // v345: the URL the hero's <img> has fully loaded (its own src: the desktop mounts the candidate logo while the hero
-  // holds, so its load can land before the latch). The latch already required this URL to decode, and `complete` /
-  // the load event only report a fully loaded image: a half-loaded logo never hides (overdraws) the text.
-  const [shownUrl, setShownUrl] = useState<string | null>(null);
+  // v346: the latch already required this exact logo URL to decode, so the text hides in the latch commit itself (no
+  // second render: v345's ref/latch setState re-rendered the whole sheet in the reveal commit and the phone backdrop
+  // painted a frame or more after the content, Tester Escape from L.A. 390). Only a logo <img> that is missing or not
+  // fully loaded when the latch commits (a stall; a half-loaded image never hides the text) is marked unpainted:
+  // the text stays until that element's own load event (its own src, so a load during the hold counts).
+  const [unpainted, setUnpainted] = useState<string | null>(null);
   const logoEl = useRef<HTMLImageElement | null>(null);
-  const markLoaded = useCallback((el: HTMLImageElement | null) => {
-    const u = el?.getAttribute('src');
-    if (el && u && el.complete && el.naturalWidth > 0) setShownUrl(u);
+  const loadedSrc = useRef<string | null>(null);
+  const isLoaded = (el: HTMLImageElement | null, u: string) =>
+    !!el && el.getAttribute('src') === u && (loadedSrc.current === u || (el.complete && el.naturalWidth > 0));
+  const logoLoaded = useCallback((e: { currentTarget: HTMLImageElement }) => {
+    const u = e.currentTarget.getAttribute('src');
+    loadedSrc.current = u;
+    setUnpainted(p => (p && p === u ? null : p));
   }, []);
-  // onLoad records the element's own src (it can load during the hold, before the latch names the logo).
-  const logoLoaded = useCallback((e: { currentTarget: HTMLImageElement }) => markLoaded(e.currentTarget), [markLoaded]);
-  const logoRef = useCallback((el: HTMLImageElement | null) => { logoEl.current = el; markLoaded(el); }, [markLoaded]);
-  // At the latch: a candidate that already loaded during the hold (no new ref call or load event) is rechecked.
+  const logoRef = useCallback((el: HTMLImageElement | null) => { logoEl.current = el; }, []);
   const latched = cur.title === 'logo' ? cur.logo : null;
-  useLayoutEffect(() => { if (latched) markLoaded(logoEl.current); }, [latched, markLoaded]);
+  useLayoutEffect(() => {
+    if (latched && !isLoaded(logoEl.current, latched)) setUnpainted(latched);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latched]);
   return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, deadline: cur.capped, artDeadline: !!cur.artCapped, logoFailed,
-    logoShown: cur.title === 'logo' && !!cur.logo && shownUrl === cur.logo, logoRef, logoLoaded };
+    logoShown: !!latched && unpainted !== latched, logoRef, logoLoaded };
 }
 /** The same fade for an element that mounts at the latch (the desktop backdrop img). */
 export const HERO_ANIM = 'm-crossfade 0.45s ease-out both';
