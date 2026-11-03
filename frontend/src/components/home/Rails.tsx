@@ -2,7 +2,8 @@ import { ownedKey } from '@/services/ownership';
 import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
 /** Phone-first rails on Luma's purple-navy glass. */
 import { CARD_SIZES, cardSrcSet, img, type Card, type Rail } from './homeApi';
-import { plexSheetArt, PLEX_ART_PATH } from '@/utils/image';
+import { logoImg, plexSheetArt, PLEX_ART_PATH } from '@/utils/image';
+import type { KnownLogo } from '@/services/modalPrefetch';
 import { FONT } from '@/components/start/StartUI';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MOTION, reducedMotion } from '@/theme/motion';
@@ -38,10 +39,22 @@ export function cardIds(c: Card): { kind: 'movie' | 'tv'; ratingKey?: number; tm
   return c.tmdb_hint ? { kind, ratingKey, tmdbId: c.tmdb_hint } : { kind, ratingKey };
 }
 
+/** cw-logo: the sheet's exact logo image URL for a card whose logo the server already resolved (none otherwise). */
+export function cardLogo(c: Card): string | null {
+  return c.clearlogo_url ? logoImg(c.clearlogo_url) : null;
+}
+/** The card's known logo answer for its TMDb id (primes the sheet's clearlogo lookup), or undefined. */
+export function cardLogoOf(c: Card, kind: 'movie' | 'tv', tmdbId?: number): KnownLogo | undefined {
+  if (!tmdbId) return undefined;
+  if (c.clearlogo_url) return { kind, tmdbId, url: c.clearlogo_url };
+  if (c.has_logo === false) return { kind, tmdbId, url: null };
+  return undefined;
+}
+
 /** Warm the detail popup (metadata, backdrop, logo, color blur). */
 export function warmCard(c: Card, ratings = false): Promise<void> {
   const { kind, ratingKey, tmdbId } = cardIds(c);
-  return warmDetail(kind, ratingKey, tmdbId, { ratings, art: cardArt(c) }).catch(() => {});
+  return warmDetail(kind, ratingKey, tmdbId, { ratings, art: cardArt(c), logo: cardLogoOf(c, kind, tmdbId) }).catch(() => {});
 }
 
 /** The proxy's exact art pattern (app/main.py _PLEX_IMG_PATH, art only). */

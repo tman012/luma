@@ -73,3 +73,93 @@ def test_clearlogo_is_never_browser_cached(test_app):
     with mock.patch.object(m, '_fetch_one_logo', side_effect=RuntimeError('x')):
         r = client.get('/api/clearlogo/5?type=tv')
     assert r.status_code == 500 and 'no-store' in r.headers.get('Cache-Control', '')
+
+
+# --- cw-logo cold path: the logo on the card, a fast first logo fetch ---------------------------------------------
+
+def _logo_cfg(cache, warm_result=None):
+    """home_rails with a fake logo cache: cache maps (tid, type) -> path|None (known); warm fills it."""
+    calls = []
+
+    def cached(tid, mtype):
+        k = (tid, mtype)
+        return (True, cache[k]) if k in cache else (False, None)
+
+    def warm(pairs):
+        from concurrent.futures import Future
+        calls.append(list(pairs))
+        out = {}
+        for p in pairs:
+            if warm_result and p in warm_result:
+                cache[p] = warm_result[p]
+            f = Future(); f.set_result(cache.get(p)); out[p] = f
+        return out
+    return cached, warm, calls
+
+
+def test_cards_carry_the_cached_logo_and_a_known_no_logo():
+    cached, warm, calls = _logo_cfg({(603, 'movie'): '/m.png', (6191, 'tv'): None})
+    with mock.patch.dict(home_rails._cfg, logo_cached=cached, logo_warm=warm):
+        out = home_rails.with_logos([{'key': '900', 'type': 'movie', 'tmdb_hint': 603},
+                                     {'key': '4591', 'type': 'episode', 'show_key': '4501', 'tmdb_hint': 6191},
+                                     {'key': 'x', 'type': 'movie'}])
+    assert out[0]['clearlogo_url'] == 'https://image.tmdb.org/t/p/original/m.png'
+    assert out[1]['has_logo'] is False and 'clearlogo_url' not in out[1]
+    assert 'clearlogo_url' not in out[2] and calls == []
+
+
+def test_cw_waits_briefly_for_uncached_logos_other_rails_only_warm():
+    cached, warm, calls = _logo_cfg({}, warm_result={(6191, 'tv'): '/s.png'})
+    with mock.patch.dict(home_rails._cfg, logo_cached=cached, logo_warm=warm):
+        cw = home_rails.with_logos([{'key': '4591', 'type': 'episode', 'tmdb_hint': 6191}], wait_s=0.2)
+    assert cw[0]['clearlogo_url'].endswith('/s.png') and calls == [[(6191, 'tv')]]
+    cached, warm, calls = _logo_cfg({}, warm_result={(7, 'tv'): '/r.png'})
+    with mock.patch.dict(home_rails._cfg, logo_cached=cached, logo_warm=warm):
+        rail = home_rails.with_logos([{'key': '1', 'type': 'show', 'tmdb_id': 7}])
+    assert 'clearlogo_url' not in rail[0] and calls == [[(7, 'tv')]]
+
+
+def test_cw_logo_wait_is_bounded():
+    import time as _t
+    from concurrent.futures import Future
+    never = Future()
+    with mock.patch.dict(home_rails._cfg, logo_cached=lambda *a: (False, None), logo_warm=lambda pairs: {p: never for p in pairs}):
+        t0 = _t.monotonic()
+        out = home_rails.with_logos([{'key': '1', 'type': 'movie', 'tmdb_hint': 5}], wait_s=0.1)
+    assert _t.monotonic() - t0 < 0.5 and 'clearlogo_url' not in out[0]
+
+
+def test_logo_cache_peek_never_fetches():
+    m._logo_cache.clear(); m._logo_cache_ts.clear()
+    with mock.patch.object(m.requests, 'get', side_effect=AssertionError('no network')):
+        assert m._cached_logo(1, 'tv') == (False, None)
+    m._logo_cache['tv:1'] = '/a.png'; m._logo_cache_ts['tv:1'] = m.time.time()
+    assert m._cached_logo(1, 'tv') == (True, '/a.png')
+    m._logo_cache.clear(); m._logo_cache_ts.clear()
+
+
+def test_img_tmdb_accepts_logo_size_w300_and_serves_a_repeat_from_memory(test_app):
+    m._TMDB_IMG_MEM.clear()
+    seen = []
+
+    def fake_fetch(url):
+        seen.append(url)
+        return 200, 'image/png', b'PNGDATA'
+    client = test_app.test_client()
+    with mock.patch.object(m, '_img_fetch', side_effect=fake_fetch):
+        r1 = client.get('/api/img/tmdb?path=/l.png&size=w300')
+        r2 = client.get('/api/img/tmdb?path=/l.png&size=w300')
+    assert r1.status_code == 200 and r2.data == b'PNGDATA'
+    assert seen == ['https://image.tmdb.org/t/p/w300/l.png']
+    m._TMDB_IMG_MEM.clear()
+
+
+def test_logo_warm_resolves_and_pulls_the_image_into_memory():
+    m._TMDB_IMG_MEM.clear(); m._logo_cache.clear(); m._logo_cache_ts.clear()
+    with mock.patch.object(m, '_fetch_one_logo', return_value='/w.png'), \
+         mock.patch.object(m, '_img_fetch', return_value=(200, 'image/png', b'X')) as f:
+        futs = m._warm_logos([(9, 'tv')])
+        assert futs[(9, 'tv')].result(timeout=5) == '/w.png'
+    assert m._tmdb_img_mem_get('https://image.tmdb.org/t/p/w300/w.png')
+    assert {c.args[0] for c in f.call_args_list} == {'https://image.tmdb.org/t/p/w300/w.png', 'https://image.tmdb.org/t/p/original/w.png'}
+    m._TMDB_IMG_MEM.clear()

@@ -4,6 +4,7 @@
  * fails, or at REVEAL_CAP_MS. Once the text title shows it stays (no late jump to a logo). */
 import { useEffect, useState } from 'react';
 import { remainingCap } from '@/services/modalPrefetch';
+import { reuseLoad } from '@/hooks/useLoadedImage';
 
 export type TitleState = 'hold' | 'logo' | 'text';
 /** Safety cap: past it, everything reveals at once anyway (text title and/or
@@ -65,8 +66,11 @@ export function useTitleReveal(
     }
     if (timedOut) { setLogo('text'); return; }
     let alive = true;
-    const img = new Image();
     const done = (ok: boolean) => { if (alive) setLogo(s => (s === 'hold' ? (ok ? 'logo' : 'text') : s)); };
+    // cw-logo: the load the tap started (the image loader promotes a queued one) is reused, not a new download.
+    const shared = reuseLoad(logoUrl);
+    if (shared) { void shared.then(done); return () => { alive = false; }; }
+    const img = new Image();
     img.onload = () => {
       const p = typeof img.decode === 'function' ? img.decode() : Promise.resolve();
       p.then(() => done(true), () => done(true));

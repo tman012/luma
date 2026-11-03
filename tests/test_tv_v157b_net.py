@@ -14,6 +14,7 @@ from tests.test_tv_polish_v156 import _Resp, _Sess
 @pytest.fixture
 def proxy(owner, monkeypatch):  # noqa: F811
     _Sess.calls, _Sess.answer = [], _Resp()
+    app.main._TMDB_IMG_MEM.clear()   # cw-logo: the small TMDb image memory cache starts empty for every test
     monkeypatch.setattr(app.main.requests, 'Session', _Sess)
     monkeypatch.setattr(app.main.requests, 'get', lambda *a, **k: pytest.fail('a bare requests.get'))
     return owner
@@ -26,7 +27,7 @@ def _img(c, path, host=None):
     return c.get('/api/img/tmdb', query_string=q, environ_base=REMOTE, headers=HDR)
 
 
-@pytest.mark.parametrize('host,url', [(None, 'https://image.tmdb.org/t/p/w500/abc.jpg'),
+@pytest.mark.parametrize('host,url', [(None, 'https://image.tmdb.org/t/p/w300/abc.jpg'),   # cw-logo: w300 is a TMDb size
                                       ('tvdb', 'https://artworks.thetvdb.com/abc.jpg')])
 def test_both_branches_stream_without_proxy_env_or_redirects(proxy, host, url):
     r = _img(proxy, '/abc.jpg', host)

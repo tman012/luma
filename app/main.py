@@ -11821,6 +11821,54 @@ def _fetch_one_logo(tmdb_id: int, media_type: str, raise_errors: bool = False) -
     return path
 
 
+def _cached_logo(tmdb_id: int, media_type: str):
+    """(known, file_path) from the logo cache, no network: known False when it isn't cached (or expired)."""
+    key = f"{media_type}:{tmdb_id}"
+    if key in _logo_cache and (time.time() - _logo_cache_ts.get(key, 0)) < _LOGO_CACHE_TTL:
+        return True, _logo_cache[key]
+    return False, None
+
+
+_LOGO_WARM_POOL = None
+_LOGO_WARM_LOCK = threading.Lock()
+_logo_warming: set = set()
+LOGO_WARM_WORKERS = 4
+
+
+def _warm_logos(pairs, logo_size: str = 'w300'):
+    """Background: resolve these (tmdb_id, media_type) logos into the cache and pull their logo image into the
+    small image LRU, a bounded pool, each id once at a time. Returns {pair: future}."""
+    global _LOGO_WARM_POOL
+    from concurrent.futures import ThreadPoolExecutor
+    out = {}
+    with _LOGO_WARM_LOCK:
+        if _LOGO_WARM_POOL is None:
+            _LOGO_WARM_POOL = ThreadPoolExecutor(max_workers=LOGO_WARM_WORKERS, thread_name_prefix='logo-warm')
+        for tid, mtype in pairs:
+            if (tid, mtype) in _logo_warming:
+                continue
+            _logo_warming.add((tid, mtype))
+
+            def job(tid=tid, mtype=mtype):
+                try:
+                    path = _fetch_one_logo(tid, mtype)
+                    if path:
+                        for size in {logo_size, 'original'}:
+                            url = f"https://image.tmdb.org/t/p/{size}{path}"
+                            if not _tmdb_img_mem_get(url):
+                                st, ct, body = _img_fetch(url)
+                                if st == 200 and body:
+                                    _tmdb_img_mem_put(url, ct, body)
+                    return path
+                except Exception:  # noqa: BLE001 - a warm only
+                    return None
+                finally:
+                    with _LOGO_WARM_LOCK:
+                        _logo_warming.discard((tid, mtype))
+            out[(tid, mtype)] = _LOGO_WARM_POOL.submit(job)
+    return out
+
+
 @app.route('/api/tmdb/logos', methods=['POST'])
 def get_logos_batch():
     """Batch-fetch clearlogo paths for multiple TMDb IDs.
@@ -13361,12 +13409,53 @@ class _ImgTooLarge(Exception):
     pass
 
 
+# cw-logo: one pooled keep-alive session for upstream images (a new Session per image paid a TLS handshake on every
+# first fetch), and a small in-memory LRU of small TMDb images (logos, ~10-60 KB) so a warmed logo is served at once.
+from collections import OrderedDict  # noqa: E402
+_IMG_SESSION_LOCAL = threading.local()
+_TMDB_IMG_MEM: 'OrderedDict[str, tuple]' = OrderedDict()
+_TMDB_IMG_MEM_LOCK = threading.Lock()
+TMDB_IMG_MEM_ITEM_MAX = 256 * 1024
+TMDB_IMG_MEM_TOTAL_MAX = 24 * 1024 * 1024
+
+
+def _img_session() -> requests.Session:
+    """This thread's pooled session (rebuilt if requests.Session itself was replaced, e.g. by a test double)."""
+    held = getattr(_IMG_SESSION_LOCAL, 'held', None)
+    if held is None or held[0] is not requests.Session:
+        sess = requests.Session()
+        sess.trust_env = False
+        held = (requests.Session, sess)
+        _IMG_SESSION_LOCAL.held = held
+    return held[1]
+
+
+def _tmdb_img_mem_get(url: str):
+    with _TMDB_IMG_MEM_LOCK:
+        hit = _TMDB_IMG_MEM.get(url)
+        if hit:
+            _TMDB_IMG_MEM.move_to_end(url)
+        return hit
+
+
+def _tmdb_img_mem_put(url: str, ctype: str, body: bytes) -> None:
+    if not body or len(body) > TMDB_IMG_MEM_ITEM_MAX:
+        return
+    with _TMDB_IMG_MEM_LOCK:
+        _TMDB_IMG_MEM[url] = (ctype, body)
+        _TMDB_IMG_MEM.move_to_end(url)
+        total = sum(len(b) for _, b in _TMDB_IMG_MEM.values())
+        while total > TMDB_IMG_MEM_TOTAL_MAX and _TMDB_IMG_MEM:
+            _, (_, b) = _TMDB_IMG_MEM.popitem(last=False)
+            total -= len(b)
+
+
 def _img_fetch(url: str):
     """(status, content type, body) for one upstream image: no proxy env, no redirects, streamed and
     capped at IMG_PROXY_MAX_BYTES (a bigger Content-Length is refused before reading; a body that runs
     past the cap is cut off). Raises _ImgTooLarge or requests.RequestException."""
-    with requests.Session() as sess:
-        sess.trust_env = False
+    sess = _img_session()
+    if sess is not None:
         resp = sess.get(url, timeout=15, allow_redirects=False, stream=True)
         try:
             ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
@@ -13390,6 +13479,9 @@ def _img_fetch(url: str):
 
 def _img_response(url: str, label: str):
     from flask import Response
+    hit = _tmdb_img_mem_get(url) if label == 'TMDb' else None
+    if hit:
+        return Response(hit[1], content_type=hit[0], headers={'Cache-Control': 'public, max-age=604800'})
     try:
         status, ctype, body = _img_fetch(url)
     except _ImgTooLarge:
@@ -13400,6 +13492,8 @@ def _img_response(url: str, label: str):
         return 'Error fetching image', 502
     if status != 200 or not body:
         return 'Image not found', 404
+    if label == 'TMDb':
+        _tmdb_img_mem_put(url, ctype, body)
     return Response(body, content_type=ctype, headers={'Cache-Control': 'public, max-age=604800'})
 
 
@@ -13435,7 +13529,8 @@ def img_tmdb_proxy():
         return _img_tvdb(tmdb_path)
 
     # Validate size parameter
-    valid_sizes = {'w92', 'w154', 'w185', 'w342', 'w500', 'w780', 'w1280', 'original'}
+    # w45/w300: TMDb's logo sizes (phones ask for logos at w300; it fell back to w500 before, a bigger first fetch).
+    valid_sizes = {'w45', 'w92', 'w154', 'w185', 'w300', 'w342', 'w500', 'w780', 'w1280', 'original'}
     if size not in valid_sizes:
         size = 'w500'
 
@@ -22212,7 +22307,8 @@ from app import home_rails as _home_rails
 _home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user,
                  trakt_connected=_connectors.trakt_connected, fetch_trakt=_fetch_trakt_rail,
                  fetch_poster=_watchlist_rail_poster,
-                 owned_lookup=lambda tid, kind: fast_search_index.find_by_tmdb(tid, kind))
+                 owned_lookup=lambda tid, kind: fast_search_index.find_by_tmdb(tid, kind),
+                 logo_cached=_cached_logo, logo_warm=_warm_logos)
 app.register_blueprint(_home_rails.bp)
 
 

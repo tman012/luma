@@ -87,6 +87,12 @@ export function loadImage(url: string | null | undefined, priority?: 'high' | 'l
   return entry.ready;
 }
 
+/** True when the loader already has `url` (queued, loading or decoded): a surface that needs it then reuses that
+ *  load (loadImage promotes a queued one to high priority) instead of starting its own download. */
+export function hasLoad(url: string | null | undefined): boolean {
+  return !!url && entries.has(url);
+}
+
 /** True once `url` is decoded and held in memory. */
 export function isDecoded(url: string | null | undefined): boolean {
   return !!url && !!entries.get(url)?.done;

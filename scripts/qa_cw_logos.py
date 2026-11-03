@@ -10,6 +10,9 @@ Uses this install's own configured Plex and TMDb settings, exactly as the app do
 Inside the app container (from the app folder):
     python3 scripts/qa_cw_logos.py            # table
     python3 scripts/qa_cw_logos.py --json     # one JSON object per item
+    python3 scripts/qa_cw_logos.py --home-json home.json
+        # also: whether each card in a saved /api/home answer (DevTools > Network > /api/home > Save response, or the
+        # harness's capture) carries the server-resolved logo (clearlogo_url) or a known no-logo (has_logo false)
 """
 from __future__ import annotations
 
@@ -56,6 +59,7 @@ def _logo(tmdb_id: int, media_type: str, api_key: str):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--json', action='store_true')
+    ap.add_argument('--home-json', help='a saved /api/home response (read only)')
     args = ap.parse_args()
     # Never write: a settings migration or bootstrap in this process must not save (the running app owns the file).
     SettingsManager._save = lambda self, *a, **k: None  # type: ignore[method-assign]
@@ -69,6 +73,12 @@ def main() -> int:
     t0 = time.monotonic()
     items = home_rails.continue_watching(plex_service)
     print(f'# {len(items)} Continue Watching items (onDeck {_ms(t0)} ms); TV index built in this process: {bool(tv_plex._shows)}')
+    served = {}
+    if args.home_json:
+        with open(args.home_json, encoding='utf-8') as fh:
+            home = json.load(fh)
+        for c in home.get('continue_watching') or []:
+            served[str(c.get('key'))] = c
     rows = []
     for c in items:
         kind = c.get('type')
@@ -87,6 +97,12 @@ def main() -> int:
                'tmdb_used': used, 'hint_matches_plex': (c.get('tmdb_hint') == plex_tmdb) if c.get('tmdb_hint') else None,
                'logo': path, 'logo_status': status, 'plex_ms': plex_ms, 'logo_ms': _ms(t2),
                'plex_guids': meta.get('guids') or meta.get('guid')}
+        if args.home_json:
+            sc = served.get(str(c.get('key')))
+            row['card_in_home_json'] = sc is not None
+            row['card_logo'] = (sc or {}).get('clearlogo_url')
+            row['card_has_logo_false'] = (sc or {}).get('has_logo') is False
+            row['card_tmdb_hint'] = (sc or {}).get('tmdb_hint')
         rows.append(row)
         if args.json:
             print(json.dumps(row, default=str))
@@ -96,9 +112,13 @@ def main() -> int:
         for r in rows:
             print(f"{str(r['type']):8} {str(r['title'])[:32]:32} {r['opens']:12} {str(r['tmdb_hint'] or '-'):>8} "
                   f"{str(r['plex_tmdb_id'] or '-'):>8} {str(r['tmdb_used'] or '-'):>8} {r['plex_ms']:>7} {r['logo_ms']:>7}  "
-                  f"{'YES ' + r['logo'] if r['logo'] else 'NO (' + r['logo_status'] + ')'}")
+                  f"{'YES ' + r['logo'] if r['logo'] else 'NO (' + r['logo_status'] + ')'}"
+                  + (f"  card: {'logo on card' if r.get('card_logo') else ('no-logo on card' if r.get('card_has_logo_false') else ('NOT in home json' if not r.get('card_in_home_json') else 'no logo field'))}" if args.home_json else ''))
         miss = [r for r in rows if not r['logo']]
         print(f'# logos resolved: {len(rows) - len(miss)}/{len(rows)}')
+        if args.home_json:
+            on = sum(1 for r in rows if r.get('card_logo'))
+            print(f'# cards carrying the logo in /api/home: {on}/{len(rows) - len(miss)} of those with a logo')
     return 0
 
 

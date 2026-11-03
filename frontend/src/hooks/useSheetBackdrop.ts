@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { tapElapsed } from '@/services/modalPrefetch';
 import type { TitleState } from '@/hooks/useTitleReveal';
 import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
+import { reuseLoad } from '@/hooks/useLoadedImage';
 
 export const BACKDROP_CAP_MS = SURFACE_DEADLINE_MS;
 /** A cold open's backdrop-only deadline (PM, v341): past BACKDROP_CAP_MS the whole reveal still waits up to this
@@ -29,6 +30,9 @@ function useDecoded(url: string | null): { url: string | null; ok: boolean } {
   useEffect(() => {
     if (!url) return;
     let live = true;
+    // cw-logo: a load the tap (or a warm-up) already started for this URL is reused and promoted, not duplicated.
+    const shared = reuseLoad(url);
+    if (shared) { void shared.then((ok) => { if (live) setDone({ url, ok }); }); return () => { live = false; }; }
     const im = new Image();
     (im as HTMLImageElement & { fetchPriority?: string }).fetchPriority = 'high';
     im.src = url;
@@ -63,6 +67,7 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
   const [st, setSt] = useState<St>(() => fresh(openKey));
   const cur = st.key === openKey ? st : fresh(openKey);
   const artOk = useDecoded(cur.artDone ? null : art ?? null);
+  // cw-logo: the logo decode reuses the tap's own load when there is one (useDecoded), never a second download.
   const logoOk = useDecoded(cur.title ? null : logo ?? null);
   // `alt`: a second sharp backdrop (an owned movie's Plex art), loaded in parallel: the reveal takes `art` when it has
   // decoded, else `alt` (never past the reveal: the latch is final).

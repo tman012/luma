@@ -150,6 +150,20 @@ export function clearlogoPath(kind: 'movie' | 'tv', tmdbId: number): string {
   return `/api/clearlogo/${tmdbId}${kind === 'tv' ? '?type=tv' : ''}`;
 }
 
+/** cw-logo: a logo answer the server already gave on the card (url null: known to have none). */
+export interface KnownLogo { kind: 'movie' | 'tv'; tmdbId: number; url: string | null }
+/** Seeds the sheet's clearlogo lookup with the card's known answer (memory only, the shared detail cache's TTL), so
+ *  the sheet settles its logo the moment it knows the id, without a round trip. A real answer already there wins. */
+export function primeClearlogo(k: KnownLogo | null | undefined): void {
+  if (!k || !k.tmdbId) return;
+  const url = clearlogoPath(k.kind, k.tmdbId);
+  const hit = cache.get(url);
+  if (hit && Date.now() - hit.at < DETAIL_TTL_MS) return;
+  const body = JSON.stringify({ clearlogo_url: k.url });
+  cache.set(url, { at: Date.now(), p: Promise.resolve({ ok: true, status: 200, body, type: 'application/json' }), ac: null });
+  if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value as string);
+}
+
 /** A failed clearlogo lookup is retried this often, this far apart, before the title settles as text. */
 export const LOGO_RETRIES = 2;
 export const LOGO_RETRY_MS = 120;
@@ -188,9 +202,11 @@ function flushSkippedWarms(): void {
 }
 export async function warmDetail(
   kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number,
-  opts: { images?: boolean; ratings?: boolean; open?: boolean; search?: boolean; art?: (string | null | undefined)[] } = {},
+  opts: { images?: boolean; ratings?: boolean; open?: boolean; search?: boolean; art?: (string | null | undefined)[]; logo?: KnownLogo } = {},
 ): Promise<void> {
   if (!ratingKey && !tmdbId) return;
+  // cw-logo: a logo the card already names seeds the lookup (any warm-up; nothing is fetched for it here).
+  primeClearlogo(opts.logo);
   // A background warm-up (hover, row focus) never starts while a sheet opens: the open's art and details own the
   // connections until its reveal (v341l: hover warms of other rows held the sockets the tapped art needed).
   // v341n: it is queued, not dropped: it runs once the window ends (one per title; the newest options win).
@@ -479,9 +495,15 @@ if (typeof window !== 'undefined' && !(window as { __lumaPress?: boolean }).__lu
 export async function openWhenReady(
   kind: 'movie' | 'tv', ratingKey: number | undefined, tmdbId: number | undefined,
   card: HTMLElement | null, open: () => void, onClosed?: () => void, art?: (string | null | undefined)[],
+  logo?: KnownLogo,
 ): Promise<void> {
   if (pending) return;
   pending = true;
+  // cw-logo: a logo the card names starts downloading at the tap, at high priority (the open's hold pauses and drops
+  // only low-priority warm-ups; this load is the sheet's own: the hero's decode reuses it, see useLoadedImage).
+  primeClearlogo(logo);
+  const logoUrl = logo?.url ? logoImg(logo.url) : null;
+  if (logoUrl) void preloadImage(logoUrl, 'high');
   // A Home card's tap leaves its on-screen posters loading (v341r); a search row's open holds them (I1440).
   keepHomePostersOnOpen(!!card?.closest('[data-testid^="card-"]') && !card.closest(SEARCH_SURFACE + ',[role="dialog"]'));
   tapAt = now();
@@ -499,7 +521,7 @@ export async function openWhenReady(
   let timer = 0;
   try {
     await Promise.race([
-      warmDetail(kind, ratingKey, tmdbId, { open: true, art }).catch(() => {}),
+      warmDetail(kind, ratingKey, tmdbId, { open: true, art, logo }).catch(() => {}),
       new Promise<void>((res) => { timer = window.setTimeout(res, OPEN_WAIT_MS); }),
     ]);
   } finally {

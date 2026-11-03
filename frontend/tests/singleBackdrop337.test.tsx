@@ -106,7 +106,7 @@ describe('one backdrop per sheet open', () => {
   it('preload at tap: the warm-up started by the tap downloads the same final image', () => {
     const s = src('services/modalPrefetch.ts');
     expect(s).toMatch(/preloadImage\(\(ratingKey && \(opts\.art \?\? \[\]\)\.find\(Boolean\)\) \|\| finalBackdropUrl\(path \? tmdbBackdrop\(path\) : plexBackdrop\), opts\.open \? 'high' : 'low'\)/);
-    expect(s).toMatch(/tapAt = now\(\);[\s\S]*warmDetail\(kind, ratingKey, tmdbId, \{ open: true, art \}\)/);
+    expect(s).toMatch(/tapAt = now\(\);[\s\S]*warmDetail\(kind, ratingKey, tmdbId, \{ open: true, art(, logo)? \}\)/);
   });
 
   it('no seed frame: the sheets never hand the tapped poster or a second layer to the backdrop', () => {

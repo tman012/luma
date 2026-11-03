@@ -8,6 +8,9 @@ export interface Card {
   show_key?: string; season?: number; episode?: number;
   /** Plex cards (cw-logo): the TMDb id of what the tap opens (the movie, or an episode's/season's show). A hint only. */
   tmdb_hint?: number;
+  /** cw-logo: the title's TMDb clearlogo when the server already knows it (has_logo false: known to have none). */
+  clearlogo_url?: string | null;
+  has_logo?: boolean;
   poster: string | null; art?: string | null; progress?: number;
   /** The Plex art's raw path (the sheet's backdrop), loaded from the tap. */
   art_path?: string | null;

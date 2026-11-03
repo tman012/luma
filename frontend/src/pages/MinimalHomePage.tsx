@@ -6,7 +6,7 @@ import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { FONT, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
-import { HomeRails, SkeletonCrossfade, SkeletonRails, WYM_RAIL_ID, cardArt, cardIds, railCss } from '@/components/home/Rails';
+import { HomeRails, SkeletonCrossfade, SkeletonRails, WYM_RAIL_ID, cardArt, cardIds, cardLogoOf, railCss } from '@/components/home/Rails';
 import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
 import { pageDecode } from '@/loading/sheetPriority';
@@ -44,7 +44,7 @@ export function MinimalHomePage() {
   // tapped poster shows a pressed state meanwhile, 600 ms cap).
   const openCard = (c: Card, el?: HTMLElement | null) => {
     const { kind, ratingKey, tmdbId } = cardIds(c);
-    void openWhenReady(kind, ratingKey, tmdbId, el ?? null, () => openDetail(modals, c), undefined, cardArt(c));
+    void openWhenReady(kind, ratingKey, tmdbId, el ?? null, () => openDetail(modals, c), undefined, cardArt(c), cardLogoOf(c, kind, tmdbId));
   };
 
   const ready = !loading && authenticated && !startInProgress;

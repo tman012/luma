@@ -72,10 +72,75 @@ def init(*, get_plex: Callable[[], Any], get_current_user: Callable[[], Optional
          trakt_connected: Callable[[], bool] = lambda: False,
          fetch_trakt: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
          fetch_poster: Optional[Callable[[int], Optional[str]]] = None,
-         owned_lookup: Optional[Callable[[int, str], Optional[Dict[str, Any]]]] = None):
+         owned_lookup: Optional[Callable[[int, str], Optional[Dict[str, Any]]]] = None,
+         logo_cached: Optional[Callable[[int, str], Any]] = None,
+         logo_warm: Optional[Callable[..., Dict[Any, Any]]] = None):
     _cfg.update(get_plex=get_plex, get_current_user=get_current_user,
                 trakt_connected=trakt_connected, fetch_trakt=fetch_trakt, fetch_poster=fetch_poster,
-                owned_lookup=owned_lookup)
+                owned_lookup=owned_lookup, logo_cached=logo_cached, logo_warm=logo_warm)
+
+
+# cw-logo: Continue Watching waits at most this long for logos it doesn't have cached yet (resolved in parallel by a
+# bounded pool); every other rail takes only what is cached and warms the rest in the background for the next load.
+CW_LOGO_BUDGET_S = 0.35
+TMDB_LOGO_BASE = 'https://image.tmdb.org/t/p/original'
+
+
+def _logo_target(card: Dict[str, Any]):
+    tid = card.get('tmdb_hint') or card.get('tmdb_id')
+    try:
+        tid = int(tid) if tid else None
+    except (TypeError, ValueError):
+        tid = None
+    if not tid:
+        return None
+    return tid, ('movie' if card.get('type') == 'movie' else 'tv')
+
+
+def with_logos(cards: List[Dict[str, Any]], wait_s: float = 0.0) -> List[Dict[str, Any]]:
+    """Copies of the cards with `clearlogo_url` (the TMDb logo the sheet would resolve) where it is known: from the
+    server's logo cache, else from a background warm awaited at most `wait_s` in total. A card whose logo isn't known
+    yet carries none (the sheet resolves it as before); a known 'no logo' carries `has_logo: False`."""
+    cached, warm = _cfg.get('logo_cached'), _cfg.get('logo_warm')
+    if not cached or not cards:
+        return cards
+    out, missing = [], {}
+    for c in cards:
+        t = _logo_target(c) if isinstance(c, dict) else None
+        if not t:
+            out.append(c); continue
+        try:
+            known, path = cached(*t)
+        except Exception:  # noqa: BLE001
+            known, path = False, None
+        c = dict(c)
+        if known:
+            if path:
+                c['clearlogo_url'] = TMDB_LOGO_BASE + path
+            else:
+                c['has_logo'] = False
+        else:
+            missing.setdefault(t, []).append(c)
+        out.append(c)
+    if missing and warm:
+        try:
+            futs = warm(list(missing))
+        except Exception:  # noqa: BLE001
+            futs = {}
+        if wait_s > 0 and futs:
+            from concurrent.futures import wait as _wait
+            _wait(list(futs.values()), timeout=wait_s)
+            for t, cs in missing.items():
+                try:
+                    known, path = cached(*t)
+                except Exception:  # noqa: BLE001
+                    known, path = False, None
+                for c in cs:
+                    if known and path:
+                        c['clearlogo_url'] = TMDB_LOGO_BASE + path
+                    elif known:
+                        c['has_logo'] = False
+    return out
 
 
 def owned_card(card: Dict[str, Any]) -> Dict[str, Any]:
@@ -670,7 +735,9 @@ def home():
                  (': ' + ', '.join(dropped)) if dropped else '')
     if cw_items is None and not out_rails and dropped:
         return jsonify({'continue_watching': [], 'rails': [], 'plex': False})
-    cw_items = cw_items or []
+    cw_items = with_logos(cw_items or [], CW_LOGO_BUDGET_S)
+    for r in out_rails:
+        r['items'] = with_logos(r['items'])
     resp = jsonify({'continue_watching': cw_items, 'rails': out_rails, 'plex': True})
     resp.headers['Cache-Control'] = 'no-store'
     return resp
