@@ -27,12 +27,14 @@ KINDS = ('backdrop', 'logo')
 DEFAULT_CAP_MB = 512
 FAIL_RETRY_S = 600
 MAX_FILE_BYTES = 25 * 1024 * 1024
+# v348 (Designer): backdrops are kept at most this wide (TMDb w1920, or resized here): a 3840 original is 1.4-1.9 MB.
+BACKDROP_MAX_W = 1920
 _MAGIC = ((b'\xff\xd8\xff', 'jpg', 'image/jpeg'), (b'\x89PNG\r\n\x1a\n', 'png', 'image/png'),
           (b'RIFF', 'webp', 'image/webp'))
 CTYPES = {'jpg': 'image/jpeg', 'png': 'image/png', 'webp': 'image/webp'}
 
 Key = Tuple[str, int]
-# resolve(type, id) -> {'backdrop': url|None, 'logo': url|None}  (None: the title has none)
+# resolve(type, id) -> {'backdrop': url|None, 'logo': url|None, 'backdrop_textless': bool}  (None: the title has none)
 Resolver = Callable[[str, int], Dict[str, Optional[str]]]
 # download(url) -> bytes (raises on failure)
 Downloader = Callable[[str], bytes]
@@ -59,6 +61,22 @@ def valid(type_: str, id_: str, kind: Optional[str] = None) -> Optional[Key]:
     if not (s.isascii() and s.isdigit()) or len(s) > 10 or int(s) <= 0:
         return None
     return type_, int(s)
+
+
+def fit_backdrop(body: bytes, max_w: int = BACKDROP_MAX_W) -> bytes:
+    """A backdrop wider than max_w, resized to it (JPEG); anything else as it is (or when Pillow can't read it)."""
+    try:
+        from io import BytesIO
+        from PIL import Image
+        im = Image.open(BytesIO(body))
+        if im.width <= max_w:
+            return body
+        h = round(im.height * max_w / im.width)
+        out = BytesIO()
+        im.convert('RGB').resize((max_w, h), Image.LANCZOS).save(out, 'JPEG', quality=86, optimize=True)
+        return out.getvalue()
+    except Exception:
+        return body
 
 
 def _sniff(body: bytes) -> Optional[str]:
@@ -98,6 +116,10 @@ class WlImageStore:
 
     def present(self, key: Key) -> Dict[str, bool]:
         return {k: self.path(key, k) is not None for k in KINDS}
+
+    def textless(self, key: Key) -> bool:
+        """The stored backdrop is TMDb's textless art (no language): it may sit behind a logo."""
+        return (self._dir(key) / 'textless').is_file()
 
     # -- the watchlist -----------------------------------------------------------------------------------------
     def sync(self, type_: str, ids: Iterable[object]) -> None:
@@ -202,6 +224,8 @@ class WlImageStore:
                 continue
             try:
                 body = self._download(url)
+                if kind == 'backdrop' and body:
+                    body = fit_backdrop(body)
                 ext = _sniff(body or b'')
                 if not ext or len(body) > MAX_FILE_BYTES:
                     raise ValueError('not an image')
@@ -213,6 +237,12 @@ class WlImageStore:
                 tmp = d / f'.{kind}.part'
                 tmp.write_bytes(body)
                 os.replace(tmp, d / f'{kind}.{ext}')
+                if kind == 'backdrop':
+                    mark = d / 'textless'
+                    if urls.get('backdrop_textless'):
+                        mark.write_bytes(b'')
+                    elif mark.exists():
+                        mark.unlink()
             except Exception as e:
                 ok = False
                 self._fail(key, e)
@@ -233,7 +263,7 @@ class WlImageStore:
             return []
         out = []
         for p in self.root.glob('*/*/*'):
-            if p.is_file() and not p.name.startswith('.'):
+            if p.is_file() and not p.name.startswith('.') and p.name != 'textless':
                 st = p.stat()
                 out.append((st.st_mtime, st.st_size, p))
         return out

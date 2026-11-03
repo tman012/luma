@@ -166,7 +166,7 @@ def test_watchlist_items_name_their_local_images(test_app, store):
         m._wl_sync_and_annotate('movie', items)
     assert items[0]['wl_images']['backdrop'].endswith('/api/wl-image/movie/578/backdrop')
     assert items[0]['wl_images']['logo'].endswith('/api/wl-image/movie/578/logo')
-    assert items[1]['wl_images'] == {'backdrop': None, 'logo': None}
+    assert items[1]['wl_images'] == {'backdrop': None, 'logo': None, 'backdrop_textless': False}
     s.drain()
     assert s.present(('movie', 603))['backdrop'], 'a new watchlist title is fetched (background)'
     with test_app.test_request_context('/api/watchlist'):
@@ -195,3 +195,66 @@ def test_background_worker_never_blocks_the_request(tmp_path):
 def test_service_worker_never_caches_api_paths():
     sw = open(os.path.join(os.path.dirname(__file__), '..', 'static', 'sw.js'), encoding='utf-8').read()
     assert "p.startsWith('/api/')) return false" in sw
+
+
+# v348 (Designer) -----------------------------------------------------------------------------------------------
+def _jpeg(w, h):
+    from io import BytesIO
+    from PIL import Image
+    b = BytesIO(); Image.new('RGB', (w, h), (10, 20, 30)).save(b, 'JPEG'); return b.getvalue()
+
+
+def test_backdrops_are_stored_at_most_1920_wide(tmp_path):
+    from io import BytesIO
+    from PIL import Image
+    big = _jpeg(3840, 2160)
+    s, _ = make(tmp_path, download=lambda u: big if u.endswith('.jpg') else PNG)
+    s.sync('movie', [1]); s.drain()
+    im = Image.open(s.path(('movie', 1), 'backdrop'))
+    assert im.size == (1920, 1080)
+    small = _jpeg(1280, 720)
+    assert w.fit_backdrop(small) == small
+
+
+def test_textless_flag_is_kept_with_the_backdrop_and_pruned_with_it(tmp_path, test_app, monkeypatch):
+    s, _ = make(tmp_path, resolve=lambda t, i: {'backdrop': 'https://img/b.jpg', 'logo': 'https://img/l.png', 'backdrop_textless': True})
+    s.sync('tv', [5]); s.drain()
+    assert s.textless(('tv', 5))
+    monkeypatch.setattr(m, '_wl_store_obj', s)
+    items = [{'tmdb_id': 5}]
+    with test_app.test_request_context('/api/watchlist/tv'):
+        m._wl_sync_and_annotate('tv', items)
+    assert items[0]['wl_images']['backdrop_textless'] is True
+    assert all(p.name != 'textless' for _, _, p in s.files())
+    s.sync('tv', [])
+    assert not (tmp_path / 'wl' / 'tv' / '5').exists()
+
+
+def test_resolve_prefers_the_textless_backdrop_when_there_is_a_logo(monkeypatch):
+    class R:
+        def __init__(self, data): self.data = data
+        def raise_for_status(self): pass
+        def json(self): return self.data
+    seen = []
+
+    def get(url, params=None, timeout=None):
+        seen.append(url)
+        if url.endswith('/images'):
+            return R({'backdrops': [
+                {'file_path': '/en.jpg', 'iso_639_1': 'en', 'vote_average': 9},
+                {'file_path': '/low.jpg', 'iso_639_1': None, 'vote_average': 4},
+                {'file_path': '/best.jpg', 'iso_639_1': None, 'vote_average': 7},
+            ]})
+        return R({'backdrop_path': '/withtext.jpg'})
+    monkeypatch.setattr(m.requests, 'get', get)
+    monkeypatch.setattr(m.settings, 'get', lambda k, d=None: 'k' if k == 'apis.tmdb.api_key' else d)
+    monkeypatch.setattr(m, '_fetch_one_logo', lambda *a, **k: '/logo.png')
+    r = m._wl_resolve('tv', 153312)
+    assert r == {'backdrop': 'https://image.tmdb.org/t/p/w1920/best.jpg',
+                 'logo': 'https://image.tmdb.org/t/p/original/logo.png', 'backdrop_textless': True}
+    monkeypatch.setattr(m, '_fetch_one_logo', lambda *a, **k: None)   # no logo: backdrop_path, no images call
+    n = len(seen)
+    r = m._wl_resolve('movie', 1)
+    assert r['backdrop'] == 'https://image.tmdb.org/t/p/w1920/withtext.jpg' and r['backdrop_textless'] is False
+    assert not any(u.endswith('/images') for u in seen[n:])
+    assert m._wl_textless([{'file_path': '/a.jpg', 'iso_639_1': 'fr'}]) is None   # no textless: backdrop_path

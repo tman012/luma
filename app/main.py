@@ -13561,7 +13561,9 @@ _wl_store_lock = threading.Lock()
 
 
 def _wl_resolve(type_: str, tmdb_id: int) -> dict:
-    """The full-resolution TMDb URLs of a title's sheet backdrop and clearlogo (None: it has none)."""
+    """The TMDb URLs of a title's sheet backdrop (w1920) and clearlogo (original; None: it has none). With a logo the
+    backdrop is the textless one (no language, highest vote: the logo never sits over a second title); backdrop_path
+    only when no textless image exists (v348, Designer)."""
     api_key = settings.get('apis.tmdb.api_key') or Config.TMDB_API_KEY
     if not api_key:
         raise RuntimeError('no TMDb key')
@@ -13570,8 +13572,26 @@ def _wl_resolve(type_: str, tmdb_id: int) -> dict:
     r.raise_for_status()
     bd = (r.json() or {}).get('backdrop_path')
     logo = _fetch_one_logo(tmdb_id, type_, raise_errors=True)
-    img = 'https://image.tmdb.org/t/p/original'
-    return {'backdrop': f"{img}{bd}" if bd else None, 'logo': f"{img}{logo}" if logo else None}
+    textless = False
+    if logo:
+        ri = requests.get(f"{base}/{type_}/{tmdb_id}/images",
+                          params={'api_key': api_key, 'include_image_language': 'null'}, timeout=10)
+        ri.raise_for_status()
+        pick = _wl_textless((ri.json() or {}).get('backdrops') or [])
+        if pick:
+            bd, textless = pick, True
+    img = 'https://image.tmdb.org/t/p'
+    return {'backdrop': f"{img}/w1920{bd}" if bd else None, 'logo': f"{img}/original{logo}" if logo else None,
+            'backdrop_textless': textless}
+
+
+def _wl_textless(backdrops: list) -> Optional[str]:
+    """The textless backdrop (iso_639_1 null) with the highest vote, or None."""
+    cands = [b for b in backdrops if b.get('iso_639_1') in (None, '') and b.get('file_path')]
+    if not cands:
+        return None
+    cands.sort(key=lambda b: (b.get('vote_average') or 0, b.get('vote_count') or 0, b.get('width') or 0), reverse=True)
+    return cands[0]['file_path']
 
 
 def _wl_download(url: str) -> bytes:
@@ -13611,6 +13631,7 @@ def _wl_sync_and_annotate(type_: str, items: list) -> None:
                 continue
             have = store.present((type_, int(tid)))
             i['wl_images'] = {k: (_wl_url(type_, int(tid), k) if have[k] else None) for k in ('backdrop', 'logo')}
+            i['wl_images']['backdrop_textless'] = bool(have['backdrop'] and store.textless((type_, int(tid))))
     except Exception as e:
         logger.warning(f"wl-images sync failed: {e}")
 

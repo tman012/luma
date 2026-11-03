@@ -47,7 +47,7 @@ const srcs = () => Array.from(document.querySelectorAll('img')).map((i) => i.get
 
 describe('wl-images: Watchlist sheet opens on the local images', () => {
   it('parses the payload flag (only /api/wl-image/ URLs)', () => {
-    expect(parseWlImages({ backdrop: LOCAL.backdrop, logo: null })).toEqual({ backdrop: LOCAL.backdrop, logo: null });
+    expect(parseWlImages({ backdrop: LOCAL.backdrop, logo: null, backdrop_textless: true })).toEqual({ backdrop: LOCAL.backdrop, logo: null, backdropTextless: true });
     expect(parseWlImages({ backdrop: null, logo: null })).toBeNull();
     expect(parseWlImages({ backdrop: 'https://evil/x.jpg' })).toBeNull();
     expect(parseWlImages(undefined)).toBeNull();
@@ -78,4 +78,42 @@ describe('wl-images: Watchlist sheet opens on the local images', () => {
       expect(s.some((u) => u.includes('tmdb-bd.jpg'))).toBe(true);
     });
   }
+});
+
+import { withLocalArt, localArt } from '@/services/localArt';
+describe('v348 (Designer): local art rules', () => {
+  const art = { backdrop: '/api/wl-image/tv/5/backdrop', logo: '/api/wl-image/tv/5/logo', backdropTextless: true };
+  it('owned or Plex art: the backdrop stays Plex (only the logo is local)', () => {
+    expect(withLocalArt({ backdropUrl: '/plex.jpg', plexArtUrl: '/plex.jpg', clearLogoUrl: null }, art))
+      .toMatchObject({ backdropUrl: '/plex.jpg', clearLogoUrl: art.logo, logoSettled: true });
+    expect(withLocalArt({ backdropUrl: '/plex.jpg', isOwned: true }, art)!.backdropUrl).toBe('/plex.jpg');
+  });
+  it('a textless local backdrop fills the textless field (TV); one with text never replaces textless art', () => {
+    expect(withLocalArt({ backdropUrl: '/t.jpg', backdropTextlessUrl: '/tl.jpg' }, art))
+      .toMatchObject({ backdropUrl: '/t.jpg', backdropTextlessUrl: art.backdrop });
+    expect(withLocalArt({ backdropUrl: '/t.jpg', backdropTextlessUrl: '/tl.jpg' }, { ...art, backdropTextless: false }))
+      .toMatchObject({ backdropUrl: '/t.jpg', backdropTextlessUrl: '/tl.jpg' });
+    expect(withLocalArt({ backdropUrl: '/t.jpg' }, { ...art, backdropTextless: false })!.backdropUrl).toBe(art.backdrop);
+    expect(withLocalArt({ backdropUrl: '/m.jpg' }, art)!.backdropUrl).toBe(art.backdrop);   // movie: the backdrop field
+  });
+  it('phones keep their TMDb sizes: nothing local is registered at a phone width (minimal)', async () => {
+    const win = window as unknown as { __LUMA_MINIMAL__?: boolean };
+    const was = win.__LUMA_MINIMAL__; win.__LUMA_MINIMAL__ = true;
+    const w = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    setLocalArt('movie', 777, LOCAL);
+    expect(localArt('movie', 777)).toBeNull();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
+    win.__LUMA_MINIMAL__ = was;
+  });
+  it('the same title from another entry point after the Watchlist sheet closed: its usual art', async () => {
+    layoutMode.mode = 'expanded';
+    await openWl(LOCAL);
+    expect(srcs().some((u) => u.includes('/api/wl-image/'))).toBe(true);
+    cleanup(); _resetModalPrefetch();
+    expect(localArt('movie', 603)).toBeNull();
+    await openWl(null);   // e.g. search: nothing registered by this open
+    expect(srcs().some((u) => u.includes('/api/wl-image/'))).toBe(false);
+    expect(srcs().some((u) => u.includes('tmdb-bd.jpg'))).toBe(true);
+  });
 });
