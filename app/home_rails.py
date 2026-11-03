@@ -456,6 +456,23 @@ def _sections_or_none(plex) -> Optional[List[Dict[str, Any]]]:
             for d in root.findall('./Directory') if d.get('key')]
 
 
+def _tmdb_hint(el: ET.Element, kind: str, show_key: Optional[str]) -> Optional[int]:
+    """The TMDb id of the title a card opens: a movie's/show's own Guid tags (includeGuids) or legacy agent guid; an
+    episode's or season's show from the TV index (show ratingKey -> ids) or its legacy grandparent/parent guid."""
+    from app import tv_plex
+    try:
+        if kind in ('movie', 'show'):
+            return tv_plex.show_ids(el.get('guid'), [g.get('id') for g in el.findall('Guid') if g.get('id')])[0]
+        if kind in ('episode', 'season') and show_key:
+            known = tv_plex._shows.get(str(show_key))
+            if known and known[0]:
+                return known[0]
+            return tv_plex.show_ids(el.get('grandparentGuid') if kind == 'episode' else el.get('parentGuid'))[0]
+    except Exception:  # noqa: BLE001 - a hint only; the sheet resolves the id itself
+        return None
+    return None
+
+
 def _card(el: ET.Element, wide: bool = False) -> Optional[Dict[str, Any]]:
     """A rail card from a Plex <Video> or <Directory>."""
     kind = el.get('type', '')
@@ -484,6 +501,12 @@ def _card(el: ET.Element, wide: bool = False) -> Optional[Dict[str, Any]]:
     # Tapping a card opens the detail popup: episodes and seasons open their show.
     if show_key:
         card['show_key'] = show_key
+    # cw-logo: the TMDb id of what the tap opens (the movie, or the episode's/season's show), so the open starts the
+    # clearlogo and TMDb details at the tap like a search row does (Plex's validated id still decides). Never an
+    # episode's own id. None when Plex names no TMDb id (the sheet then resolves it from the Plex details as before).
+    hint = _tmdb_hint(el, kind, show_key)
+    if hint:
+        card['tmdb_hint'] = hint
     if kind == 'episode' and el.get('parentIndex') and el.get('index'):
         card['season'], card['episode'] = int(el.get('parentIndex')), int(el.get('index'))
     # The sheet's Plex art (its raw path, as the detail answer names it): a tap starts loading it at once.
@@ -511,7 +534,7 @@ def _items(root: Optional[ET.Element], wide: bool = False) -> List[Dict[str, Any
 
 
 def continue_watching(plex) -> List[Dict[str, Any]]:
-    return _items(plex._get('/library/onDeck', params={'X-Plex-Container-Start': 0,
+    return _items(plex._get('/library/onDeck', params={'X-Plex-Container-Start': 0, 'includeGuids': 1,
                                                        'X-Plex-Container-Size': CONTINUE_LIMIT}, timeout=10),
                   wide=True)
 

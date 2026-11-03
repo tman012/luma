@@ -32,7 +32,10 @@ export function cardIds(c: Card): { kind: 'movie' | 'tv'; ratingKey?: number; tm
     const rk = Number(c.key) || Number(c.rating_key) || (c.title ? ownedKey({ title: c.title, year: /^\d{4}$/.test(c.subtitle || '') ? Number(c.subtitle) : null, mediaType: kind, tmdbId: c.tmdb_id }) : undefined);
     return rk ? { kind, tmdbId: c.tmdb_id, ratingKey: rk } : { kind, tmdbId: c.tmdb_id };
   }
-  return { kind, ratingKey: Number(kind === 'movie' ? c.key : (c.show_key || c.key)) };
+  const ratingKey = Number(kind === 'movie' ? c.key : (c.show_key || c.key));
+  // cw-logo: a Plex card that names the TMDb id of what it opens starts that title's details and clearlogo at the tap,
+  // as a search row does (Plex's validated id still decides in the sheet).
+  return c.tmdb_hint ? { kind, ratingKey, tmdbId: c.tmdb_hint } : { kind, ratingKey };
 }
 
 /** Warm the detail popup (metadata, backdrop, logo, color blur). */

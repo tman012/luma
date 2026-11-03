@@ -11735,6 +11735,9 @@ def get_tmdb_colors(tmdb_id):
         return jsonify(null_result)
 
 
+_CLEARLOGO_NO_STORE = {'Cache-Control': 'no-store'}
+
+
 @app.route('/api/clearlogo/<tmdb_id>')
 def get_clearlogo(tmdb_id):
     """Fetch clearlogo from TMDB images API (uses shared 24h cache)."""
@@ -11742,13 +11745,14 @@ def get_clearlogo(tmdb_id):
         media_type = request.args.get('type', 'movie')
         tmdb_id_int = int(tmdb_id)
         logo_path = _fetch_one_logo(tmdb_id_int, media_type, raise_errors=True)
+        # cw-logo: never cached by the browser (an empty answer must not outlive the server's own cache).
         if logo_path:
             clearlogo_url = f"https://image.tmdb.org/t/p/original{logo_path}"
-            return jsonify({'clearlogo_url': clearlogo_url})
-        return jsonify({'clearlogo_url': None})  # no logo isn't an error (no console 404)
+            return jsonify({'clearlogo_url': clearlogo_url}), 200, _CLEARLOGO_NO_STORE
+        return jsonify({'clearlogo_url': None}), 200, _CLEARLOGO_NO_STORE  # no logo isn't an error (no console 404)
     except Exception as e:
         logger.error(f"Error fetching clearlogo from TMDB: {e}")
-        return jsonify({'clearlogo_url': None}), 500
+        return jsonify({'clearlogo_url': None}), 500, _CLEARLOGO_NO_STORE
 
 
 # ---------------------------------------------------------------------------

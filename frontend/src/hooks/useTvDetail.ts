@@ -15,10 +15,10 @@ import {
   type OwnershipMap,
 } from '@/services/sonarrApi';
 import { resolveOwnership, mediaKey } from '@/services/ownership';
-import { detailFetch, remainingCap, preloadImage } from '@/services/modalPrefetch';
+import { detailFetch, remainingCap, preloadImage, fetchClearlogo as fetchLogo } from '@/services/modalPrefetch';
 import { TMDB_BACKDROP_WAIT_MS } from './useMovieDetail';
 import { useModalColors } from './useModalColors';
-import { logoImg, finalBackdropUrl, plexArtFromPath } from '@/utils/image';
+import { finalBackdropUrl, plexArtFromPath } from '@/utils/image';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -43,9 +43,7 @@ interface UseTvDetailResult {
 // Hook
 // ---------------------------------------------------------------------------
 
-/** A failed clearlogo lookup is retried this often, this far apart, before the title settles as text. */
-export const LOGO_RETRIES = 2;
-export const LOGO_RETRY_MS = 120;
+export { LOGO_RETRIES, LOGO_RETRY_MS } from '@/services/modalPrefetch';
 
 export function useTvDetail(
   ratingKey?: number,
@@ -170,24 +168,12 @@ export function useTvDetail(
     const controller = new AbortController();
     let cancelled = false;
 
-    // A failed lookup (5xx, network) is not "no logo": it is asked again (LOGO_RETRIES, fresh request: the shared
-    // cache never keeps errors) before it settles as text. Only an answer settles it; the sheet's one reveal still
-    // decides logo vs text by its deadline, so a late logo never swaps in (cw-logo: CW Twilight Zone opened as text).
-    async function fetchClearlogo(id: number, signal: AbortSignal): Promise<string | null> {
-      for (let attempt = 0; ; attempt += 1) {
-        try {
-          const resp = await detailFetch(`/api/clearlogo/${id}?type=tv`, { signal });
-          if (resp.ok) {
-            const data = (await resp.json()) as { clearlogo_url?: string };
-            return logoImg(data.clearlogo_url);
-          }
-        } catch (e) {
-          if ((e as { name?: string })?.name === 'AbortError' || signal.aborted) return null;
-        }
-        if (attempt >= LOGO_RETRIES || signal.aborted) return null;
-        await new Promise<void>((r) => window.setTimeout(r, LOGO_RETRY_MS));
-      }
-    }
+    // One lookup per id for this open (started as soon as Plex names the id, alongside the TMDb details).
+    const logos = new Map<number, Promise<string | null>>();
+    const fetchClearlogo = (id: number, signal: AbortSignal) => {
+      if (!logos.has(id)) logos.set(id, fetchLogo('tv', id, signal));
+      return logos.get(id)!;
+    };
 
     async function fetchDetail() {
       // Another show opened: drop the old one so its backdrop never shows.
@@ -237,6 +223,8 @@ export function useTvDetail(
           const plexData = (await plexResp.json()) as Record<string, unknown>;
           const plexTmdbId = (plexData.tmdb_id as number | null) || null;
           if (!cancelled) setPlexTmdb(plexTmdbId);
+          // cw-logo: the logo lookup starts now, alongside the TMDb details (it waited for them before).
+          if (plexTmdbId && !cancelled) void fetchClearlogo(plexTmdbId, controller.signal);
 
           // With a TMDb id, give TMDb a moment (usually cached by the card
           // prefetch) so the first backdrop shown is the final one; without

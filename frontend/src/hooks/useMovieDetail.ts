@@ -1,7 +1,7 @@
 import { isMinimal } from '@/minimal';
 import { useState, useEffect, useRef } from 'react';
 import { pickBestTrailer } from '@/utils/pickBestTrailer';
-import { backdropUrl as tmdbBackdrop, logoImg, plexBackdrop, plexSheetArt, finalBackdropUrl, plexArtFromPath } from '@/utils/image';
+import { backdropUrl as tmdbBackdrop, plexBackdrop, plexSheetArt, finalBackdropUrl, plexArtFromPath } from '@/utils/image';
 import {
   parsePlexResponse,
   parseTmdbResponse,
@@ -12,7 +12,7 @@ import {
 } from '@/utils/modalParsers';
 import { apiFetch } from '../apiClient';
 import type { Ratings as InlineRatings } from '@/utils/modalParsers';
-import { detailFetch, plexRatingsPath, preloadImage, remainingCap, titleRatingsPath } from '@/services/modalPrefetch';
+import { detailFetch, fetchClearlogo, plexRatingsPath, preloadImage, remainingCap, titleRatingsPath } from '@/services/modalPrefetch';
 import { useModalColors } from './useModalColors';
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,18 @@ interface UseMovieDetailResult {
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
+
+/** One clearlogo lookup per movie id at a time (the Plex step starts it, the logo effect reads it). */
+const logoLookups = new Map<number, Promise<string | null>>();
+function logoLookup(id: number): Promise<string | null> {
+  const hit = logoLookups.get(id);
+  if (hit) return hit;
+  const p = fetchClearlogo('movie', id);
+  logoLookups.set(id, p);
+  const done = () => { if (logoLookups.get(id) === p) logoLookups.delete(id); };
+  p.then(done, done);
+  return p;
+}
 
 export function useMovieDetail(
   ratingKey?: number,
@@ -107,6 +119,8 @@ export function useMovieDetail(
           const plexTid = 'tmdb_id' in plexData ? ((plexData.tmdb_id as number | null) || undefined) : tmdbId;
           const tmdbFirst = tmdbId && plexTid === tmdbId ? tmdbRaced : null;
           parsed.tmdbId = plexTid ?? parsed.tmdbId;
+          // cw-logo: the logo lookup starts as soon as Plex names the id (the effect below reads the same answer).
+          if (parsed.tmdbId) void logoLookup(parsed.tmdbId);
 
           // Opened with only a Plex key (Home rails): get TMDb now, briefly,
           // so the first backdrop shown is the final one (no swap later).
@@ -398,10 +412,8 @@ export function useMovieDetail(
       ? { ...prev, clearLogoUrl: url ?? prev.clearLogoUrl, logoSettled: true } : prev);
     if (!id) { settle(null); return; }
     let cancelled = false;
-    detailFetch(`/api/clearlogo/${id}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => { if (!cancelled) settle(logoImg(data?.clearlogo_url ?? null)); })
-      .catch(() => { if (!cancelled) settle(null); });
+    // A failed lookup is retried before it settles as text (fetchClearlogo), as on TV.
+    logoLookup(id).then((url) => { if (!cancelled) settle(url); }, () => { if (!cancelled) settle(null); });
     return () => { cancelled = true; };
   }, [!!detail, detail?.tmdbId, tmdbId, ratingKey, reloadNonce]);
 

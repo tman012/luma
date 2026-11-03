@@ -150,6 +150,25 @@ export function clearlogoPath(kind: 'movie' | 'tv', tmdbId: number): string {
   return `/api/clearlogo/${tmdbId}${kind === 'tv' ? '?type=tv' : ''}`;
 }
 
+/** A failed clearlogo lookup is retried this often, this far apart, before the title settles as text. */
+export const LOGO_RETRIES = 2;
+export const LOGO_RETRY_MS = 120;
+/** The sheet's clearlogo lookup (every path: Home, Continue Watching, search): the logo image URL, or null for a real
+ *  "no logo". A failed lookup (5xx, network) is not "no logo": it is asked again (a fresh request, the shared cache
+ *  never keeps errors) before it settles. The sheet's one reveal still decides logo vs text by its deadline. */
+export async function fetchClearlogo(kind: 'movie' | 'tv', tmdbId: number, signal?: AbortSignal): Promise<string | null> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const resp = await detailFetch(clearlogoPath(kind, tmdbId), signal ? { signal } : undefined);
+      if (resp.ok) return logoImg(((await resp.json()) as { clearlogo_url?: string | null }).clearlogo_url ?? null);
+    } catch (e) {
+      if ((e as { name?: string })?.name === 'AbortError' || signal?.aborted) return null;
+    }
+    if (attempt >= LOGO_RETRIES || signal?.aborted) return null;
+    await new Promise<void>((r) => window.setTimeout(r, LOGO_RETRY_MS));
+  }
+}
+
 /** Warm everything a movie/TV popup opened with these ids will need. */
 /** `ratings`: also warm the title ratings (background warm-ups: capped per load, flagged for the server's
  *  budget guard); `open`: a user's open, which fetches them unflagged and uncapped. */

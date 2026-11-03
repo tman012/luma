@@ -281,11 +281,13 @@ export function openDetail(modals: { openMovie: (o: object) => void; openTv: (o:
       : modals.openTv({ tmdbId: c.tmdb_id, ...(cardIds(c).ratingKey ? { ratingKey: cardIds(c).ratingKey } : {}), origin: 'trakt_shows' });
   }
   const key = Number(c.key);
-  if (c.type === 'movie') return modals.openMovie({ ratingKey: key, origin: 'continue_watching' });
+  // cw-logo: with the card's TMDb hint the sheet opens like a search row (Plex key + TMDb id): the logo starts at once.
+  const hint = c.tmdb_hint ? { tmdbId: c.tmdb_hint } : {};
+  if (c.type === 'movie') return modals.openMovie({ ratingKey: key, ...hint, origin: 'continue_watching' });
   const show = Number(c.show_key || c.key);
   // A Continue Watching episode opens its show's sheet, as every other rail's TV card does (same sheet, show logo,
   // one reveal); the episode-intent sheet (episodeContext) hid the show's hero and logo.
-  modals.openTv({ ratingKey: show, origin: 'recently_added_tv' });
+  modals.openTv({ ratingKey: show, ...hint, origin: 'recently_added_tv' });
 }
 
 /** The parts of a /api/home answer Home renders, tolerating {} or a missing / malformed field. */
