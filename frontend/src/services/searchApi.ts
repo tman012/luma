@@ -262,7 +262,9 @@ export function openIds(tmdb: unknown, rk: unknown, _kind?: 'movie' | 'tv'): { r
 }
 export function resultIds(item: SearchMovie): { kind: 'movie' | 'tv'; ratingKey?: number; tmdbId?: number } {
   return { kind: item.media_type === 'tv' ? 'tv' : 'movie',
-    ...openIds(item.tmdb_id || item.id, item.isOwned ? item.rating_key : undefined, item.media_type === 'tv' ? 'tv' : 'movie') };
+    // A row the server gave a Plex key (library search: rating_key + art_path) opens as Home's card does, Plex art
+    // requested at the tap, even before ownership is merged in (Tester PREP d704a3db: phone search waited on TMDb).
+    ...openIds(item.tmdb_id || item.id, item.isOwned || (item.rating_key && item.art_path) ? item.rating_key : undefined, item.media_type === 'tv' ? 'tv' : 'movie') };
 }
 
 /** The backdrops a row's sheet may show, as the sheet loads them: TMDb's, and an owned title's Plex art. */
