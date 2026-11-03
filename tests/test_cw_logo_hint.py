@@ -163,3 +163,17 @@ def test_logo_warm_resolves_and_pulls_the_image_into_memory():
     assert m._tmdb_img_mem_get('https://image.tmdb.org/t/p/w300/w.png')
     assert {c.args[0] for c in f.call_args_list} == {'https://image.tmdb.org/t/p/w300/w.png', 'https://image.tmdb.org/t/p/original/w.png'}
     m._TMDB_IMG_MEM.clear()
+
+
+# v344: a title with no TMDb id never raises (LIVE 1:41 AM: int('None')): it answers no-logo, 200, no TMDb call.
+def test_clearlogo_missing_id_is_no_logo_not_an_error(test_app, monkeypatch):
+    calls = []
+    monkeypatch.setattr(m, '_fetch_one_logo', lambda *a, **k: calls.append(a) or '/x.png')
+    c = test_app.test_client()
+    for bad in ('None', 'null', 'undefined', '0', '-3', 'abc'):
+        r = c.get(f'/api/clearlogo/{bad}?type=movie')
+        assert r.status_code == 200, bad
+        assert r.get_json() == {'clearlogo_url': None}
+        assert r.headers.get('Cache-Control') == 'no-store'
+    assert calls == []
+    assert c.get('/api/clearlogo/578?type=movie').get_json()['clearlogo_url'].endswith('/x.png')

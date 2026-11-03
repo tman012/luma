@@ -415,13 +415,17 @@ export function CompactLayout(props: MovieModalViewProps) {
                   <div data-hero-title={sheetHero.state} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
                     opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1, transition: reducedMotion() ? 'none' : HERO_FADE }}>
                   {sheetHero.state === 'logo' && sheetHero.logo ? (
-                    <img data-hero-logo="" decoding="sync" src={sheetHero.logo} onError={sheetHero.logoFailed} alt={detail?.title}
+                    <img data-hero-logo="" decoding="sync" ref={sheetHero.logoRef} src={sheetHero.logo} onLoad={sheetHero.logoLoaded} onError={sheetHero.logoFailed} alt={detail?.title}
                         width={300} height={140}
                         // Held to the fixed title box: the logo's intrinsic size never drives layout (iOS grew the box).
-                        style={{ display: 'block', width: 'calc(100% - 32px)', height: '100%', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', objectPosition: 'center bottom', filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }} />
-                  ) : (
+                        style={{ display: 'block', position: 'absolute', left: '16px', bottom: 0, width: 'calc(100% - 32px)', height: '100%', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', objectPosition: 'center bottom', filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }} />
+                  ) : null}
                   <h1
+                    data-hero-text=""
                     style={{
+                      // v345 (prod): the real title is always on the page; the logo is layered on it and hides it only
+                      // once it has loaded (a failed or stalled logo leaves the text).
+                      visibility: sheetHero.logoShown ? 'hidden' : 'visible',
                       fontSize: '28px',
                       fontWeight: 700,
                       color: '#fff',
@@ -430,9 +434,8 @@ export function CompactLayout(props: MovieModalViewProps) {
                       textShadow: '0 2px 8px rgba(0,0,0,0.5)',
                     }}
                   >
-                    {hero.seeded ? hero.title : detail?.title}
+                    {detail?.title || hero.title}
                   </h1>
-                  )}
                   </div>
                 </div>
   </>);

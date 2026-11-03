@@ -39,7 +39,7 @@ STAMP = ROOT / 'static' / 'sw-stamp.json'
 SOURCES = ('frontend/src', 'frontend/public', 'frontend/index.html', 'frontend/package.json',
            'frontend/package-lock.json', 'frontend/vite.config.ts', 'frontend/tsconfig.json',
            'frontend/tsconfig.app.json')
-LAST_SHIPPED = 342                   # LIVE runs 5e5497e5 (v342)
+LAST_SHIPPED = 343                   # LIVE runs 376db702 (v343)
 TAKEN = frozenset({142, 144, 145, 146, 147, 148, 149})   # sources-followup v142, login-error-states v144, 01abfd9 v145 (Ops), f0db05d v146, 4d22f6c v147 (TV Import, gated), 4b82ab5 v148 (Import fixes, bundled), a201cfa v149 (Tester's Import fixes)
 VERSION_RE = re.compile(r"const CACHE_VERSION = '([a-z-]+)-v(\d+)';")
 

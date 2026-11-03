@@ -171,10 +171,18 @@ export const LOGO_RETRY_MS = 120;
  *  "no logo". A failed lookup (5xx, network) is not "no logo": it is asked again (a fresh request, the shared cache
  *  never keeps errors) before it settles. The sheet's one reveal still decides logo vs text by its deadline. */
 export async function fetchClearlogo(kind: 'movie' | 'tv', tmdbId: number, signal?: AbortSignal): Promise<string | null> {
+  // v344: no TMDb id, no lookup (never /api/clearlogo/None).
+  if (!Number.isInteger(Number(tmdbId)) || Number(tmdbId) <= 0) return null;
   for (let attempt = 0; ; attempt += 1) {
     try {
       const resp = await detailFetch(clearlogoPath(kind, tmdbId), signal ? { signal } : undefined);
-      if (resp.ok) return logoImg(((await resp.json()) as { clearlogo_url?: string | null }).clearlogo_url ?? null);
+      if (resp.ok) {
+        const url = logoImg(((await resp.json()) as { clearlogo_url?: string | null }).clearlogo_url ?? null);
+        // v345: a sheet's logo starts loading the moment its URL is known (high priority, never queued behind the hold);
+        // the hero and title reuse this load.
+        if (url) void preloadImage(url, 'high');
+        return url;
+      }
     } catch (e) {
       if ((e as { name?: string })?.name === 'AbortError' || signal?.aborted) return null;
     }
@@ -256,9 +264,13 @@ export async function warmDetail(
     });
   }
   if (kind === 'movie' && ratingKey) void json(plexRatingsPath(ratingKey));
+  const logoAsk = tid ? json(clearlogoPath(kind, tid), undefined, own) : Promise.resolve(null);
+  // v345 (prod's order): the open's logo image starts the moment its URL is known, at high priority, never after the
+  // details or behind the background pause; the sheet's hero and title reuse this load (reuseLoad).
+  if (opts.open && images) void logoAsk.then((l) => preloadImage(logoImg((l?.clearlogo_url as string | undefined) ?? null), 'high'));
   const [tm, logo] = await Promise.all([
     tid ? json(kind === 'movie' ? `/api/movie/${tid}` : `/api/tv/${tid}`, bg, own) : Promise.resolve(null),
-    tid ? json(clearlogoPath(kind, tid), undefined, own) : Promise.resolve(null),
+    logoAsk,
   ]);
   // Ratings with the details: the title-based ratings the sheet asks for (none in the minimal build).
   // Only when the detail reply carried no inline ratings (an older server) is the ratings endpoint warmed.

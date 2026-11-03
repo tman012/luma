@@ -11,6 +11,7 @@ Inside the app container (from the app folder):
     python3 scripts/qa_cw_logos.py            # table
     python3 scripts/qa_cw_logos.py --json     # one JSON object per item
     python3 scripts/qa_cw_logos.py --home-json home.json
+    python3 /tmp/qa_cw_logos.py --app-dir /app   # a copy outside the app folder
         # also: whether each card in a saved /api/home answer (DevTools > Network > /api/home > Save response, or the
         # harness's capture) carries the server-resolved logo (clearlogo_url) or a known no-logo (has_logo false)
 """
@@ -22,14 +23,45 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+def _app_dir(argv: list[str]) -> str:
+    """The app folder (the one holding app/): --app-dir, $LUMA_APP_DIR, this script's parent, /app or the cwd, so a
+    copy run from /tmp in the container still finds the app."""
+    for i, a in enumerate(argv):
+        if a == '--app-dir' and i + 1 < len(argv):
+            return os.path.abspath(argv[i + 1])
+        if a.startswith('--app-dir='):
+            return os.path.abspath(a.split('=', 1)[1])
+    for d in (os.environ.get('LUMA_APP_DIR'), os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'), '/app',
+              os.getcwd()):
+        if d and os.path.isfile(os.path.join(d, 'app', 'home_rails.py')):
+            return os.path.abspath(d)
+    return os.getcwd()
+
+
+_APP_DIR = _app_dir(sys.argv[1:])
+sys.path.insert(0, _APP_DIR)
 
 import requests  # noqa: E402
+from flask import Flask  # noqa: E402
 
 from app import home_rails, tv_plex  # noqa: E402
 from app.config import Config  # noqa: E402
 from app.plex_service import plex_service  # noqa: E402
 from app.settings_manager import SettingsManager  # noqa: E402
+
+
+def _qa_app(settings=None) -> Flask:
+    """A bare Flask app for an app context: home_rails builds image URLs from current_app.config['URL_BASE'] (the
+    running app's own module is never imported here: no routes, no background jobs, no writes)."""
+    qa = Flask('qa_cw_logos')
+    base = ''
+    try:  # the app's own rule (settings / env), as app.main computes it
+        from app.server_config import get_url_base  # noqa: WPS433
+        base = get_url_base(settings) if settings is not None else ''
+    except Exception:
+        base = os.environ.get('URL_BASE', '')
+    qa.config['URL_BASE'] = base or ''
+    return qa
 
 
 def _ms(t0: float) -> int:
@@ -60,7 +92,18 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--home-json', help='a saved /api/home response (read only)')
+    ap.add_argument('--app-dir', help='the app folder (default: next to this script, else /app)')
     args = ap.parse_args()
+    SettingsManager._save = lambda self, *a, **k: None  # type: ignore[method-assign]  # never write
+    try:
+        settings = SettingsManager()
+    except Exception:
+        settings = None
+    with _qa_app(settings).app_context():
+        return _run(args)
+
+
+def _run(args: argparse.Namespace) -> int:
     # Never write: a settings migration or bootstrap in this process must not save (the running app owns the file).
     SettingsManager._save = lambda self, *a, **k: None  # type: ignore[method-assign]
     if not SettingsManager().__dict__.get('_path') or not SettingsManager()._path.exists():

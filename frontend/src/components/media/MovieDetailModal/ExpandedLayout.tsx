@@ -949,6 +949,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                       objectFit: 'contain',
                       filter: t.logo.filter,
                     }}
+                    ref={sheetHero.logoRef}
+                    onLoad={sheetHero.logoLoaded}
                     onError={sheetHero.logoFailed}
                   />
                 ) : null}
@@ -956,7 +958,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   style={{
                     // v341m: rastered while holding (the row is at opacity 0), so the reveal commit only flips opacity: a hidden
                     // title first painted at the reveal landed a frame or two after the content (B3/I1440 +20-35 ms).
-                    ...(sheetHero.state === 'hold' ? { display: 'block' } : titleTextStyle(sheetHero.state)),
+                    // v345 (prod): the real title shows until the logo has loaded (a failed or stalled logo leaves the text).
+                    ...(sheetHero.state === 'hold' || !sheetHero.logoShown ? { display: 'block' } : titleTextStyle(sheetHero.state)),
                     fontSize: t.titleFontSize,
                     fontWeight: 700,
                     color: '#fff',

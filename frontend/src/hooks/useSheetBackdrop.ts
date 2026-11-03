@@ -58,6 +58,11 @@ export interface SheetHero {
   artDeadline: boolean;
   /** The chosen logo failed to paint (img onError): show the text title instead. */
   logoFailed: () => void;
+  /** v345 (prod's structure): the real text title is always rendered; it is hidden only once the logo <img> has
+   *  actually loaded (logoShown). A logo that fails or stalls leaves the text title showing: never neither. */
+  logoShown: boolean;
+  logoRef: (el: HTMLImageElement | null) => void;
+  logoLoaded: () => void;
 }
 interface St { key: unknown; capped: boolean; artCapped?: boolean; title: 'logo' | 'text' | null; logo: string | null; art: string | null; artDone: boolean }
 const fresh = (key: unknown): St => ({ key, capped: false, title: null, logo: null, art: null, artDone: false });
@@ -102,6 +107,9 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     // Past the deadline: latch once the pick is settled (the details are in), with what has decoded; a known backdrop
     // still decoding holds the latch until it decodes, fails, or BACKDROP_ART_DEADLINE_MS.
     const artWait = !!art && artOk.url !== art && !cur.artCapped;
+    // v345 (prod's logo budget): a logo whose URL is known (decoding) or whose lookup is still out holds the latch past
+    // the 1.0s deadline up to the same art deadline (BACKDROP_ART_DEADLINE_MS), never longer; then text, no late swap.
+    const logoWait = !cur.artCapped && (logo ? logoOk.url !== logo : !logoSettled);
     // At the art deadline a pick still pending (TMDb slow or failing) latches with what has decoded (the Plex art), or
     // no art: never a blank sheet past the cap, and nothing swaps in after.
     // Past the 1.0s deadline with the details in and their backdrop already decoded (TV: the Plex art while TMDb
@@ -110,12 +118,17 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     const altIn = !!alt && alt !== art && altOk.url === alt && altOk.ok;
     // Past the 1.0s deadline with `art` still loading but `alt` decoded: latch on `alt` now.
     const altReady = cur.capped && present && !artIn && altIn;
-    if (!ready && !(cur.capped && artSettled && !artWait) && !(cur.artCapped && present) && !artReady && !altReady) return;
+    if (!ready && !(cur.capped && artSettled && !artWait && !logoWait) && !(cur.artCapped && present) && !(artReady && !logoWait) && !(altReady && !logoWait)) return;
     const fallback = altIn ? alt : cur.artCapped && present && !artIn ? good.current.url : null;
     setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: artIn ? art! : fallback, artDone: true });
   }, [art, artOk, alt, altOk, artSettled, present, logo, logoOk, logoSettled, cur, openKey]);
   const logoFailed = useCallback(() => setSt(s => (s.key === openKey && s.title === 'logo' ? { ...s, title: 'text', logo: null } : s)), [openKey]);
-  return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, deadline: cur.capped, artDeadline: !!cur.artCapped, logoFailed };
+  const [shownUrl, setShownUrl] = useState<string | null>(null);
+  const logoLoaded = useCallback(() => setShownUrl(cur.logo), [cur.logo]);
+  // A decoded logo is complete at mount: the text hides in the same commit (no frame of text, no swap).
+  const logoRef = useCallback((el: HTMLImageElement | null) => { if (el && el.complete && el.getAttribute('src')) setShownUrl(el.getAttribute('src')); }, []);
+  return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, deadline: cur.capped, artDeadline: !!cur.artCapped, logoFailed,
+    logoShown: cur.title === 'logo' && !!cur.logo && shownUrl === cur.logo, logoRef, logoLoaded };
 }
 /** The same fade for an element that mounts at the latch (the desktop backdrop img). */
 export const HERO_ANIM = 'm-crossfade 0.45s ease-out both';

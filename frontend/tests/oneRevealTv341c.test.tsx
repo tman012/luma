@@ -16,7 +16,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 const decode = async (u: string) => { await act(async () => { decodes.get(u)!(); await Promise.resolve(); await Promise.resolve(); }); };
 type P = { a: string | null; s: boolean; p: boolean };
 // TV: art = the Plex art while TMDb is pending (backdropPending: not settled), the details present.
-const mount = (x: P) => renderHook(({ a, s, p }: P) => useSheetHero(a, s, null, false, 'k', p), { initialProps: x });
+const mount = (x: P) => renderHook(({ a, s, p }: P) => useSheetHero(a, s, null, true, 'k', p)  /* v345: no logo for the title (a pending lookup holds to the art deadline) */, { initialProps: x });
 const past = () => { act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); }); act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); }); };
 
 describe('v341c: the TV hero is capped while TMDb is pending', () => {

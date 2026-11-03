@@ -139,6 +139,8 @@ describe('one backdrop per sheet open', () => {
     const h = hero({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
     await decode('/art.jpg');
     act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
+    expect(h.result.current.state).toBe('hold');   // v345: a known logo waits up to the art deadline (prod's budget)
+    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); });
     expect(h.result.current).toMatchObject({ state: 'text', art: '/art.jpg', logo: null });
     expect(decodes.has('/logo.png')).toBe(true);
     h.rerender({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
@@ -228,7 +230,7 @@ describe('one backdrop per sheet open', () => {
     h.rerender({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
     expect(h.result.current.state).toBe('text');
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
-      expect(src(`components/media/${k}/CompactLayout.tsx`)).toMatch(/src=\{sheetHero\.logo\} onError=\{sheetHero\.logoFailed\}/);
+      expect(src(`components/media/${k}/CompactLayout.tsx`)).toMatch(/src=\{sheetHero\.logo\} (onLoad=\{sheetHero\.logoLoaded\} )?onError=\{sheetHero\.logoFailed\}/);
       expect(src(`components/media/${k}/ExpandedLayout.tsx`)).toMatch(/onError=\{sheetHero\.logoFailed\}/);
     }
   });

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { useSheetHero, BACKDROP_CAP_MS } from '@/hooks/useSheetBackdrop';
+import { useSheetHero, BACKDROP_CAP_MS, BACKDROP_ART_DEADLINE_MS } from '@/hooks/useSheetBackdrop';
 import { openIds } from '@/services/searchApi';
 
 const src = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8');
@@ -25,16 +25,20 @@ describe('v341d: the clearlogo never pops in or moves the block', () => {
     await decode('/logo.png');
     expect(h.result.current).toMatchObject({ state: 'logo', logo: '/logo.png' });
   });
-  it('a logo from the late clearlogo fetch (after the deadline) never swaps in: text title for the open', () => {
+  it('a logo from the late clearlogo fetch (after the art deadline) never swaps in: text title for the open', () => {
     const h = mount({ logo: undefined, settled: false });
     act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
+    expect(h.result.current.state).toBe('hold');   // v345: a pending lookup waits up to the art deadline
+    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); });
     expect(h.result.current.state).toBe('text');
     h.rerender({ logo: '/late-logo.png', settled: true });
     expect(h.result.current).toMatchObject({ state: 'text', logo: null });
   });
-  it('a logo URL known but decoding late: text at the deadline, the decode afterwards changes nothing', async () => {
+  it('a logo URL known but decoding late: text at the art deadline, the decode afterwards changes nothing', async () => {
     const h = mount({ logo: '/slow.png', settled: true });
     act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
+    expect(h.result.current.state).toBe('hold');   // v345: a known logo waits up to the art deadline
+    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); });
     expect(h.result.current.state).toBe('text');
     await decode('/slow.png');
     expect(h.result.current).toMatchObject({ state: 'text', logo: null });
@@ -44,7 +48,7 @@ describe('v341d: the clearlogo never pops in or moves the block', () => {
       const s = src(`components/media/${k}/CompactLayout.tsx`);
       expect(s, k).toMatch(/data-title-box=""[\s\S]{0,400}height: '140px'/);
       expect(s, k).toMatch(/data-hero-title=\{sheetHero\.state\} style=\{\{ position: 'absolute', inset: 0/);
-      expect(s, k).not.toMatch(/naturalHeight|onLoad=\{[^}]*setLogo/);
+      expect(s, k).not.toMatch(/naturalHeight|onLoad=\{[^}]*setLogo/);  // v345: onLoad={sheetHero.logoLoaded} only hides the text
       expect(s, k).not.toMatch(/data-sheet-spinner/);
     }
   });
