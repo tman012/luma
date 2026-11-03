@@ -11741,7 +11741,7 @@ def get_clearlogo(tmdb_id):
     try:
         media_type = request.args.get('type', 'movie')
         tmdb_id_int = int(tmdb_id)
-        logo_path = _fetch_one_logo(tmdb_id_int, media_type)
+        logo_path = _fetch_one_logo(tmdb_id_int, media_type, raise_errors=True)
         if logo_path:
             clearlogo_url = f"https://image.tmdb.org/t/p/original{logo_path}"
             return jsonify({'clearlogo_url': clearlogo_url})
@@ -11761,7 +11761,7 @@ _LOGO_CACHE_TTL = 86400  # 24 hours
 _LOGO_CACHE_MAX = 500
 
 
-def _fetch_one_logo(tmdb_id: int, media_type: str) -> Optional[str]:
+def _fetch_one_logo(tmdb_id: int, media_type: str, raise_errors: bool = False) -> Optional[str]:
     """Fetch best logo file_path for a single TMDb ID (with 24h cache)."""
     import time as _time
     cache_key = f"{media_type}:{tmdb_id}"
@@ -11778,8 +11778,12 @@ def _fetch_one_logo(tmdb_id: int, media_type: str) -> Optional[str]:
             params={'api_key': api_key, 'include_image_language': 'en,null'},
             timeout=8,
         )
-        resp.raise_for_status()
-        logos = resp.json().get('logos', [])
+        if resp.status_code == 404:
+            resp_logos = []  # no such title: a real "no logo", cached
+        else:
+            resp.raise_for_status()
+            resp_logos = resp.json().get('logos', [])
+        logos = resp_logos
 
         # Prefer English PNG, then English any, then any PNG, then any
         en = [l for l in logos if l.get('iso_639_1') == 'en']
@@ -11791,7 +11795,11 @@ def _fetch_one_logo(tmdb_id: int, media_type: str) -> Optional[str]:
         best = (png + others)[0] if (png or others) else None
         path = best['file_path'] if best else None
     except Exception:
-        path = None
+        # A failed lookup (timeout, TMDb 5xx) is not "no logo": never cached (a cached None hid the logo for 24h in
+        # that worker, cw-logo). /api/clearlogo answers it as an error so the sheet retries; the batch gets None.
+        if raise_errors:
+            raise
+        return None
 
     # Evict expired entries; enforce max size
     if len(_logo_cache) >= _LOGO_CACHE_MAX:

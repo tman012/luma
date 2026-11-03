@@ -43,6 +43,10 @@ interface UseTvDetailResult {
 // Hook
 // ---------------------------------------------------------------------------
 
+/** A failed clearlogo lookup is retried this often, this far apart, before the title settles as text. */
+export const LOGO_RETRIES = 2;
+export const LOGO_RETRY_MS = 120;
+
 export function useTvDetail(
   ratingKey?: number,
   tmdbId?: number,
@@ -166,14 +170,22 @@ export function useTvDetail(
     const controller = new AbortController();
     let cancelled = false;
 
+    // A failed lookup (5xx, network) is not "no logo": it is asked again (LOGO_RETRIES, fresh request: the shared
+    // cache never keeps errors) before it settles as text. Only an answer settles it; the sheet's one reveal still
+    // decides logo vs text by its deadline, so a late logo never swaps in (cw-logo: CW Twilight Zone opened as text).
     async function fetchClearlogo(id: number, signal: AbortSignal): Promise<string | null> {
-      try {
-        const resp = await detailFetch(`/api/clearlogo/${id}?type=tv`, { signal });
-        if (!resp.ok) return null;
-        const data = (await resp.json()) as { clearlogo_url?: string };
-        return logoImg(data.clearlogo_url);
-      } catch {
-        return null;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          const resp = await detailFetch(`/api/clearlogo/${id}?type=tv`, { signal });
+          if (resp.ok) {
+            const data = (await resp.json()) as { clearlogo_url?: string };
+            return logoImg(data.clearlogo_url);
+          }
+        } catch (e) {
+          if ((e as { name?: string })?.name === 'AbortError' || signal.aborted) return null;
+        }
+        if (attempt >= LOGO_RETRIES || signal.aborted) return null;
+        await new Promise<void>((r) => window.setTimeout(r, LOGO_RETRY_MS));
       }
     }
 
