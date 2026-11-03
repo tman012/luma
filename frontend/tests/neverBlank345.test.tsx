@@ -14,7 +14,7 @@ import { openWhenReady, _resetModalPrefetch } from '@/services/modalPrefetch';
 import { _resetImageLoader } from '@/loading/imageLoader';
 
 type ImgMode = 'ok' | 'fail' | 'stall';
-const cfg = { img: 'ok' as ImgMode, domStall: false, logo: true, logoMs: 0, detailMs: 0 };
+const cfg = { img: 'ok' as ImgMode, domStall: false, logo: true, logoMs: 0, detailMs: 0, artMs: 30 };
 const isLogo = (u: string) => u.includes('logo.png');
 const made: { src: string; pri: string; at: number }[] = [];
 let t0 = 0;
@@ -30,20 +30,22 @@ class FakeImage {
   removeAttribute() { this.s = ''; }
   decode = () => new Promise<void>((res, rej) => {
     const m = isLogo(this.s) ? cfg.img : 'ok';
-    if (m === 'ok') setTimeout(res, 30); else if (m === 'fail') setTimeout(() => rej(new Error('broken')), 30);
+    if (m === 'ok') setTimeout(res, isLogo(this.s) ? 30 : cfg.artMs); else if (m === 'fail') setTimeout(() => rej(new Error('broken')), 30);
   });
   naturalWidth = 10; complete = true;
 }
 // jsdom never loads images: an <img> is complete unless the test stalls it (a logo that never finishes in the DOM).
 Object.defineProperty(HTMLImageElement.prototype, 'complete', { configurable: true,
   get(this: HTMLImageElement) { return !(cfg.domStall && isLogo(this.getAttribute('src') || '')); } });
+Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', { configurable: true,
+  get(this: HTMLImageElement) { return cfg.domStall && isLogo(this.getAttribute('src') || '') ? 0 : 300; } });
 
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
 const wait = (ms: number) => (ms ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
 const fetchCalls: { url: string; at: number }[] = [];
 beforeEach(() => {
   _resetModalPrefetch(); _resetImageLoader(); made.length = 0; fetchCalls.length = 0;
-  Object.assign(cfg, { img: 'ok', domStall: false, logo: true, logoMs: 0, detailMs: 0 });
+  Object.assign(cfg, { img: 'ok', domStall: false, logo: true, logoMs: 0, detailMs: 0, artMs: 30 });
   vi.useFakeTimers(); t0 = Date.now(); vi.stubGlobal('Image', FakeImage);
   vi.stubGlobal('fetch', vi.fn(async (u: string) => {
     const url = String(u); fetchCalls.push({ url, at: Date.now() - t0 });
@@ -131,3 +133,55 @@ for (const mode of ['compact', 'expanded'] as const) {
     }
   });
 }
+
+describe('v345b: desktop movie, logo shown means the text is hidden (kept in the DOM)', () => {
+  const s = SHEETS[1];
+  const h1 = () => Array.from(document.querySelectorAll('h1')).find((h) => (h.textContent ?? '').trim() === s.title)!;
+  const visible = (h: HTMLElement) => h.style.display !== 'none' && h.style.visibility !== 'hidden';
+  it('the candidate logo loads while the hero holds (its load before the latch): text hidden once the logo shows', async () => {
+    layoutMode.mode = 'expanded'; cfg.domStall = true; cfg.artMs = 1300;   // the backdrop holds the hero
+    const row = document.createElement('button'); row.setAttribute('aria-label', s.title); document.body.appendChild(row);
+    void openWhenReady(s.kind, s.rk, s.id, row, () => {}, undefined, []);
+    render(s.el());
+    for (let i = 0; i < 6; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    const img = document.querySelector<HTMLImageElement>('img[src*="logo.png"]');
+    expect(img, 'candidate logo mounted during the hold').not.toBeNull();
+    expect(document.querySelector('[data-hero-title], [data-reveal]')).toBeTruthy();
+    cfg.domStall = false; act(() => { fireEvent.load(img!); });   // the browser finishes loading it while the hero still holds
+    for (let i = 0; i < 40; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(document.querySelector('img[src*="logo.png"]')).not.toBeNull();
+    expect(h1(), 'text kept in the DOM').toBeTruthy();
+    expect(visible(h1()), 'text hidden under a shown logo').toBe(false);
+  });
+  it('logo failed or stalled: the text title is visible', async () => {
+    layoutMode.mode = 'expanded'; cfg.domStall = true;
+    await open(s, s.title);
+    expect(visible(h1())).toBe(true);
+    cleanup(); _resetModalPrefetch(); _resetImageLoader(); cfg.domStall = false; cfg.img = 'fail';
+    await open(s, s.title);
+    expect(visible(h1())).toBe(true);
+  });
+  it('phone and TV desktop: the same rule (logo shown, text hidden)', async () => {
+    for (const [mode, sh] of [['compact', SHEETS[1]], ['expanded', SHEETS[2]], ['compact', SHEETS[2]]] as const) {
+      cleanup(); _resetModalPrefetch(); _resetImageLoader(); layoutMode.mode = mode;
+      await open(sh, sh.title);
+      const t = Array.from(document.querySelectorAll('h1')).find((h) => (h.textContent ?? '').trim() === sh.title)!;
+      expect(document.querySelector('img[src*="logo.png"]'), `${mode} ${sh.name}`).not.toBeNull();
+      expect(t.style.display === 'none' || t.style.visibility === 'hidden', `${mode} ${sh.name}`).toBe(true);
+    }
+  });
+});
+
+describe('v345b: a logo already loaded at the tap is the one the reveal uses (CW: Last Breath)', () => {
+  for (const mode of ['compact', 'expanded'] as const) it(`${mode}: card logo loaded at the tap, details at 1.1s: logo`, async () => {
+    layoutMode.mode = mode; cfg.detailMs = 1100;
+    const s = SHEETS[0];
+    const row = document.createElement('button'); row.setAttribute('aria-label', s.title); document.body.appendChild(row);
+    void openWhenReady(s.kind, s.rk, undefined, row, () => {}, undefined, [], { kind: 'movie', tmdbId: s.id, url: 'https://image.tmdb.org/t/p/original/logo.png' });
+    render(<MovieDetailModal ratingKey={5003} onClose={() => {}} />);
+    for (let i = 0; i < 4; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(made.some((m) => isLogo(m.src) && m.pri === 'high'), 'logo loading from the tap').toBe(true);
+    for (let i = 0; i < 60; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(heroShows()).toBe('logo');
+  });
+});

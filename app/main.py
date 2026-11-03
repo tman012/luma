@@ -11742,10 +11742,14 @@ _CLEARLOGO_NO_STORE = {'Cache-Control': 'no-store'}
 def get_clearlogo(tmdb_id):
     """Fetch clearlogo from TMDB images API (uses shared 24h cache)."""
     try:
+        # v345: only movie|tv reaches the TMDb path (anything else is a movie lookup, as the default was).
         media_type = request.args.get('type', 'movie')
+        if media_type not in ('movie', 'tv'):
+            media_type = 'movie'
         # v344: a title with no TMDb id (the client sent 'None', 'null', '' or junk) has no logo: answer that, no error.
+        # v345: ASCII digits only (str.isdigit accepts '²' and other digits int() rejects: a 500).
         raw_id = str(tmdb_id or '').strip()
-        if not raw_id.isdigit() or int(raw_id) <= 0:
+        if not (raw_id.isascii() and raw_id.isdigit()) or int(raw_id) <= 0:
             return jsonify({'clearlogo_url': None}), 200, _CLEARLOGO_NO_STORE
         tmdb_id_int = int(raw_id)
         logo_path = _fetch_one_logo(tmdb_id_int, media_type, raise_errors=True)

@@ -177,3 +177,17 @@ def test_clearlogo_missing_id_is_no_logo_not_an_error(test_app, monkeypatch):
         assert r.headers.get('Cache-Control') == 'no-store'
     assert calls == []
     assert c.get('/api/clearlogo/578?type=movie').get_json()['clearlogo_url'].endswith('/x.png')
+
+
+# v345 (Reviewer): ASCII digits only ('²' passes str.isdigit but int() raises), and the type is allowlisted.
+def test_clearlogo_unicode_digits_and_type_allowlist(test_app, monkeypatch):
+    calls = []
+    monkeypatch.setattr(m, '_fetch_one_logo', lambda tid, media, **k: calls.append((tid, media)) or None)
+    c = test_app.test_client()
+    for bad in ('\u00b2', '\u0663', '1\u00b2', '\uff11'):
+        r = c.get('/api/clearlogo/' + bad)
+        assert r.status_code == 200 and r.get_json() == {'clearlogo_url': None}, repr(bad)
+    assert calls == []
+    for t, want in (('tv', 'tv'), ('movie', 'movie'), ('person', 'movie'), ('../x', 'movie'), ('TV', 'movie')):
+        c.get(f'/api/clearlogo/12?type={t}')
+        assert calls[-1] == (12, want), t

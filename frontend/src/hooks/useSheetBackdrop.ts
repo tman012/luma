@@ -9,7 +9,7 @@
  *   pick is settled and a known backdrop has decoded (or failed, or BACKDROP_ART_DEADLINE_MS passed): a backdrop not decoded by then is dropped for that open (the
  *   no-art state), a logo not decoded is the text title. Once latched nothing changes for that open (`openKey`):
  *   no backdrop arrives later, no swap, no text-to-logo jump. Nothing paints before the latch. */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { tapElapsed } from '@/services/modalPrefetch';
 import type { TitleState } from '@/hooks/useTitleReveal';
 import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
@@ -62,7 +62,7 @@ export interface SheetHero {
    *  actually loaded (logoShown). A logo that fails or stalls leaves the text title showing: never neither. */
   logoShown: boolean;
   logoRef: (el: HTMLImageElement | null) => void;
-  logoLoaded: () => void;
+  logoLoaded: (e: { currentTarget: HTMLImageElement }) => void;
 }
 interface St { key: unknown; capped: boolean; artCapped?: boolean; title: 'logo' | 'text' | null; logo: string | null; art: string | null; artDone: boolean }
 const fresh = (key: unknown): St => ({ key, capped: false, title: null, logo: null, art: null, artDone: false });
@@ -123,10 +123,21 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: artIn ? art! : fallback, artDone: true });
   }, [art, artOk, alt, altOk, artSettled, present, logo, logoOk, logoSettled, cur, openKey]);
   const logoFailed = useCallback(() => setSt(s => (s.key === openKey && s.title === 'logo' ? { ...s, title: 'text', logo: null } : s)), [openKey]);
+  // v345: the URL the hero's <img> has fully loaded (its own src: the desktop mounts the candidate logo while the hero
+  // holds, so its load can land before the latch). The latch already required this URL to decode, and `complete` /
+  // the load event only report a fully loaded image: a half-loaded logo never hides (overdraws) the text.
   const [shownUrl, setShownUrl] = useState<string | null>(null);
-  const logoLoaded = useCallback(() => setShownUrl(cur.logo), [cur.logo]);
-  // A decoded logo is complete at mount: the text hides in the same commit (no frame of text, no swap).
-  const logoRef = useCallback((el: HTMLImageElement | null) => { if (el && el.complete && el.getAttribute('src')) setShownUrl(el.getAttribute('src')); }, []);
+  const logoEl = useRef<HTMLImageElement | null>(null);
+  const markLoaded = useCallback((el: HTMLImageElement | null) => {
+    const u = el?.getAttribute('src');
+    if (el && u && el.complete && el.naturalWidth > 0) setShownUrl(u);
+  }, []);
+  // onLoad records the element's own src (it can load during the hold, before the latch names the logo).
+  const logoLoaded = useCallback((e: { currentTarget: HTMLImageElement }) => markLoaded(e.currentTarget), [markLoaded]);
+  const logoRef = useCallback((el: HTMLImageElement | null) => { logoEl.current = el; markLoaded(el); }, [markLoaded]);
+  // At the latch: a candidate that already loaded during the hold (no new ref call or load event) is rechecked.
+  const latched = cur.title === 'logo' ? cur.logo : null;
+  useLayoutEffect(() => { if (latched) markLoaded(logoEl.current); }, [latched, markLoaded]);
   return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, deadline: cur.capped, artDeadline: !!cur.artCapped, logoFailed,
     logoShown: cur.title === 'logo' && !!cur.logo && shownUrl === cur.logo, logoRef, logoLoaded };
 }
