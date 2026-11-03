@@ -3853,6 +3853,9 @@ def get_watchlist():
             (m.get('title') or '').lower(),
         ))
 
+        # wl-images: the store follows the watchlist (new titles fetched in the background, removed ones pruned);
+        # each item names its local sheet images when present.
+        _wl_sync_and_annotate('movie', watchlist)
         return jsonify(watchlist)
     except Exception as e:
         logger.error(f"Error fetching Radarr watchlist: {e}")
@@ -3903,6 +3906,7 @@ def get_tv_watchlist():
     """
     cached = _tv_watchlist_cache
     if cached['data'] is not None and time.time() - cached['ts'] < _TV_WATCHLIST_TTL:
+        _wl_sync_and_annotate('tv', cached['data'].get('series') or [])
         return jsonify(cached['data'])
 
     try:
@@ -3943,6 +3947,7 @@ def get_tv_watchlist():
 
         payload = {'enabled': True, 'series': rows}
         _tv_watchlist_cache.update({'ts': time.time(), 'data': payload})
+        _wl_sync_and_annotate('tv', rows)
         return jsonify(payload)
 
     except Exception as e:
@@ -4705,6 +4710,7 @@ def remove_from_watchlist(tmdb_id):
                 f"[watchlist] unmonitored (removed from watchlist): "
                 f"{movie.get('title')} tmdb={tmdb_id}"
             )
+            _wl_forget('movie', tmdb_id)   # wl-images: a removed title's local images go now
             return jsonify({
                 'message': 'Removed from watchlist',
                 'success': True,
@@ -13545,6 +13551,120 @@ def img_tmdb_proxy():
     if '..' in tmdb_path or '//' in tmdb_path or len(tmdb_path) > 300:
         return 'Invalid path', 400
     return _img_response(f"https://image.tmdb.org/t/p/{size}{tmdb_path}", 'TMDb')
+
+
+# ---------------------------------------------------------------------------
+# wl-images (trial): local copies of Watchlist items' sheet backdrop (original) and clearlogo (app/wl_images.py)
+# ---------------------------------------------------------------------------
+_wl_store_obj = None
+_wl_store_lock = threading.Lock()
+
+
+def _wl_resolve(type_: str, tmdb_id: int) -> dict:
+    """The full-resolution TMDb URLs of a title's sheet backdrop and clearlogo (None: it has none)."""
+    api_key = settings.get('apis.tmdb.api_key') or Config.TMDB_API_KEY
+    if not api_key:
+        raise RuntimeError('no TMDb key')
+    base = (settings.get('apis.tmdb.base_url', '') or 'https://api.themoviedb.org/3').rstrip('/')
+    r = requests.get(f"{base}/{type_}/{tmdb_id}", params={'api_key': api_key}, timeout=10)
+    r.raise_for_status()
+    bd = (r.json() or {}).get('backdrop_path')
+    logo = _fetch_one_logo(tmdb_id, type_, raise_errors=True)
+    img = 'https://image.tmdb.org/t/p/original'
+    return {'backdrop': f"{img}{bd}" if bd else None, 'logo': f"{img}{logo}" if logo else None}
+
+
+def _wl_download(url: str) -> bytes:
+    status, ctype, body = _img_fetch(url)
+    if status != 200 or not body:
+        raise RuntimeError(f'upstream {status}')
+    return body
+
+
+def _wl_store():
+    global _wl_store_obj
+    with _wl_store_lock:
+        if _wl_store_obj is None:
+            from app.wl_images import WlImageStore
+            _wl_store_obj = WlImageStore(_wl_resolve, _wl_download)
+            try:
+                _wl_store_obj.reconcile()
+            except Exception as e:
+                logger.warning(f"wl-images reconcile failed: {e}")
+        return _wl_store_obj
+
+
+def _wl_url(type_: str, tmdb_id: int, kind: str) -> str:
+    return f"{(app.config.get('URL_BASE') or '').rstrip('/')}/api/wl-image/{type_}/{tmdb_id}/{kind}"
+
+
+def _wl_sync_and_annotate(type_: str, items: list) -> None:
+    """Never fails the watchlist: the store follows it and each item gets `wl_images` ({backdrop, logo}: a local
+    URL when stored, else null)."""
+    try:
+        store = _wl_store()
+        ids = [i.get('tmdb_id') for i in items if i.get('tmdb_id')]
+        store.sync(type_, ids)
+        for i in items:
+            tid = i.get('tmdb_id')
+            if not tid:
+                continue
+            have = store.present((type_, int(tid)))
+            i['wl_images'] = {k: (_wl_url(type_, int(tid), k) if have[k] else None) for k in ('backdrop', 'logo')}
+    except Exception as e:
+        logger.warning(f"wl-images sync failed: {e}")
+
+
+def _wl_forget(type_: str, tmdb_id) -> None:
+    try:
+        from app.wl_images import valid
+        key = valid(type_, str(tmdb_id))
+        if key:
+            _wl_store().remove(key)
+    except Exception as e:
+        logger.warning(f"wl-images prune failed: {e}")
+
+
+@app.route('/api/wl-image/<type_>/<tmdb_id>/<kind>')
+def wl_image(type_, tmdb_id, kind):
+    """A Watchlist item's stored sheet image. A miss is a fast 404 (never fetched inline: the background worker
+    fills the store); the browser may cache a hit (the service worker never caches /api/)."""
+    from flask import send_file
+    from app.wl_images import valid, CTYPES
+    key = valid(type_, tmdb_id, kind)
+    if not key:
+        return jsonify({'error': 'invalid'}), 400, {'Cache-Control': 'no-store'}
+    store = _wl_store()
+    p = store.path(key, kind)
+    if p is None:
+        return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
+    store.touch(p)
+    resp = send_file(str(p), mimetype=CTYPES[p.suffix[1:]], conditional=True, max_age=604800)
+    resp.headers['Cache-Control'] = 'public, max-age=604800, immutable'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    return resp
+
+
+def _wl_startup_reconcile():
+    """Startup: the store is reconciled (partials, cap) and follows the current watchlists once."""
+    time.sleep(20)
+    try:
+        _wl_store()
+        with app.test_request_context('/api/watchlist'):
+            try:
+                get_watchlist()
+            except Exception as e:
+                logger.info(f"wl-images startup movie sync skipped: {e}")
+            try:
+                get_tv_watchlist()
+            except Exception as e:
+                logger.info(f"wl-images startup tv sync skipped: {e}")
+    except Exception as e:
+        logger.warning(f"wl-images startup reconcile failed: {e}")
+
+
+if not os.environ.get('PYTEST_CURRENT_TEST') and os.environ.get('LUMA_WL_IMAGES', '1') != '0':
+    threading.Thread(target=_wl_startup_reconcile, name='wl-images-startup', daemon=True).start()
 
 
 # Playback Endpoints

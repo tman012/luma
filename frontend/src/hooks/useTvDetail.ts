@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useLocalArt, withLocalArt } from '@/services/localArt';
 import { pickBestTrailer } from '@/utils/pickBestTrailer';
 import {
   parseTmdbTvResponse,
@@ -447,9 +448,12 @@ export function useTvDetail(
   const colorsTmdbId = ratingKey ? (plexTmdb === undefined ? tmdbId : (plexTmdb ?? undefined)) : resolvedTmdbId;
   const { colors: ultraBlurColors, settled: colorsSettled } =
     useModalColors('tv', ratingKey, colorsTmdbId, colorsEnabled);
+  // wl-images: a Watchlist open's server-stored backdrop / logo replace TMDb's (a failed one falls back: useLocalArt).
+  const local = useLocalArt('tv', show?.tmdbId ?? tmdbId);
+  const shownShow = useMemo(() => withLocalArt(show, local), [show, local?.backdrop, local?.logo]);
 
   return {
-    show,
+    show: shownShow,
     seasons,
     tvdbId,
     ownership,
