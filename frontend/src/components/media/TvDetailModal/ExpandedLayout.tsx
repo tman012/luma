@@ -1481,15 +1481,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
             overflowX: 'hidden',
           }}>
 
-            {/* Loading state */}
+            {/* Loading state: the pre-reveal surface only, no spinner (Taylor 2026-11-02) */}
             {(loading || (!reveal.revealed && !error)) && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-                <div style={{
-                  width: '48px', height: '48px', borderRadius: '50%',
-                  border: '2px solid rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.7)',
-                  animation: 'tvExpandedSpin 0.8s linear infinite',
-                }} />
-              </div>
+              <div data-sheet-pending="" style={{ display: 'flex', flex: 1 }} />
             )}
 
             {/* Error state */}
@@ -1590,15 +1584,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
                   {/* Bottom group */}
                   <div style={{ flexShrink: 0 }}>
 
-                    {/* Episode mode: loading spinner */}
+                    {/* Episode mode while fetching: reserved space, no spinner */}
                     {isEpisodeIntent && !inEpisodeMode && (
-                      <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
-                        <div style={{
-                          width: '28px', height: '28px', borderRadius: '50%',
-                          border: '2px solid rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.7)',
-                          animation: 'tvExpandedSpin 0.8s linear infinite',
-                        }} />
-                      </div>
+                      <div data-episode-pending="" style={{ padding: '40px 0', minHeight: '28px' }} />
                     )}
 
                     {/* Episode mode: episode header */}

@@ -45,7 +45,7 @@ describe('v341d: the clearlogo never pops in or moves the block', () => {
       expect(s, k).toMatch(/data-title-box=""[\s\S]{0,400}height: '140px'/);
       expect(s, k).toMatch(/data-hero-title=\{sheetHero\.state\} style=\{\{ position: 'absolute', inset: 0/);
       expect(s, k).not.toMatch(/naturalHeight|onLoad=\{[^}]*setLogo/);
-      expect(s, k).toMatch(/sheetHero\.deadline && !reveal\.revealed && !error && \(\s*<div data-sheet-spinner/);
+      expect(s, k).not.toMatch(/data-sheet-spinner/);
     }
   });
   it('an owned title opens with its Plex key as well as the TMDb id (the Plex art path), movies too (v341i)', () => {
@@ -77,7 +77,7 @@ describe('v341d: late TMDb text after the reveal changes nothing visible', () =>
     }
   });
 });
-describe('v341d: desktop keeps its sheet spinner until the one reveal (no blank between details and reveal)', () => {
+describe('v341d: desktop keeps its pre-reveal surface until the one reveal (no spinner since the no-spinner fix)', () => {
   it('movie and TV expanded', () => {
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
       expect(src(`components/media/${k}/ExpandedLayout.tsx`), k).toMatch(/\{\(loading \|\| \(!reveal\.revealed && !error\)\) && \(/);

@@ -855,27 +855,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           }}
         >
 
-        {/* Loading state */}
+        {/* Loading state: the pre-reveal surface only, no spinner (Taylor 2026-11-02) */}
         {(loading || (!reveal.revealed && !error)) && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flex: 1,
-            }}
-          >
-            <div
-              style={{
-                width: '48px',
-                height: '48px',
-                borderRadius: '50%',
-                border: '2px solid rgba(255,255,255,0.15)',
-                borderTopColor: 'rgba(255,255,255,0.7)',
-                animation: 'webModalSpin 0.8s linear infinite',
-              }}
-            />
-          </div>
+          <div data-sheet-pending="" style={{ display: 'flex', flex: 1 }} />
         )}
 
         {/* Error state */}

@@ -442,13 +442,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   return (
     <SheetFrame name="MovieDetailModal" phase={phase} composed={composed} go={go} onScrimClick={onClose}>
       <SheetCard background={sheetBg}>
-        {/* Past the 1.0s deadline with the details still out (a slow TMDb): the sheet spinner, as on desktop; it
-            leaves at the one reveal. */}
-        {sheetHero.deadline && !reveal.revealed && !error && (
-          <div data-sheet-spinner="" aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-            <div style={{ width: '28px', height: '28px', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.7)', animation: 'webModalSpin 0.8s linear infinite' }} />
-          </div>
-        )}
+        {/* No sheet spinner past the deadline (Taylor 2026-11-02): the pre-reveal surface stays as is. */}
         {/* Scrollable content */}
         <div
           ref={scrollRef}
