@@ -13263,7 +13263,8 @@ def img_plex_proxy():
             v = int(raw)
         except (TypeError, ValueError):
             return None
-        return max(16, min(v, 2000)) if v > 0 else None
+        # 2560: the desktop sheet's art at DPR >= 2 (2560x1440, v341s); one side alone still fits a 2000 box.
+        return max(16, min(v, 2560)) if v > 0 else None
 
     req_w = _clamp_dim(request.args.get('w'))
     req_h = _clamp_dim(request.args.get('h'))

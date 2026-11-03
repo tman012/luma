@@ -90,17 +90,25 @@ export function phoneMinimal(): boolean {
   return isMinimal() && typeof window !== 'undefined' && window.innerWidth < 1024;
 }
 
-/** Plex art for the popup backdrop: a 780x439 transcode on phones (minimal), 1280x720 elsewhere (v341o). The desktop
- *  sheet used the unsized original (~1.1 MB for Escape from L.A.): on fast4g it landed after the reveal cap and the
- *  sheet revealed with no backdrop. 1280x720 is the phone's sharp size (backdropHiRes), so the row prewarm, the tap
+/** Plex art for the popup backdrop: a 780x439 transcode on phones (minimal); on desktop 1920x1080, or 2560x1440 at
+ *  devicePixelRatio >= 2 (v341s, Designer D-SHARP: 1280x720 was soft on a full-width sheet). Never the unsized
+ *  original (~1.1 MB for Escape from L.A., v341o). The size is decided here only, so the row prewarm, the tap
  *  preload and the hero all name this one URL. */
-export const PLEX_ART_W = 1280;
-export const PLEX_ART_H = 720;
+export const PLEX_ART_W = 1920;
+export const PLEX_ART_H = 1080;
+export const PLEX_ART_W_2X = 2560;
+export const PLEX_ART_H_2X = 1440;
+export function plexArtSize(): [number, number] {
+  if (phoneMinimal()) return [780, 439];
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  return dpr >= 2 ? [PLEX_ART_W_2X, PLEX_ART_H_2X] : [PLEX_ART_W, PLEX_ART_H];
+}
 export function plexBackdrop(url: string | null | undefined): string | null {
   if (!url) return null;
   // One URL per art: an encoded path (Home's cards) and the raw one (the details) load the same image once.
   url = url.replace(/([?&]url=)(%2F[^&]*)/i, (_m, k: string, v: string) => k + decodeURIComponent(v));
-  return phoneMinimal() ? sizedPlexImg(url, 780, 439) : sizedPlexImg(url, PLEX_ART_W, PLEX_ART_H);
+  const [w, h] = plexArtSize();
+  return sizedPlexImg(url, w, h);
 }
 
 /** The Plex art as the sheet shows it (finalBackdropUrl of plexBackdrop): a tap or a warm-up preloads this exact URL. */

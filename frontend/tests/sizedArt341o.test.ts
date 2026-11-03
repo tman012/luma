@@ -2,17 +2,26 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { plexBackdrop, plexSheetArt, plexArtFromPath, finalBackdropUrl, PLEX_ART_W, PLEX_ART_H } from '@/utils/image';
 import { keepHomePostersOnOpen, beginSheetPriority, endSheetPriority, _resetSheetPriority } from '@/loading/sheetPriority';
 
-describe('v341o desktop Plex art is the 1280x720 transcode (Tester N1440/I1440, Designer O2)', () => {
-  it('desktop never names the unsized original', () => {
-    expect(PLEX_ART_W).toBe(1280); expect(PLEX_ART_H).toBe(720);
-    const raw = '/api/img/plex?url=/library/metadata/92145/art/1793430969';
-    expect(plexBackdrop(raw)).toMatch(/\/api\/img\/plex\?url=\/library\/metadata\/92145\/art\/1793430969&w=1280&h=720$/);
+describe('v341s desktop Plex art: 1920x1080, 2560x1440 at DPR >= 2, one URL (Designer D-SHARP)', () => {
+  const setDpr = (v: number) => Object.defineProperty(window, 'devicePixelRatio', { value: v, configurable: true });
+  afterEach(() => setDpr(1));
+  const raw = '/api/img/plex?url=/library/metadata/92145/art/1793430969';
+  it('desktop at DPR 1 names the 1920x1080 transcode, never the unsized original', () => {
+    setDpr(1);
+    expect(PLEX_ART_W).toBe(1920); expect(PLEX_ART_H).toBe(1080);
+    expect(plexBackdrop(raw)).toMatch(/\/api\/img\/plex\?url=\/library\/metadata\/92145\/art\/1793430969&w=1920&h=1080$/);
   });
-  it('row prewarm, tap preload and hero name one URL (encoded card path = raw detail path)', () => {
+  it('desktop at DPR 2 (and above) names 2560x1440', () => {
+    for (const d of [2, 3]) { setDpr(d); expect(plexBackdrop(raw)).toMatch(/&w=2560&h=1440$/); }
+    setDpr(1.5); expect(plexBackdrop(raw)).toMatch(/&w=1920&h=1080$/);
+  });
+  for (const d of [1, 2]) it(`row prewarm, tap preload and hero name one URL at DPR ${d}`, () => {
+    setDpr(d);
     const a = plexArtFromPath('/library/metadata/92145/art/1793430969');
     const b = plexSheetArt('/api/img/plex?url=/library/metadata/92145/art/1793430969');
     const c = finalBackdropUrl(plexBackdrop('/api/img/plex?url=%2Flibrary%2Fmetadata%2F92145%2Fart%2F1793430969'));
     expect(a).toBe(b); expect(b).toBe(c); expect(finalBackdropUrl(a)).toBe(a);
+    expect(a).toMatch(d >= 2 ? /&w=2560&h=1440$/ : /&w=1920&h=1080$/);
   });
 });
 
