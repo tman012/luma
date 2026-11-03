@@ -10,6 +10,7 @@ const listeners = new Set<() => void>();
 /** A tap from a Home card: its on-screen posters are never stripped (R1/y). A search open still holds them: behind a
  *  slow TMDb the search grid's on-screen posters held all six HTTP/1.1 sockets (I1440: 4.35 s, no art). */
 let keepOnScreen = false;
+export const SEARCH_SURFACE = '[data-testid="search-shelf"],[data-testid="search-result"],[data-testid="search-results"],[data-testid="phone-search-row"],[data-testid="r3-card"]';
 let nextFromHome = false;
 export function keepHomePostersOnOpen(fromHome: boolean): void { nextFromHome = fromHome; }
 /** On-screen page images lowered for the open (their own fetchpriority, restored at the reveal or Close). */
@@ -60,7 +61,9 @@ function hold(img: HTMLImageElement, vis: boolean): void {
   }
   if (img.complete && src) return;
   if (src == null && srcset == null) return;
-  if (vis && keepOnScreen) {
+  // A search surface's posters are always held (Tester PREP 46d2e5ee: phone SearchShelf posters kept all six
+  // HTTP/1.1 sockets for 4.3 s behind a slow TMDb; 70fb71e1 cancelled them).
+  if (vis && keepOnScreen && !img.closest(SEARCH_SURFACE)) {
     if (!lowered.some((l) => l.img === img)) { lowered.push({ img, prio: img.getAttribute('fetchpriority') }); img.setAttribute('fetchpriority', 'low'); }
     return;
   }
