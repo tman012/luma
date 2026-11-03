@@ -32,6 +32,7 @@ BACKDROP_MAX_W = 1920
 # v349: phone copies (Designer's phone sizes: the sheet's 1280 backdrop, the w300 logo), resized here from the stored
 # image; served with ?w=<width>.
 VARIANTS = {'backdrop': 1280, 'logo': 300}
+WORKER_GAP_S = 0.05
 _MAGIC = ((b'\xff\xd8\xff', 'jpg', 'image/jpeg'), (b'\x89PNG\r\n\x1a\n', 'png', 'image/png'),
           (b'RIFF', 'webp', 'image/webp'))
 CTYPES = {'jpg': 'image/jpeg', 'png': 'image/png', 'webp': 'image/webp'}
@@ -228,6 +229,9 @@ class WlImageStore:
             finally:
                 with self._lock:
                     self._queued.discard(key)
+            # v350: background work yields between titles, so a backfill (every stored title's phone copies after an
+            # update) never crowds out the requests a sheet open is waiting on.
+            time.sleep(WORKER_GAP_S)
 
     def drain(self) -> None:
         """Run everything queued now, in this thread (tests, a one-shot reconcile)."""

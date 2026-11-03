@@ -327,7 +327,7 @@ async function fetchWatchlist(): Promise<WatchlistMovie[]> {
       addedDate: (m.added_date as string) || null,
       digitalReleaseDate: (m.digital_release_date as string) || null,
       digitalReleaseLabel: (m.digital_release_label as string) || null,
-      wlImages: parseWlImages(m.wl_images),
+      wlImages: parseWlImages(m.wl_images, 'movie', tmdbId),
     };
   });
 }

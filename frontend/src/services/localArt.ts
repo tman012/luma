@@ -17,7 +17,12 @@ const MAX = 200;
 export const PHONE_W = { backdrop: 1280, logo: 300 } as const;
 
 /** The payload's `wl_images` ({backdrop, logo}: URLs or null) as LocalArt, or null. */
-export function parseWlImages(v: unknown): LocalArt | null {
+export function parseWlImages(v: unknown, kind?: Kind, id?: number | null): LocalArt | null {
+  const art = parseWl(v);
+  if (art && kind && id) noteLocalArt(kind, id, art);
+  return art;
+}
+function parseWl(v: unknown): LocalArt | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as { backdrop?: unknown; logo?: unknown; backdrop_textless?: unknown };
   const pick = (x: unknown) => (typeof x === 'string' && x.includes('/api/wl-image/') ? x : null);
@@ -32,21 +37,59 @@ function drop(kind: Kind, id: number, which: keyof LocalArt, url: string): void 
   for (const l of Array.from(listeners)) l();
 }
 
+/** The URLs a sheet names for stored art: absolute, and on phones the server's phone copies (v349, Designer: the
+ *  1280 sheet backdrop, the w300 logo). */
+function sizedArt(art: LocalArt): LocalArt {
+  const abs = (u: string | null) => (u ? (u.startsWith('/api/') ? withBase(u) : u) : null);
+  const phone = phoneMinimal();
+  const sized = (u: string | null, w: number) => (u && phone ? `${u}${u.includes('?') ? '&' : '?'}w=${w}` : u);
+  return { backdrop: sized(abs(art.backdrop), PHONE_W.backdrop), logo: sized(abs(art.logo), PHONE_W.logo),
+    backdropTextless: !!art.backdropTextless };
+}
+
+/** v350 (Designer NO on ece4395c): a stored backdrop not decoded this long after the open is dropped before the
+ *  reveal, so the sheet's usual backdrop (TMDb) starts with time left inside the art deadline
+ *  (BACKDROP_ART_DEADLINE_MS 1.6 s): the hero never reveals bare while the normal path would have had art, and a
+ *  late local image never swaps in after. */
+export const LOCAL_BACKDROP_WAIT_MS = 700;
+
 /** A Watchlist open: its stored images start loading now (high priority) and the sheet uses them. */
 export function setLocalArt(kind: Kind, id: number | null | undefined, art: LocalArt | null | undefined): void {
   if (!id || !art) return;
-  const abs = (u: string | null) => (u ? (u.startsWith('/api/') ? withBase(u) : u) : null);
-  // v349: phones keep their sizes (Designer: the 1280 sheet backdrop, the w300 logo) from the server's phone copies.
-  const phone = phoneMinimal();
-  const sized = (u: string | null, w: number) => (u && phone ? `${u}${u.includes('?') ? '&' : '?'}w=${w}` : u);
-  const a = { backdrop: sized(abs(art.backdrop), PHONE_W.backdrop), logo: sized(abs(art.logo), PHONE_W.logo),
-    backdropTextless: !!art.backdropTextless };
+  const a = sizedArt(art);
+  noteLocalArt(kind, id, art);
   reg.delete(k(kind, id)); reg.set(k(kind, id), a);
   while (reg.size > MAX) reg.delete(reg.keys().next().value as string);
   for (const which of ['backdrop', 'logo'] as const) {
     const u = a[which];
     if (u) void loadImage(u, 'high').then(() => { if (!isDecoded(u)) drop(kind, id, which, u); });
   }
+  const b = a.backdrop;
+  if (b) window.setTimeout(() => { if (!isDecoded(b)) drop(kind, id, 'backdrop', b); }, LOCAL_BACKDROP_WAIT_MS);
+}
+
+/** Titles whose payload named stored art (Watchlist lists, the Home Watchlist rail), so their warm-ups and the tap
+ *  preload the stored backdrop instead of TMDb's (v350: never both). Nothing loads here. */
+const known = new Map<string, LocalArt>();
+export function noteLocalArt(kind: Kind, id: number | null | undefined, art: LocalArt | null | undefined): void {
+  if (!id || !art) return;
+  known.delete(k(kind, id)); known.set(k(kind, id), sizedArt(art));
+  while (known.size > 2000) known.delete(known.keys().next().value as string);
+}
+
+/** The stored backdrop a sheet of this title will show (warm-ups preload it in place of TMDb's), or null: none
+ *  stored, or this open dropped it (a load error or LOCAL_BACKDROP_WAIT_MS): then TMDb's is the one to load. */
+export function localBackdropFor(kind: Kind, id: number | null | undefined): string | null {
+  if (!id) return null;
+  const r = reg.get(k(kind, id));
+  if (r) return r.backdrop;
+  return known.get(k(kind, id))?.backdrop ?? null;
+}
+export function localLogoFor(kind: Kind, id: number | null | undefined): string | null {
+  if (!id) return null;
+  const r = reg.get(k(kind, id));
+  if (r) return r.logo;
+  return known.get(k(kind, id))?.logo ?? null;
 }
 
 export function localArt(kind: Kind, id: number | null | undefined): LocalArt | null {
@@ -77,7 +120,7 @@ export function clearLocalArt(kind: Kind, id: number | null | undefined): void {
   if (id) reg.delete(k(kind, id));
 }
 
-export function _resetLocalArt(): void { reg.clear(); }
+export function _resetLocalArt(): void { reg.clear(); known.clear(); }
 
 /** A sheet's details with its local art in place. v348 (Designer): an owned title keeps its Plex art (only the logo
  *  is local); a textless local backdrop fills the textless field where the sheet has one (TV), else the backdrop; a

@@ -13608,10 +13608,15 @@ def _wl_store():
         if _wl_store_obj is None:
             from app.wl_images import WlImageStore
             _wl_store_obj = WlImageStore(_wl_resolve, _wl_download)
-            try:
-                _wl_store_obj.reconcile()
-            except Exception as e:
-                logger.warning(f"wl-images reconcile failed: {e}")
+            # v350: the reconcile (a directory walk and the cap) runs off the request path: the first sheet open after
+            # a start never waits on it (Designer NO on ece4395c: a cold open's backdrop came 1.3 s late).
+            obj = _wl_store_obj
+            def _reconcile():
+                try:
+                    obj.reconcile()
+                except Exception as e:
+                    logger.warning(f"wl-images reconcile failed: {e}")
+            threading.Thread(target=_reconcile, name='wl-images-reconcile', daemon=True).start()
         return _wl_store_obj
 
 
@@ -13674,12 +13679,16 @@ def wl_image(type_, tmdb_id, kind):
     if not _wl_enabled():
         return jsonify({'error': 'off'}), 404, {'Cache-Control': 'no-store'}
     store = _wl_store()
-    p = store.path(key, kind, VARIANTS[kind] if w else None)   # ?w=: the phone copy
+    # ?w=: the phone copy; until the worker has made it (a title stored before v349) the stored image itself, never a
+    # 404 (v350: a phone open must not lose its local art to a pending backfill).
+    p = (store.path(key, kind, VARIANTS[kind]) if w else None) or store.path(key, kind)
     if p is None:
         return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
     store.touch(p)
     resp = send_file(str(p), mimetype=CTYPES[p.suffix[1:]], conditional=True, max_age=604800)
-    resp.headers['Cache-Control'] = 'public, max-age=604800, immutable'
+    # A stand-in for a phone copy not made yet is never cached under the copy's URL.
+    stand_in = bool(w) and '@' not in p.name
+    resp.headers['Cache-Control'] = 'no-cache' if stand_in else 'public, max-age=604800, immutable'
     resp.headers['X-Content-Type-Options'] = 'nosniff'
     return resp
 

@@ -10,6 +10,7 @@ import { apiFetch } from '@/apiClient';
 import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import { colorsFromImage } from '@/utils/posterColors';
 import { finalBackdropUrl, plexSheetArt } from '@/utils/image';
+import { localBackdropFor, localLogoFor } from '@/services/localArt';
 import { parsePlexResponse, parsePlexTvResponse } from '@/utils/modalParsers';
 import { dropOtherColors, getSeedColors, modalColors, prefetchModalColors, setSeedColors } from '@/services/modalColors';
 import { isMinimal } from '@/minimal';
@@ -180,7 +181,7 @@ export async function fetchClearlogo(kind: 'movie' | 'tv', tmdbId: number, signa
         const url = logoImg(((await resp.json()) as { clearlogo_url?: string | null }).clearlogo_url ?? null);
         // v345: a sheet's logo starts loading the moment its URL is known (high priority, never queued behind the hold);
         // the hero and title reuse this load.
-        if (url) void preloadImage(url, 'high');
+        if (url && !localLogoFor(kind, tmdbId)) void preloadImage(url, 'high');   // v350: a stored logo: never TMDb's too
         return url;
       }
     } catch (e) {
@@ -267,7 +268,7 @@ export async function warmDetail(
   const logoAsk = tid ? json(clearlogoPath(kind, tid), undefined, own) : Promise.resolve(null);
   // v345 (prod's order): the open's logo image starts the moment its URL is known, at high priority, never after the
   // details or behind the background pause; the sheet's hero and title reuse this load (reuseLoad).
-  if (opts.open && images) void logoAsk.then((l) => preloadImage(logoImg((l?.clearlogo_url as string | undefined) ?? null), 'high'));
+  if (opts.open && images) void logoAsk.then((l) => preloadImage(localLogoFor(kind, tid) || logoImg((l?.clearlogo_url as string | undefined) ?? null), 'high'));
   const [tm, logo] = await Promise.all([
     tid ? json(kind === 'movie' ? `/api/movie/${tid}` : `/api/tv/${tid}`, bg, own) : Promise.resolve(null),
     logoAsk,
@@ -293,8 +294,9 @@ export async function warmDetail(
   await Promise.all([
     // The sheet's one backdrop (finalBackdropUrl): decoding it from the tap overlaps the sheet's enter motion.
     // An owned title whose Plex art the card/row named shows that art only: never TMDb's backdrop too (v341k).
-    preloadImage((ratingKey && (opts.art ?? []).find(Boolean)) || finalBackdropUrl(path ? tmdbBackdrop(path) : plexBackdrop), opts.open ? 'high' : 'low'),
-    preloadImage(logoImg((logo?.clearlogo_url as string | undefined) ?? null), opts.open ? 'high' : 'low'),
+    // wl-images v350: stored art in place of TMDb's (never both); after a drop (error / wait) TMDb's again.
+    preloadImage((ratingKey && (opts.art ?? []).find(Boolean)) || localBackdropFor(kind, tid) || finalBackdropUrl(path ? tmdbBackdrop(path) : plexBackdrop), opts.open ? 'high' : 'low'),
+    preloadImage(localLogoFor(kind, tid) || logoImg((logo?.clearlogo_url as string | undefined) ?? null), opts.open ? 'high' : 'low'),
     // With a poster-derived seed the palette never gates the reveal.
     getSeedColors(kind, ratingKey, tmdbId) ? Promise.resolve(null) : modalColors(kind, ratingKey, tmdbId),
   ]);
@@ -514,7 +516,7 @@ export async function openWhenReady(
   // cw-logo: a logo the card names starts downloading at the tap, at high priority (the open's hold pauses and drops
   // only low-priority warm-ups; this load is the sheet's own: the hero's decode reuses it, see useLoadedImage).
   primeClearlogo(logo);
-  const logoUrl = logo?.url ? logoImg(logo.url) : null;
+  const logoUrl = logo?.url && !localLogoFor(kind, tmdbId) ? logoImg(logo.url) : null;   // v350: stored logo: never TMDb's too
   if (logoUrl) void preloadImage(logoUrl, 'high');
   // A Home card's tap leaves its on-screen posters loading (v341r); a search row's open holds them (I1440).
   keepHomePostersOnOpen(!!card?.closest('[data-testid^="card-"]') && !card.closest(SEARCH_SURFACE + ',[role="dialog"]'));

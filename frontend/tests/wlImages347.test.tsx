@@ -13,18 +13,22 @@ import { _resetImageLoader } from '@/loading/imageLoader';
 import { parseWlImages, setLocalArt, _resetLocalArt } from '@/services/localArt';
 
 const broken = new Set<string>();
+/** v350: per-URL load time (ms; default 20) and every URL an Image was asked to load. */
+const slow = new Map<string, number>();
+const requested: string[] = [];
+const delay = (v: string) => { for (const [k2, ms] of slow) if (v.includes(k2)) return ms; return 20; };
 class FakeImage {
   private s = ''; fetchPriority = ''; decoding = ''; onload: null | (() => void) = null; onerror: null | (() => void) = null;
-  set src(v: string) { this.s = v; if (v) setTimeout(() => (broken.has(v) ? this.onerror?.() : this.onload?.()), 20); }
+  set src(v: string) { this.s = v; if (v) { requested.push(v); setTimeout(() => (broken.has(v) ? this.onerror?.() : this.onload?.()), delay(v)); } }
   get src() { return this.s; }
   removeAttribute() { this.s = ''; }
-  decode = () => new Promise<void>((res, rej) => { const v = this.s; setTimeout(() => (broken.has(v) ? rej(new Error('x')) : res()), 20); });
+  decode = () => new Promise<void>((res, rej) => { const v = this.s; setTimeout(() => (broken.has(v) ? rej(new Error('x')) : res()), delay(v)); });
 }
 Object.defineProperty(HTMLImageElement.prototype, 'complete', { configurable: true, get() { return true; } });
 Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', { configurable: true, get() { return 300; } });
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
 beforeEach(() => {
-  _resetModalPrefetch(); _resetImageLoader(); _resetLocalArt(); broken.clear();
+  _resetModalPrefetch(); _resetImageLoader(); _resetLocalArt(); broken.clear(); slow.clear(); requested.length = 0;
   vi.useFakeTimers(); vi.stubGlobal('Image', FakeImage);
   vi.stubGlobal('fetch', vi.fn(async (u: string) => {
     const url = String(u);
@@ -37,12 +41,19 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 const LOCAL = { backdrop: '/api/wl-image/movie/603/backdrop', logo: '/api/wl-image/movie/603/logo' };
 async function openWl(art: typeof LOCAL | null) {
+  atReveal = null;
   setLocalArt('movie', 603, art);
   const row = document.createElement('button'); row.setAttribute('aria-label', 'The Matrix'); document.body.appendChild(row);
   void openWhenReady('movie', undefined, 603, row, () => {}, undefined, []);
   render(<MovieDetailModal tmdbId={603} onClose={() => {}} />);
-  for (let i = 0; i < 60; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  for (let i = 0; i < 80; i++) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    const st = document.querySelector('[data-hero-title]')?.getAttribute('data-hero-title')
+      ?? ((document.querySelector('[data-reveal]') as HTMLElement | null)?.style.opacity === '1' ? 'shown' : null);
+    if (st && st !== 'hold' && atReveal === null) atReveal = srcs().filter((u) => /backdrop|tmdb-bd/.test(u));
+  }
 }
+let atReveal: string[] | null = null;
 const srcs = () => Array.from(document.querySelectorAll('img')).map((i) => i.getAttribute('src') || '');
 
 describe('wl-images: Watchlist sheet opens on the local images', () => {
@@ -113,6 +124,43 @@ describe('v348 (Designer): local art rules', () => {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
       win.__LUMA_MINIMAL__ = was;
     }
+  });
+  for (const mode of ['compact', 'expanded'] as const) {
+    it(`v350 ${mode}: stored art present -> no TMDb backdrop (or logo) is ever requested`, async () => {
+      layoutMode.mode = mode;
+      await openWl(LOCAL);
+      expect(requested.some((u) => u.includes('/api/wl-image/movie/603/backdrop'))).toBe(true);
+      expect(requested.filter((u) => u.includes('tmdb-bd'))).toEqual([]);
+      expect(requested.filter((u) => u.includes('tmdb-logo'))).toEqual([]);
+    });
+    it(`v350 ${mode}: the stored backdrop decodes late -> dropped before the reveal; TMDb's is there at the reveal, no late swap`, async () => {
+      layoutMode.mode = mode;
+      slow.set('/api/wl-image/movie/603/backdrop', 2500);
+      await openWl(LOCAL);
+      expect(atReveal, 'revealed').not.toBeNull();
+      expect(atReveal!.some((u) => u.includes('tmdb-bd'))).toBe(true);
+      expect(atReveal!.some((u) => u.includes('/api/wl-image/movie/603/backdrop'))).toBe(false);
+      const end = srcs();
+      expect(end.some((u) => u.includes('tmdb-bd'))).toBe(true);
+      expect(end.some((u) => u.includes('/api/wl-image/movie/603/backdrop')), 'never swapped in after').toBe(false);
+    });
+    it(`v350 ${mode}: the stored backdrop within the wait -> held for it, on screen at the reveal`, async () => {
+      layoutMode.mode = mode;
+      slow.set('/api/wl-image/movie/603/backdrop', 500);
+      await openWl(LOCAL);
+      expect(atReveal!.some((u) => u.includes('/api/wl-image/movie/603/backdrop'))).toBe(true);
+      expect(requested.filter((u) => u.includes('tmdb-bd'))).toEqual([]);
+    });
+  }
+  it('v350 the Home payload notes stored art: a warm-up before any tap preloads it, not TMDb\'s', async () => {
+    const { noteLocalArt, localBackdropFor } = await import('@/services/localArt');
+    noteLocalArt('movie', 603, LOCAL);
+    expect(localBackdropFor('movie', 603)).toMatch(/\/api\/wl-image\/movie\/603\/backdrop$/);
+    const { warmDetail } = await import('@/services/modalPrefetch');
+    void warmDetail('movie', undefined, 603);
+    for (let i = 0; i < 20; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(requested.some((u) => u.includes('/api/wl-image/movie/603/backdrop'))).toBe(true);
+    expect(requested.filter((u) => u.includes('tmdb-bd'))).toEqual([]);
   });
   it('v349 minimal Home Watchlist rail payload: wl_images parses for the open; a desktop-width minimal open stays full size', () => {
     const card = { key: 'watchlist-603', type: 'movie', tmdb_id: 603,

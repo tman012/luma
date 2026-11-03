@@ -130,7 +130,7 @@ async function fetchWatchlist(): Promise<WatchlistMovie[]> {
       addedDate: (m.added_date as string) || null,
       digitalReleaseDate: (m.digital_release_date as string) || null,
       digitalReleaseLabel: (m.digital_release_label as string) || null,
-      wlImages: parseWlImages(m.wl_images),
+      wlImages: parseWlImages(m.wl_images, 'movie', tmdbId),
     };
   });
 }
@@ -154,7 +154,7 @@ async function fetchTvWatchlist(): Promise<WatchlistSeries[]> {
         premiereDate: (s.premiere_date as string) ?? null,
         episodeOrder: (s.episode_order as number) ?? 0,
         qualityProfileName: (s.quality_profile_name as string) || '',
-        wlImages: parseWlImages(s.wl_images),
+        wlImages: parseWlImages(s.wl_images, 'tv', tmdbId),
       };
     });
   } catch {

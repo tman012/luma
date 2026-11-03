@@ -349,3 +349,24 @@ def test_minimal_home_watchlist_rail_and_native_watchlist_follow_the_store(test_
     assert out[0]['wl_images']['backdrop'].endswith(f"/api/wl-image/movie/{out[0]['tmdb_id']}/backdrop")
     movie_watchlist.removed_hooks[0](578) if movie_watchlist.removed_hooks else None
     assert not s.present(('movie', 578))['backdrop'], 'a native watchlist removal prunes at once'
+
+
+def test_v350_a_phone_copy_not_made_yet_serves_the_stored_image_uncached(test_app, store):
+    s, _ = store
+    s.sync('movie', [578]); s.drain()
+    s.path(('movie', 578), 'backdrop', 1280).unlink()
+    r = test_app.test_client().get('/api/wl-image/movie/578/backdrop?w=1280')
+    assert r.status_code == 200 and r.data == JPG and r.headers['Cache-Control'] == 'no-cache'
+
+
+def test_v350_the_first_request_never_waits_on_the_reconcile(test_app, tmp_path, monkeypatch):
+    import threading as th
+    gate = th.Event()
+    monkeypatch.setattr(w.WlImageStore, 'reconcile', lambda self: gate.wait(5))
+    monkeypatch.setattr(m, '_wl_store_obj', None)
+    monkeypatch.setenv('LUMA_WL_IMAGE_DIR', str(tmp_path / 'wl'))
+    t0 = time.time()
+    r = test_app.test_client().get('/api/wl-image/movie/578/backdrop')
+    gate.set()
+    assert r.status_code == 404 and time.time() - t0 < 2
+    monkeypatch.setattr(m, '_wl_store_obj', None)
