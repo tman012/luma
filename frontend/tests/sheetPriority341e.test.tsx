@@ -130,7 +130,7 @@ describe('v341i: Tester PREP on 58ed7e21 (Plex art from the tap, one URL)', () =
     const m = src('services/modalPrefetch.ts');
     expect(m).toMatch(/for \(const u of opts\.art \?\? \[\]\) if \(u\) void preloadImage\(u, opts\.open \? 'high' : 'low'\);/);
     expect(src('services/searchApi.ts')).toMatch(/openWhenReady\(kind, ratingKey, tmdbId, el \?\? null, open, onClosed, resultArt\(item\)\)/);
-    expect(src('pages/MinimalHomePage.tsx')).toMatch(/openDetail\(modals, c\), undefined, cardArt\(c\)(, cardLogoOf\(c, kind, tmdbId\))?\)/);
+    expect(src('pages/MinimalHomePage.tsx')).toMatch(/openDetail\(modals, c\), undefined, (local \? \[local\] : )?cardArt\(c\)(, cardLogoOf\(c, kind, tmdbId\))?\)/);
   });
   it('one URL per Plex art: Home encoded paths and detail raw paths are the same image', async () => {
     const { plexBackdrop } = await import('@/utils/image');

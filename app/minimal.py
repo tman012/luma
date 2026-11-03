@@ -94,7 +94,7 @@ ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts
                     # Per-section tracker lists (owner only; the routes check).
                     '/api/settings/sections/',
                     # TV library paths, scan, shows and fix-match (owner only; the routes check).
-                    '/api/settings/tv/', '/api/settings/movies/', '/api/movies/watchlist/', '/api/rooms/',
+                    '/api/settings/tv/', '/api/settings/movies/', '/api/movies/watchlist/', '/api/wl-image/', '/api/rooms/',
                     # v216: the file-info sheet's Fix Match (admin only; the routes check).
                     '/api/plex/match/',
                     # v252 Genre Roulette status, run and preview (owner only; the routes check).

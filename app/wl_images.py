@@ -29,6 +29,9 @@ FAIL_RETRY_S = 600
 MAX_FILE_BYTES = 25 * 1024 * 1024
 # v348 (Designer): backdrops are kept at most this wide (TMDb w1920, or resized here): a 3840 original is 1.4-1.9 MB.
 BACKDROP_MAX_W = 1920
+# v349: phone copies (Designer's phone sizes: the sheet's 1280 backdrop, the w300 logo), resized here from the stored
+# image; served with ?w=<width>.
+VARIANTS = {'backdrop': 1280, 'logo': 300}
 _MAGIC = ((b'\xff\xd8\xff', 'jpg', 'image/jpeg'), (b'\x89PNG\r\n\x1a\n', 'png', 'image/png'),
           (b'RIFF', 'webp', 'image/webp'))
 CTYPES = {'jpg': 'image/jpeg', 'png': 'image/png', 'webp': 'image/webp'}
@@ -65,15 +68,22 @@ def valid(type_: str, id_: str, kind: Optional[str] = None) -> Optional[Key]:
 
 def fit_backdrop(body: bytes, max_w: int = BACKDROP_MAX_W) -> bytes:
     """A backdrop wider than max_w, resized to it (JPEG); anything else as it is (or when Pillow can't read it)."""
+    return _fit(body, max_w, keep_alpha=False)
+
+
+def _fit(body: bytes, max_w: int, keep_alpha: bool) -> bytes:
     try:
         from io import BytesIO
         from PIL import Image
         im = Image.open(BytesIO(body))
         if im.width <= max_w:
             return body
-        h = round(im.height * max_w / im.width)
+        h = max(1, round(im.height * max_w / im.width))
         out = BytesIO()
-        im.convert('RGB').resize((max_w, h), Image.LANCZOS).save(out, 'JPEG', quality=86, optimize=True)
+        if keep_alpha:   # a logo stays a PNG with its transparency
+            im.convert('RGBA').resize((max_w, h), Image.LANCZOS).save(out, 'PNG', optimize=True)
+        else:
+            im.convert('RGB').resize((max_w, h), Image.LANCZOS).save(out, 'JPEG', quality=86, optimize=True)
         return out.getvalue()
     except Exception:
         return body
@@ -106,13 +116,33 @@ class WlImageStore:
     def _dir(self, key: Key) -> Path:
         return self.root / key[0] / str(key[1])
 
-    def path(self, key: Key, kind: str) -> Optional[Path]:
+    def path(self, key: Key, kind: str, w: Optional[int] = None) -> Optional[Path]:
+        """The stored file; `w`: its phone copy (VARIANTS width) instead."""
         d = self._dir(key)
+        name = kind if w is None else f'{kind}@{w}'
         for ext in CTYPES:
-            p = d / f'{kind}.{ext}'
+            p = d / f'{name}.{ext}'
             if p.is_file():
                 return p
         return None
+
+    def _variants_missing(self, key: Key) -> bool:
+        return any(self.path(key, k) and not self.path(key, k, w) for k, w in VARIANTS.items())
+
+    def _make_variant(self, key: Key, kind: str) -> None:
+        src = self.path(key, kind)
+        if not src:
+            return
+        w = VARIANTS[kind]
+        body = _fit(src.read_bytes(), w, keep_alpha=kind == 'logo')
+        ext = _sniff(body) or src.suffix[1:]
+        for old in CTYPES:
+            o = self._dir(key) / f'{kind}@{w}.{old}'
+            if o.exists() and old != ext:
+                o.unlink()
+        tmp = self._dir(key) / f'.{kind}@{w}.part'
+        tmp.write_bytes(body)
+        os.replace(tmp, self._dir(key) / f'{kind}@{w}.{ext}')
 
     def present(self, key: Key) -> Dict[str, bool]:
         return {k: self.path(key, k) is not None for k in KINDS}
@@ -125,6 +155,10 @@ class WlImageStore:
     def sync(self, type_: str, ids: Iterable[object]) -> None:
         """The `type_` watchlist as it is now: new titles are queued, titles gone are pruned."""
         keys = {k for k in (valid(type_, str(i)) for i in ids) if k}
+        # Reviewer #2: an empty answer (a hiccup as easily as an emptied list) never wipes the store; the cap and
+        # per-title removals still bound it.
+        if not keys:
+            return
         self.sync_type(keys, {type_})
 
     def sync_type(self, keys: Set[Key], types: Iterable[str]) -> None:
@@ -145,7 +179,7 @@ class WlImageStore:
 
     def want(self, key: Key) -> None:
         """Queue a fetch for a title still missing a file (not while its last failure is recent)."""
-        if all(self.present(key).values()):
+        if all(self.present(key).values()) and not self._variants_missing(key):
             return
         with self._lock:
             self._wanted.add(key)
@@ -162,7 +196,10 @@ class WlImageStore:
             self._failed.pop(key, None)
         d = self._dir(key)
         if d.is_dir():
+            names = {f'{k}{v}.{e}' for k in KINDS for v in ('', f'@{VARIANTS[k]}') for e in CTYPES} | {'textless'}
             for f in d.iterdir():
+                if f.name not in names and not (f.name.startswith('.') and f.name.endswith('.part')):
+                    continue
                 try:
                     f.unlink()
                 except OSError:
@@ -212,6 +249,11 @@ class WlImageStore:
         with self._lock:
             if key not in self._wanted:
                 return False
+        if all(self.present(key).values()):
+            for kind in KINDS:
+                if not self.path(key, kind, VARIANTS[kind]):
+                    self._make_variant(key, kind)
+            return True
         try:
             urls = self._resolve(key[0], key[1]) or {}
         except Exception as e:
@@ -220,7 +262,11 @@ class WlImageStore:
         ok = True
         for kind in KINDS:
             url = urls.get(kind)
-            if not url or self.path(key, kind):
+            if self.path(key, kind):
+                if not self.path(key, kind, VARIANTS[kind]):
+                    self._make_variant(key, kind)
+                continue
+            if not url:
                 continue
             try:
                 body = self._download(url)
@@ -237,6 +283,7 @@ class WlImageStore:
                 tmp = d / f'.{kind}.part'
                 tmp.write_bytes(body)
                 os.replace(tmp, d / f'{kind}.{ext}')
+                self._make_variant(key, kind)
                 if kind == 'backdrop':
                     mark = d / 'textless'
                     if urls.get('backdrop_textless'):
@@ -262,10 +309,19 @@ class WlImageStore:
         if not self.root.is_dir():
             return []
         out = []
-        for p in self.root.glob('*/*/*'):
-            if p.is_file() and not p.name.startswith('.') and p.name != 'textless':
-                st = p.stat()
-                out.append((st.st_mtime, st.st_size, p))
+        # Reviewer #1: only this store's own files (<movie|tv>/<digits>/<kind>[@w].<ext>), even in a shared directory.
+        names = {f'{k}{v}.{e}' for k in KINDS for v in ('', f'@{VARIANTS[k]}') for e in CTYPES}
+        for t in TYPES:
+            base = self.root / t
+            if not base.is_dir():
+                continue
+            for d in base.iterdir():
+                if not (d.is_dir() and d.name.isascii() and d.name.isdigit()):
+                    continue
+                for p in d.iterdir():
+                    if p.name in names and p.is_file():
+                        st = p.stat()
+                        out.append((st.st_mtime, st.st_size, p))
         return out
 
     def size(self) -> int:

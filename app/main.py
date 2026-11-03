@@ -5,6 +5,7 @@ Media Search Application - Clean and focused media search interface
 
 from app import safe_xml as _safe_xml   # v170 (Reviewer): every Plex XML parse is defused
 import os
+import sys
 import re
 import json
 import io
@@ -13618,12 +13619,19 @@ def _wl_url(type_: str, tmdb_id: int, kind: str) -> str:
     return f"{(app.config.get('URL_BASE') or '').rstrip('/')}/api/wl-image/{type_}/{tmdb_id}/{kind}"
 
 
-def _wl_sync_and_annotate(type_: str, items: list) -> None:
+def _wl_enabled() -> bool:
+    """LUMA_WL_IMAGES=0: the kill switch (no sync, no `wl_images`, the endpoint 404s). On in minimal mode too."""
+    return os.environ.get('LUMA_WL_IMAGES', '1') != '0'
+
+
+def _wl_sync_and_annotate(type_: str, items: list, sync_ids=None) -> None:
     """Never fails the watchlist: the store follows it and each item gets `wl_images` ({backdrop, logo}: a local
-    URL when stored, else null)."""
+    URL when stored, else null). `sync_ids`: the whole watchlist when `items` is only part of it (the Home rail)."""
+    if not _wl_enabled():
+        return
     try:
         store = _wl_store()
-        ids = [i.get('tmdb_id') for i in items if i.get('tmdb_id')]
+        ids = sync_ids if sync_ids is not None else [i.get('tmdb_id') for i in items if i.get('tmdb_id')]
         store.sync(type_, ids)
         for i in items:
             tid = i.get('tmdb_id')
@@ -13637,6 +13645,8 @@ def _wl_sync_and_annotate(type_: str, items: list) -> None:
 
 
 def _wl_forget(type_: str, tmdb_id) -> None:
+    if not _wl_enabled():
+        return
     try:
         from app.wl_images import valid
         key = valid(type_, str(tmdb_id))
@@ -13646,17 +13656,25 @@ def _wl_forget(type_: str, tmdb_id) -> None:
         logger.warning(f"wl-images prune failed: {e}")
 
 
+from app import movie_watchlist as _wl_native   # minimal mode's native movie watchlist
+_wl_native.removed_hooks.append(lambda tid: _wl_forget('movie', tid))
+_wl_native.list_hooks.append(lambda rows: _wl_sync_and_annotate('movie', rows))
+
+
 @app.route('/api/wl-image/<type_>/<tmdb_id>/<kind>')
 def wl_image(type_, tmdb_id, kind):
     """A Watchlist item's stored sheet image. A miss is a fast 404 (never fetched inline: the background worker
     fills the store); the browser may cache a hit (the service worker never caches /api/)."""
     from flask import send_file
-    from app.wl_images import valid, CTYPES
+    from app.wl_images import valid, CTYPES, VARIANTS
     key = valid(type_, tmdb_id, kind)
-    if not key:
+    w = request.args.get('w')
+    if not key or (w is not None and w != str(VARIANTS[kind])):
         return jsonify({'error': 'invalid'}), 400, {'Cache-Control': 'no-store'}
+    if not _wl_enabled():
+        return jsonify({'error': 'off'}), 404, {'Cache-Control': 'no-store'}
     store = _wl_store()
-    p = store.path(key, kind)
+    p = store.path(key, kind, VARIANTS[kind] if w else None)   # ?w=: the phone copy
     if p is None:
         return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
     store.touch(p)
@@ -13680,11 +13698,19 @@ def _wl_startup_reconcile():
                 get_tv_watchlist()
             except Exception as e:
                 logger.info(f"wl-images startup tv sync skipped: {e}")
+            try:   # minimal mode's native movie watchlist
+                from app import movie_watchlist as _mw
+                ids = _mw.tmdb_ids()
+                if ids:
+                    _wl_store().sync('movie', ids)
+            except Exception as e:
+                logger.info(f"wl-images startup native sync skipped: {e}")
     except Exception as e:
         logger.warning(f"wl-images startup reconcile failed: {e}")
 
 
-if not os.environ.get('PYTEST_CURRENT_TEST') and os.environ.get('LUMA_WL_IMAGES', '1') != '0':
+# Reviewer #5: PYTEST_CURRENT_TEST is unset while tests import this module; pytest itself being loaded is the guard.
+if 'pytest' not in sys.modules and not os.environ.get('PYTEST_CURRENT_TEST') and _wl_enabled():
     threading.Thread(target=_wl_startup_reconcile, name='wl-images-startup', daemon=True).start()
 
 
@@ -22457,7 +22483,7 @@ _home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_us
                  trakt_connected=_connectors.trakt_connected, fetch_trakt=_fetch_trakt_rail,
                  fetch_poster=_watchlist_rail_poster,
                  owned_lookup=lambda tid, kind: fast_search_index.find_by_tmdb(tid, kind),
-                 logo_cached=_cached_logo, logo_warm=_warm_logos)
+                 logo_cached=_cached_logo, logo_warm=_warm_logos, wl_annotate=_wl_sync_and_annotate)
 app.register_blueprint(_home_rails.bp)
 
 

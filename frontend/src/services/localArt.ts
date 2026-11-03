@@ -13,6 +13,8 @@ const reg = new Map<string, LocalArt>();
 const listeners = new Set<() => void>();
 const k = (kind: Kind, id: number) => `${kind}:${id}`;
 const MAX = 200;
+/** The server's phone copies (app/wl_images.py VARIANTS). */
+export const PHONE_W = { backdrop: 1280, logo: 300 } as const;
 
 /** The payload's `wl_images` ({backdrop, logo}: URLs or null) as LocalArt, or null. */
 export function parseWlImages(v: unknown): LocalArt | null {
@@ -34,9 +36,11 @@ function drop(kind: Kind, id: number, which: keyof LocalArt, url: string): void 
 export function setLocalArt(kind: Kind, id: number | null | undefined, art: LocalArt | null | undefined): void {
   if (!id || !art) return;
   const abs = (u: string | null) => (u ? (u.startsWith('/api/') ? withBase(u) : u) : null);
-  // v348: phones keep their TMDb sizes (780/1280 backdrops, w300 logos): the local art (1920 / original) is desktop's.
-  if (phoneMinimal()) return;
-  const a = { backdrop: abs(art.backdrop), logo: abs(art.logo), backdropTextless: !!art.backdropTextless };
+  // v349: phones keep their sizes (Designer: the 1280 sheet backdrop, the w300 logo) from the server's phone copies.
+  const phone = phoneMinimal();
+  const sized = (u: string | null, w: number) => (u && phone ? `${u}${u.includes('?') ? '&' : '?'}w=${w}` : u);
+  const a = { backdrop: sized(abs(art.backdrop), PHONE_W.backdrop), logo: sized(abs(art.logo), PHONE_W.logo),
+    backdropTextless: !!art.backdropTextless };
   reg.delete(k(kind, id)); reg.set(k(kind, id), a);
   while (reg.size > MAX) reg.delete(reg.keys().next().value as string);
   for (const which of ['backdrop', 'logo'] as const) {

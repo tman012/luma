@@ -74,8 +74,9 @@ def init(*, get_plex: Callable[[], Any], get_current_user: Callable[[], Optional
          fetch_poster: Optional[Callable[[int], Optional[str]]] = None,
          owned_lookup: Optional[Callable[[int, str], Optional[Dict[str, Any]]]] = None,
          logo_cached: Optional[Callable[[int, str], Any]] = None,
-         logo_warm: Optional[Callable[..., Dict[Any, Any]]] = None):
-    _cfg.update(get_plex=get_plex, get_current_user=get_current_user,
+         logo_warm: Optional[Callable[..., Dict[Any, Any]]] = None,
+         wl_annotate: Optional[Callable[..., None]] = None):
+    _cfg.update(wl_annotate=wl_annotate, get_plex=get_plex, get_current_user=get_current_user,
                 trakt_connected=trakt_connected, fetch_trakt=fetch_trakt, fetch_poster=fetch_poster,
                 owned_lookup=owned_lookup, logo_cached=logo_cached, logo_warm=logo_warm)
 
@@ -229,6 +230,9 @@ def watchlist_items() -> List[Dict[str, Any]]:
         out.append({'key': f'watchlist-{tid}', 'type': 'movie', 'title': str(m.get('title') or ''),
                     'subtitle': str(m.get('year') or ''), 'label': m.get('digital_release_label') or None, 'tmdb_id': tid,
                     'poster': f'{TMDB_POSTER}{poster}' if isinstance(poster, str) and poster.startswith('/') else None})
+    wl = _cfg.get('wl_annotate')   # wl-images: the store follows the whole watchlist; each card gets `wl_images`
+    if wl:
+        wl('movie', out, sync_ids=[m.get('tmdb_id') for m in rows if m.get('tmdb_id')])
     return out
 
 

@@ -96,15 +96,29 @@ describe('v348 (Designer): local art rules', () => {
     expect(withLocalArt({ backdropUrl: '/t.jpg' }, { ...art, backdropTextless: false })!.backdropUrl).toBe(art.backdrop);
     expect(withLocalArt({ backdropUrl: '/m.jpg' }, art)!.backdropUrl).toBe(art.backdrop);   // movie: the backdrop field
   });
-  it('phones keep their TMDb sizes: nothing local is registered at a phone width (minimal)', async () => {
+  it('v349 phones (minimal) get the server\'s phone copies: ?w=1280 backdrop, ?w=300 logo, in the sheet', async () => {
     const win = window as unknown as { __LUMA_MINIMAL__?: boolean };
     const was = win.__LUMA_MINIMAL__; win.__LUMA_MINIMAL__ = true;
     const w = window.innerWidth;
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
-    setLocalArt('movie', 777, LOCAL);
-    expect(localArt('movie', 777)).toBeNull();
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
-    win.__LUMA_MINIMAL__ = was;
+    try {
+      setLocalArt('movie', 777, LOCAL);
+      expect(localArt('movie', 777)).toMatchObject({ backdrop: expect.stringMatching(/\/api\/wl-image\/movie\/603\/backdrop\?w=1280$/),
+        logo: expect.stringMatching(/\/logo\?w=300$/) });
+      layoutMode.mode = 'compact';
+      await openWl(LOCAL);
+      expect(srcs().some((u) => u.includes('/api/wl-image/movie/603/backdrop?w=1280'))).toBe(true);
+      expect(srcs().some((u) => u.includes('tmdb-bd.jpg'))).toBe(false);
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
+      win.__LUMA_MINIMAL__ = was;
+    }
+  });
+  it('v349 minimal Home Watchlist rail payload: wl_images parses for the open; a desktop-width minimal open stays full size', () => {
+    const card = { key: 'watchlist-603', type: 'movie', tmdb_id: 603,
+      wl_images: { backdrop: '/api/wl-image/movie/603/backdrop', logo: null, backdrop_textless: true } };
+    setLocalArt('movie', 603, parseWlImages(card.wl_images));
+    expect(localArt('movie', 603)).toMatchObject({ backdrop: expect.stringMatching(/backdrop$/), logo: null, backdropTextless: true });
   });
   it('the same title from another entry point after the Watchlist sheet closed: its usual art', async () => {
     layoutMode.mode = 'expanded';

@@ -9,6 +9,7 @@ import { assetUrl } from '@/urlHelpers';
 import { HomeRails, SkeletonCrossfade, SkeletonRails, WYM_RAIL_ID, cardArt, cardIds, cardLogoOf, railCss } from '@/components/home/Rails';
 import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
+import { localArt, parseWlImages, setLocalArt } from '@/services/localArt';
 import { pageDecode } from '@/loading/sheetPriority';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { Card } from '@/components/home/homeApi';
@@ -44,7 +45,10 @@ export function MinimalHomePage() {
   // tapped poster shows a pressed state meanwhile, 600 ms cap).
   const openCard = (c: Card, el?: HTMLElement | null) => {
     const { kind, ratingKey, tmdbId } = cardIds(c);
-    void openWhenReady(kind, ratingKey, tmdbId, el ?? null, () => openDetail(modals, c), undefined, cardArt(c), cardLogoOf(c, kind, tmdbId));
+    // wl-images: a Watchlist rail card's stored images (the sheet uses them; phones get the server's phone copies).
+    if (c.wl_images) setLocalArt(kind, tmdbId, parseWlImages(c.wl_images));
+    const local = c.wl_images ? localArt(kind, tmdbId)?.backdrop : null;
+    void openWhenReady(kind, ratingKey, tmdbId, el ?? null, () => openDetail(modals, c), undefined, local ? [local] : cardArt(c), cardLogoOf(c, kind, tmdbId));
   };
 
   const ready = !loading && authenticated && !startInProgress;

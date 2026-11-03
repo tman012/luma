@@ -63,7 +63,7 @@ def test_prune_files_left_on_disk_for_titles_no_longer_wanted(tmp_path):
 
 def test_cap_prunes_least_recently_served_first(tmp_path):
     clock = Clock()
-    s, _ = make(tmp_path, cap=3 * (len(JPG) + len(PNG)) + 10, clock=clock)
+    s, _ = make(tmp_path, cap=3 * 2 * (len(JPG) + len(PNG)) + 10, clock=clock)   # main + phone copy
     for i in (1, 2, 3):
         clock.t += 10
         s.sync('movie', list(range(1, i + 1))); s.drain()
@@ -226,7 +226,7 @@ def test_textless_flag_is_kept_with_the_backdrop_and_pruned_with_it(tmp_path, te
         m._wl_sync_and_annotate('tv', items)
     assert items[0]['wl_images']['backdrop_textless'] is True
     assert all(p.name != 'textless' for _, _, p in s.files())
-    s.sync('tv', [])
+    s.sync('tv', [6])
     assert not (tmp_path / 'wl' / 'tv' / '5').exists()
 
 
@@ -258,3 +258,94 @@ def test_resolve_prefers_the_textless_backdrop_when_there_is_a_logo(monkeypatch)
     assert r['backdrop'] == 'https://image.tmdb.org/t/p/w1920/withtext.jpg' and r['backdrop_textless'] is False
     assert not any(u.endswith('/images') for u in seen[n:])
     assert m._wl_textless([{'file_path': '/a.jpg', 'iso_639_1': 'fr'}]) is None   # no textless: backdrop_path
+
+
+# v349 ---------------------------------------------------------------------------------------------------------
+def _png(w, h):
+    from io import BytesIO
+    from PIL import Image
+    b = BytesIO(); Image.new('RGBA', (w, h), (255, 0, 0, 128)).save(b, 'PNG'); return b.getvalue()
+
+
+def test_phone_copies_are_stored_and_served_with_w(tmp_path, test_app, monkeypatch):
+    from PIL import Image
+    s, _ = make(tmp_path, download=lambda u: _jpeg(1920, 1080) if u.endswith('.jpg') else _png(800, 300))
+    s.sync('movie', [11]); s.drain()
+    assert Image.open(s.path(('movie', 11), 'backdrop', 1280)).size == (1280, 720)
+    lg = Image.open(s.path(('movie', 11), 'logo', 300))
+    assert lg.size == (300, 112) and lg.mode == 'RGBA'
+    monkeypatch.setattr(m, '_wl_store_obj', s)
+    c = test_app.test_client()
+    r = c.get('/api/wl-image/movie/11/backdrop?w=1280')
+    assert r.status_code == 200 and Image.open(__import__('io').BytesIO(r.data)).size == (1280, 720)
+    assert c.get('/api/wl-image/movie/11/logo?w=300').status_code == 200
+    for bad in ('/api/wl-image/movie/11/backdrop?w=780', '/api/wl-image/movie/11/backdrop?w=300',
+                '/api/wl-image/movie/11/logo?w=1280', '/api/wl-image/movie/11/backdrop?w=%C2%B2'):
+        assert c.get(bad).status_code == 400, bad
+
+
+def test_phone_copies_are_made_for_titles_stored_before_them(tmp_path):
+    s, calls = make(tmp_path, download=lambda u: _jpeg(1920, 1080) if u.endswith('.jpg') else _png(600, 200))
+    s.sync('movie', [12]); s.drain()
+    for k in ('backdrop', 'logo'):
+        s.path(('movie', 12), k, w.VARIANTS[k]).unlink()
+    n = len(calls['download'])
+    s.sync('movie', [12]); s.drain()
+    assert s.path(('movie', 12), 'backdrop', 1280) and s.path(('movie', 12), 'logo', 300)
+    assert len(calls['download']) == n, 'made from the stored image, not downloaded again'
+
+
+def test_an_empty_watchlist_answer_never_wipes_the_store(tmp_path):
+    s, _ = make(tmp_path)
+    s.sync('movie', [1]); s.drain()
+    s.sync('movie', [])
+    assert s.path(('movie', 1), 'backdrop')
+
+
+def test_cap_and_removal_touch_only_the_stores_own_files(tmp_path):
+    s, _ = make(tmp_path, cap=1)
+    other = tmp_path / 'wl' / 'movie' / '1' / 'notes.txt'
+    other.parent.mkdir(parents=True); other.write_text('keep')
+    stray = tmp_path / 'wl' / 'x' / 'y' / 'z.jpg'
+    stray.parent.mkdir(parents=True); stray.write_bytes(JPG)
+    s.sync('movie', [1]); s.drain()
+    s.enforce_cap(); s.remove(('movie', 1))
+    assert other.exists() and stray.exists()
+
+
+def test_minimal_mode_allows_the_endpoint_and_the_kill_switch_turns_it_off(test_app, store, monkeypatch):
+    from app import minimal
+    s, _ = store
+    s.sync('movie', [578]); s.drain()
+    c = test_app.test_client()
+    monkeypatch.setenv('LUMA_MINIMAL', '1')
+    assert minimal.enabled() and minimal.path_allowed('/api/wl-image/movie/578/backdrop?w=1280'.split('?')[0])
+    assert c.get('/api/wl-image/movie/578/backdrop').status_code != 404, 'past the minimal gate (sign-in applies)'
+    monkeypatch.delenv('LUMA_MINIMAL')
+    assert c.get('/api/wl-image/movie/578/backdrop').status_code == 200
+    monkeypatch.setenv('LUMA_WL_IMAGES', '0')
+    assert c.get('/api/wl-image/movie/578/backdrop').status_code == 404
+    items = [{'tmdb_id': 578}]
+    with test_app.test_request_context('/'):
+        m._wl_sync_and_annotate('movie', items)
+    assert 'wl_images' not in items[0]
+
+
+def test_minimal_home_watchlist_rail_and_native_watchlist_follow_the_store(test_app, store, monkeypatch):
+    from app import home_rails, movie_watchlist
+    s, _ = store
+    rows = [{'tmdb_id': 578, 'title': 'Jaws', 'year': 1975}, {'tmdb_id': 603, 'title': 'The Matrix', 'year': 1999}]
+    monkeypatch.setattr(movie_watchlist, 'movies', lambda: [dict(r) for r in rows])
+    monkeypatch.setattr(home_rails, 'WATCHLIST_LIMIT', 1)
+    from app import digital_release_cache
+    monkeypatch.setattr(digital_release_cache, 'enrich_watchlist_items', lambda rows: None)
+    with test_app.app_context():
+        out = home_rails.watchlist_items()
+    s.drain()
+    assert s.present(('movie', 603))['backdrop'], 'the whole watchlist is synced, not just the rail\'s cards'
+    assert 'wl_images' in out[0]
+    with test_app.app_context():
+        out = home_rails.watchlist_items()
+    assert out[0]['wl_images']['backdrop'].endswith(f"/api/wl-image/movie/{out[0]['tmdb_id']}/backdrop")
+    movie_watchlist.removed_hooks[0](578) if movie_watchlist.removed_hooks else None
+    assert not s.present(('movie', 578))['backdrop'], 'a native watchlist removal prunes at once'

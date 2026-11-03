@@ -21,6 +21,8 @@ export interface Card {
   tmdb_id?: number;
   /** Watchlist rail cards: prod's digital-release label ('Jan 9'), shown above the title. */
   label?: string | null;
+  /** wl-images: Watchlist rail cards' stored sheet images ({backdrop, logo, backdrop_textless}). */
+  wl_images?: unknown;
 }
 export interface Rail {
   id: string; title: string; type: string; items: Card[];
