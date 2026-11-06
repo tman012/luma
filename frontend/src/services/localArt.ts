@@ -15,6 +15,9 @@ const MAX = 200;
 /** The server's phone copies (app/wl_images.py VARIANTS). At and above the 1024px kiosk/desktop breakpoint the sheet
  *  requests the stored original (no width query, no 1920 ceiling), including high-DPI displays. */
 export const PHONE_W = { backdrop: 1280, logo: 300 } as const;
+/** Same value as app/wl_images.py URL_REV. Every request URL carries it, so a browser entry for the unversioned
+ *  v348–v350 path (public, immutable, a week) is a different URL and is not reused. */
+export const WL_IMAGE_REV = '2';
 /** Same width cutoff as phone art elsewhere (phoneMinimal / KIOSK_MIN_WIDTH): below it, never the raw original. */
 const PHONE_COPY_MAX_W = 1024;
 
@@ -45,14 +48,26 @@ function phoneCopy(): boolean {
   return window.innerWidth < PHONE_COPY_MAX_W;
 }
 
-/** The URLs a sheet names for stored art: absolute. Phones get the server's phone copies (1280 backdrop, 300 logo),
- *  never the raw original. Desktop, including high-DPI, gets the stored original with no width query. */
+/** Absolute request URL: `r` is always the current revision (replacing any older one). `width` sets `w` for a phone
+ *  copy; a desktop URL has no `w`. */
+function requestUrl(u: string | null, width: number | null): string | null {
+  if (!u) return null;
+  const abs = u.startsWith('/api/') ? withBase(u) : u;
+  const q = abs.indexOf('?');
+  const path = q < 0 ? abs : abs.slice(0, q);
+  return width != null ? `${path}?r=${WL_IMAGE_REV}&w=${width}` : `${path}?r=${WL_IMAGE_REV}`;
+}
+
+/** The URLs a sheet names for stored art: absolute and revisioned. Phones get the server's phone copies
+ *  (1280 backdrop, 300 logo), never the raw original. Desktop, including high-DPI, gets the stored original
+ *  with no width query. Neither form is the unversioned v348–v350 URL. */
 function sizedArt(art: LocalArt): LocalArt {
-  const abs = (u: string | null) => (u ? (u.startsWith('/api/') ? withBase(u) : u) : null);
   const phone = phoneCopy();
-  const sized = (u: string | null, w: number) => (u && phone ? `${u}${u.includes('?') ? '&' : '?'}w=${w}` : u);
-  return { backdrop: sized(abs(art.backdrop), PHONE_W.backdrop), logo: sized(abs(art.logo), PHONE_W.logo),
-    backdropTextless: !!art.backdropTextless };
+  return {
+    backdrop: requestUrl(art.backdrop, phone ? PHONE_W.backdrop : null),
+    logo: requestUrl(art.logo, phone ? PHONE_W.logo : null),
+    backdropTextless: !!art.backdropTextless,
+  };
 }
 
 /** v350 (Designer NO on ece4395c): a stored backdrop not decoded this long after the open is dropped before the

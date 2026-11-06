@@ -180,8 +180,8 @@ def test_watchlist_items_name_their_local_images(test_app, store):
     items = [{'tmdb_id': 578}, {'tmdb_id': 603}]
     with test_app.test_request_context('/api/watchlist'):
         m._wl_sync_and_annotate('movie', items)
-    assert items[0]['wl_images']['backdrop'].endswith('/api/wl-image/movie/578/backdrop')
-    assert items[0]['wl_images']['logo'].endswith('/api/wl-image/movie/578/logo')
+    assert items[0]['wl_images']['backdrop'].endswith(f"/api/wl-image/movie/578/backdrop?r={w.URL_REV}")
+    assert items[0]['wl_images']['logo'].endswith(f"/api/wl-image/movie/578/logo?r={w.URL_REV}")
     assert items[1]['wl_images'] == {'backdrop': None, 'logo': None, 'backdrop_textless': False}
     s.drain()
     assert s.present(('movie', 603))['backdrop'], 'a new watchlist title is fetched (background)'
@@ -369,7 +369,7 @@ def test_minimal_home_watchlist_rail_and_native_watchlist_follow_the_store(test_
     assert 'wl_images' in out[0]
     with test_app.app_context():
         out = home_rails.watchlist_items()
-    assert out[0]['wl_images']['backdrop'].endswith(f"/api/wl-image/movie/{out[0]['tmdb_id']}/backdrop")
+    assert out[0]['wl_images']['backdrop'].endswith(f"/api/wl-image/movie/{out[0]['tmdb_id']}/backdrop?r={w.URL_REV}")
     movie_watchlist.removed_hooks[0](578) if movie_watchlist.removed_hooks else None
     assert not s.present(('movie', 578))['backdrop'], 'a native watchlist removal prunes at once'
 
@@ -507,3 +507,40 @@ def test_noise_original_is_larger_than_the_old_1920_ceiling(tmp_path):
           f"title_bytes={s.report()['bytes']}")
     print(f"WL_SAMPLE soft original={len(soft_buf.getvalue())} legacy1920q86={len(soft_legacy.getvalue())} "
           f"phone1280={len(soft_phone)}")
+
+
+def test_revisioned_urls_route_no_store_and_are_not_the_immutable_ones(test_app, tmp_path, monkeypatch):
+    """v348–v350 published the bare path and ?w= as public, immutable. The URLs we publish now carry r= and
+    still honor w. A client that requests the new URL cannot be served the old cache entry."""
+    from io import BytesIO
+    from PIL import Image
+    big = _jpeg(3840, 2160)
+    s, _ = make(tmp_path, download=lambda u: big if u.endswith('.jpg') else _png(800, 300))
+    s.sync('movie', [578]); s.drain()
+    monkeypatch.setattr(m, '_wl_store_obj', s)
+    items = [{'tmdb_id': 578}]
+    with test_app.test_request_context('/api/watchlist'):
+        m._wl_sync_and_annotate('movie', items)
+    published = items[0]['wl_images']['backdrop']
+    legacy = '/api/wl-image/movie/578/backdrop'
+    legacy_phone = legacy + '?w=1280'
+    assert published.endswith(f"{legacy}?r={w.URL_REV}")
+    assert published != legacy and published != legacy_phone
+    assert 'w=' not in published
+    src = open(os.path.join(os.path.dirname(__file__), '..', 'frontend', 'src', 'services', 'localArt.ts'),
+               encoding='utf-8').read()
+    assert f"WL_IMAGE_REV = '{w.URL_REV}'" in src
+    c = test_app.test_client()
+    rev = w.URL_REV
+    desktop = c.get(f'{legacy}?r={rev}')
+    assert desktop.status_code == 200 and desktop.data == big and desktop.headers['Cache-Control'] == 'no-store'
+    assert Image.open(BytesIO(desktop.data)).size == (3840, 2160)
+    for url in (f'{legacy}?r={rev}&w=1280', f'{legacy}?w=1280&r={rev}'):
+        phone = c.get(url)
+        assert phone.status_code == 200 and phone.headers['Cache-Control'] == 'no-store', url
+        assert phone.data != big and Image.open(BytesIO(phone.data)).size == (1280, 720), url
+    logo = c.get(f'/api/wl-image/movie/578/logo?w=300&r={rev}')
+    assert logo.status_code == 200 and logo.headers['Cache-Control'] == 'no-store'
+    assert Image.open(BytesIO(logo.data)).size[0] == 300
+    assert c.get(f'{legacy}?r={rev}&w=780').status_code == 400
+    assert c.get(f'{legacy}?r={rev}&w=1920').status_code == 400

@@ -10,7 +10,7 @@ vi.mock('@/contexts/ModalHostContext', async (orig) => ({ ...(await orig<typeof 
 import { MovieDetailModal } from '@/components/media/MovieDetailModal';
 import { openWhenReady, _resetModalPrefetch } from '@/services/modalPrefetch';
 import { _resetImageLoader } from '@/loading/imageLoader';
-import { parseWlImages, setLocalArt, _resetLocalArt, LOCAL_BACKDROP_WAIT_MS } from '@/services/localArt';
+import { parseWlImages, setLocalArt, _resetLocalArt, LOCAL_BACKDROP_WAIT_MS, WL_IMAGE_REV } from '@/services/localArt';
 import { BACKDROP_ART_DEADLINE_MS } from '@/hooks/useSheetBackdrop';
 import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
 
@@ -19,12 +19,13 @@ const broken = new Set<string>();
 const slow = new Map<string, number>();
 const requested: string[] = [];
 const delay = (v: string) => { for (const [k2, ms] of slow) if (v.includes(k2)) return ms; return 20; };
+const isBroken = (v: string) => { for (const b of broken) if (v.includes(b)) return true; return false; };
 class FakeImage {
   private s = ''; fetchPriority = ''; decoding = ''; onload: null | (() => void) = null; onerror: null | (() => void) = null;
-  set src(v: string) { this.s = v; if (v) { requested.push(v); setTimeout(() => (broken.has(v) ? this.onerror?.() : this.onload?.()), delay(v)); } }
+  set src(v: string) { this.s = v; if (v) { requested.push(v); setTimeout(() => (isBroken(v) ? this.onerror?.() : this.onload?.()), delay(v)); } }
   get src() { return this.s; }
   removeAttribute() { this.s = ''; }
-  decode = () => new Promise<void>((res, rej) => { const v = this.s; setTimeout(() => (broken.has(v) ? rej(new Error('x')) : res()), delay(v)); });
+  decode = () => new Promise<void>((res, rej) => { const v = this.s; setTimeout(() => (isBroken(v) ? rej(new Error('x')) : res()), delay(v)); });
 }
 Object.defineProperty(HTMLImageElement.prototype, 'complete', { configurable: true, get() { return true; } });
 Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', { configurable: true, get() { return 300; } });
@@ -116,11 +117,11 @@ describe('v348 (Designer): local art rules', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     try {
       setLocalArt('movie', 777, LOCAL);
-      expect(localArt('movie', 777)).toMatchObject({ backdrop: expect.stringMatching(/\/api\/wl-image\/movie\/603\/backdrop\?w=1280$/),
-        logo: expect.stringMatching(/\/logo\?w=300$/) });
+      expect(localArt('movie', 777)).toMatchObject({ backdrop: expect.stringMatching(/\/api\/wl-image\/movie\/603\/backdrop\?r=2&w=1280$/),
+        logo: expect.stringMatching(/\/logo\?r=2&w=300$/) });
       layoutMode.mode = 'compact';
       await openWl(LOCAL);
-      expect(srcs().some((u) => u.includes('/api/wl-image/movie/603/backdrop?w=1280'))).toBe(true);
+      expect(srcs().some((u) => u.includes('/api/wl-image/movie/603/backdrop?r=2&w=1280'))).toBe(true);
       expect(srcs().some((u) => u.includes('tmdb-bd.jpg'))).toBe(false);
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
@@ -157,7 +158,7 @@ describe('v348 (Designer): local art rules', () => {
   it('v350 the Home payload notes stored art: a warm-up before any tap preloads it, not TMDb\'s', async () => {
     const { noteLocalArt, localBackdropFor } = await import('@/services/localArt');
     noteLocalArt('movie', 603, LOCAL);
-    expect(localBackdropFor('movie', 603)).toMatch(/\/api\/wl-image\/movie\/603\/backdrop$/);
+    expect(localBackdropFor('movie', 603)).toMatch(/\/api\/wl-image\/movie\/603\/backdrop\?r=2$/);
     const { warmDetail } = await import('@/services/modalPrefetch');
     void warmDetail('movie', undefined, 603);
     for (let i = 0; i < 20; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
@@ -168,7 +169,7 @@ describe('v348 (Designer): local art rules', () => {
     const card = { key: 'watchlist-603', type: 'movie', tmdb_id: 603,
       wl_images: { backdrop: '/api/wl-image/movie/603/backdrop', logo: null, backdrop_textless: true } };
     setLocalArt('movie', 603, parseWlImages(card.wl_images));
-    expect(localArt('movie', 603)).toMatchObject({ backdrop: expect.stringMatching(/backdrop$/), logo: null, backdropTextless: true });
+    expect(localArt('movie', 603)).toMatchObject({ backdrop: expect.stringMatching(/backdrop\?r=2$/), logo: null, backdropTextless: true });
   });
   it('deadlines stay 1.0s text and 1.6s art, and the local backdrop wait stays inside the art deadline', () => {
     expect(SURFACE_DEADLINE_MS).toBe(1000);
@@ -190,17 +191,17 @@ describe('v348 (Designer): local art rules', () => {
       setWidth(390, 3);
       setLocalArt('movie', 390, LOCAL);
       expect(localArt('movie', 390)).toMatchObject({
-        backdrop: expect.stringMatching(/\/backdrop\?w=1280$/),
-        logo: expect.stringMatching(/\/logo\?w=300$/),
+        backdrop: expect.stringMatching(/\/backdrop\?r=2&w=1280$/),
+        logo: expect.stringMatching(/\/logo\?r=2&w=300$/),
       });
       setWidth(932, 3);   // a phone in landscape, still under the desktop breakpoint
       setLocalArt('movie', 932, LOCAL);
-      expect(localArt('movie', 932)?.backdrop).toMatch(/\/backdrop\?w=1280$/);
+      expect(localArt('movie', 932)?.backdrop).toMatch(/\/backdrop\?r=2&w=1280$/);
       expect(localArt('movie', 932)?.backdrop).not.toMatch(/\/backdrop$/);
       win.__LUMA_MINIMAL__ = true;
       setWidth(800, 2);
       setLocalArt('movie', 800, LOCAL);
-      expect(localArt('movie', 800)?.backdrop).toMatch(/\/backdrop\?w=1280$/);
+      expect(localArt('movie', 800)?.backdrop).toMatch(/\/backdrop\?r=2&w=1280$/);
     } finally {
       win.__LUMA_MINIMAL__ = was;
       setWidth(w, dpr);
@@ -216,14 +217,55 @@ describe('v348 (Designer): local art rules', () => {
       setWidth(1440, 2);
       setLocalArt('movie', 1440, LOCAL);
       expect(localArt('movie', 1440)).toMatchObject({
-        backdrop: expect.stringMatching(/\/api\/wl-image\/movie\/603\/backdrop$/),
-        logo: expect.stringMatching(/\/api\/wl-image\/movie\/603\/logo$/),
+        backdrop: expect.stringMatching(/\/api\/wl-image\/movie\/603\/backdrop\?r=2$/),
+        logo: expect.stringMatching(/\/api\/wl-image\/movie\/603\/logo\?r=2$/),
       });
       expect(localArt('movie', 1440)?.backdrop).not.toContain('w=1920');
       expect(localArt('movie', 1440)?.backdrop).not.toContain('w=1280');
     } finally {
       win.__LUMA_MINIMAL__ = was;
       setWidth(w, dpr);
+    }
+  });
+  it('versioned URLs replace the immutable v348–v350 ones, on desktop and on a phone, including a warm-up', async () => {
+    const legacy = {
+      backdrop: '/api/wl-image/movie/603/backdrop',
+      phone: '/api/wl-image/movie/603/backdrop?w=1280',
+      logo: '/api/wl-image/movie/603/logo',
+      logoPhone: '/api/wl-image/movie/603/logo?w=300',
+    };
+    expect(WL_IMAGE_REV).toBe('2');
+    const w0 = window.innerWidth;
+    const dpr = window.devicePixelRatio;
+    try {
+      setWidth(1440, 2);
+      setLocalArt('movie', 603, LOCAL);   // payload is the old unversioned path
+      const desk = localArt('movie', 603)!;
+      expect(desk.backdrop).toBe(`${legacy.backdrop}?r=${WL_IMAGE_REV}`);
+      expect(desk.logo).toBe(`${legacy.logo}?r=${WL_IMAGE_REV}`);
+      expect(desk.backdrop).not.toBe(legacy.backdrop);
+      expect(desk.logo).not.toBe(legacy.logo);
+      expect(desk.backdrop).not.toContain('w=');
+      const { noteLocalArt, localBackdropFor, localLogoFor } = await import('@/services/localArt');
+      noteLocalArt('tv', 9, { backdrop: '/api/wl-image/tv/9/backdrop', logo: '/api/wl-image/tv/9/logo?r=1' });
+      expect(localBackdropFor('tv', 9)).toBe('/api/wl-image/tv/9/backdrop?r=2');
+      expect(localLogoFor('tv', 9)).toBe('/api/wl-image/tv/9/logo?r=2');
+      expect(localBackdropFor('tv', 9)).not.toBe('/api/wl-image/tv/9/backdrop');
+      setWidth(390, 3);
+      setLocalArt('movie', 391, LOCAL);
+      const phone = localArt('movie', 391)!;
+      expect(phone.backdrop).toBe(`${legacy.backdrop}?r=${WL_IMAGE_REV}&w=1280`);
+      expect(phone.logo).toBe(`${legacy.logo}?r=${WL_IMAGE_REV}&w=300`);
+      expect(phone.backdrop).not.toBe(legacy.phone);
+      expect(phone.logo).not.toBe(legacy.logoPhone);
+      for (const u of requested) {
+        if (!u.includes('/api/wl-image/')) continue;
+        const path = u.replace(/^https?:\/\/[^/]+/, '');
+        expect([legacy.backdrop, legacy.phone, legacy.logo, legacy.logoPhone]).not.toContain(path);
+        expect(path).toContain(`r=${WL_IMAGE_REV}`);
+      }
+    } finally {
+      setWidth(w0, dpr);
     }
   });
   it('the same title from another entry point after the Watchlist sheet closed: its usual art', async () => {

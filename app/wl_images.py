@@ -36,6 +36,10 @@ FAIL_RETRY_S = 600
 MAX_FILE_BYTES = 25 * 1024 * 1024
 # Phone copies only (the sheet's 1280 backdrop, the w300 logo). The source file is the unmodified original.
 VARIANTS = {'backdrop': 1280, 'logo': 300}
+# Cache revision on the URL (`?r=`). v348–v350 served the unversioned path as public, immutable for a week;
+# this value makes every new request a different URL. `w` is still the only size parameter. Keep in step with
+# WL_IMAGE_REV in frontend/src/services/localArt.ts.
+URL_REV = '2'
 # Written beside a backdrop that was stored as the unmodified TMDb original. Absent on a file left by the w1920 ceiling.
 SOURCE_MARK = 'source-original'
 WORKER_GAP_S = 0.05

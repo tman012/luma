@@ -13621,7 +13621,11 @@ def _wl_store():
 
 
 def _wl_url(type_: str, tmdb_id: int, kind: str) -> str:
-    return f"{(app.config.get('URL_BASE') or '').rstrip('/')}/api/wl-image/{type_}/{tmdb_id}/{kind}"
+    """The URL a client requests. `r` is the cache revision (app.wl_images.URL_REV): distinct from the unversioned
+    v348–v350 URLs a browser may still hold as immutable. `w` is added by the client for a phone copy."""
+    from app.wl_images import URL_REV
+    base = (app.config.get('URL_BASE') or '').rstrip('/')
+    return f"{base}/api/wl-image/{type_}/{tmdb_id}/{kind}?r={URL_REV}"
 
 
 def _wl_enabled() -> bool:
@@ -13671,7 +13675,7 @@ def wl_image(type_, tmdb_id, kind):
     """A Watchlist item's stored sheet image. A miss is a fast 404 (never fetched inline: the background worker
     fills the store). Sources and phone copies are Cache-Control: no-store (the service worker never caches /api/).
     No width: the original. ?w=: the phone copy, built from the original when it is not on disk yet — never the
-    raw original bytes."""
+    raw original bytes. ?r= is the client's cache revision and is ignored here; it does not change `w` parsing."""
     from flask import send_file
     from app.wl_images import valid, CTYPES, VARIANTS, variant_servable
     key = valid(type_, tmdb_id, kind)
