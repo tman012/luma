@@ -3,7 +3,6 @@
  *  to load is dropped and the sheet falls back to its usual path (before its one reveal: the hero only latches a
  *  decoded image). Memory only (nothing stored on the device; the service worker never caches /api/). */
 import { useEffect, useRef, useState } from 'react';
-import { phoneMinimal } from '@/utils/image';
 import { isDecoded, loadImage } from '@/loading/imageLoader';
 import { withBase } from '@/urlHelpers';
 
@@ -13,8 +12,11 @@ const reg = new Map<string, LocalArt>();
 const listeners = new Set<() => void>();
 const k = (kind: Kind, id: number) => `${kind}:${id}`;
 const MAX = 200;
-/** The server's phone copies (app/wl_images.py VARIANTS). */
+/** The server's phone copies (app/wl_images.py VARIANTS). At and above the 1024px kiosk/desktop breakpoint the sheet
+ *  requests the stored original (no width query, no 1920 ceiling), including high-DPI displays. */
 export const PHONE_W = { backdrop: 1280, logo: 300 } as const;
+/** Same width cutoff as phone art elsewhere (phoneMinimal / KIOSK_MIN_WIDTH): below it, never the raw original. */
+const PHONE_COPY_MAX_W = 1024;
 
 /** The payload's `wl_images` ({backdrop, logo}: URLs or null) as LocalArt, or null. */
 export function parseWlImages(v: unknown, kind?: Kind, id?: number | null): LocalArt | null {
@@ -37,11 +39,17 @@ function drop(kind: Kind, id: number, which: keyof LocalArt, url: string): void 
   for (const l of Array.from(listeners)) l();
 }
 
-/** The URLs a sheet names for stored art: absolute, and on phones the server's phone copies (v349, Designer: the
- *  1280 sheet backdrop, the w300 logo). */
+/** Below 1024px (phone, and minimal's phone width): the server's phone copies. A desktop gets the stored original. */
+function phoneCopy(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth < PHONE_COPY_MAX_W;
+}
+
+/** The URLs a sheet names for stored art: absolute. Phones get the server's phone copies (1280 backdrop, 300 logo),
+ *  never the raw original. Desktop, including high-DPI, gets the stored original with no width query. */
 function sizedArt(art: LocalArt): LocalArt {
   const abs = (u: string | null) => (u ? (u.startsWith('/api/') ? withBase(u) : u) : null);
-  const phone = phoneMinimal();
+  const phone = phoneCopy();
   const sized = (u: string | null, w: number) => (u && phone ? `${u}${u.includes('?') ? '&' : '?'}w=${w}` : u);
   return { backdrop: sized(abs(art.backdrop), PHONE_W.backdrop), logo: sized(abs(art.logo), PHONE_W.logo),
     backdropTextless: !!art.backdropTextless };

@@ -61,21 +61,36 @@ def test_prune_files_left_on_disk_for_titles_no_longer_wanted(tmp_path):
     assert not s2.path(('movie', 1), 'backdrop') and s2.path(('movie', 2), 'backdrop')
 
 
+def _touch_title(s, i):
+    for _, _, p in s.files():
+        if p.parent.name == str(i):
+            s.touch(p)
+
+
 def test_cap_prunes_least_recently_served_first(tmp_path):
     clock = Clock()
-    s, _ = make(tmp_path, cap=3 * 2 * (len(JPG) + len(PNG)) + 10, clock=clock)   # main + phone copy
+    jpg, png = _jpeg(80, 45), _png(40, 20)   # real images, so phone copies exist and count
+    s, _ = make(tmp_path, cap=10**12, clock=clock, download=lambda u: jpg if u.endswith('.jpg') else png)
+    s.sync('movie', [1]); s.drain()
+    one = s.report()
+    assert one['bytes'] == s.size()
+    assert one['source_bytes'] > 0 and one['variant_bytes'] > 0
+    assert one['bytes'] == one['source_bytes'] + one['variant_bytes']
+    s.cap = one['bytes'] * 3 + 10
     for i in (1, 2, 3):
         clock.t += 10
         s.sync('movie', list(range(1, i + 1))); s.drain()
-        for k in ('backdrop', 'logo'):
-            s.touch(s.path(('movie', i), k))
+        _touch_title(s, i)
     clock.t += 10
-    s.touch(s.path(('movie', 1), 'backdrop')); s.touch(s.path(('movie', 1), 'logo'))   # 1 served again: newest
-    clock.t += 10
+    _touch_title(s, 1)   # 1 served again: newest of the three
+    before = s.report()['bytes']
     s.sync('movie', [1, 2, 3, 4]); s.drain()
-    assert s.size() <= s.cap
+    assert s.report()['bytes'] <= s.cap
+    assert s.report()['bytes'] < before + one['bytes']
     assert s.path(('movie', 1), 'backdrop') and s.path(('movie', 4), 'backdrop')
+    assert s.path(('movie', 3), 'backdrop'), 'a newer title stays'
     assert not s.path(('movie', 2), 'backdrop'), 'the least recently served goes first'
+    assert not (tmp_path / 'wl' / 'movie' / '2' / 'source-original').exists()
 
 
 def test_failures_are_retried_later_not_cached_for_good(tmp_path):
@@ -145,7 +160,8 @@ def test_endpoint_serves_hits_404s_misses_fast_and_rejects_bad_ids(test_app, sto
     c = test_app.test_client()
     r = c.get('/api/wl-image/movie/578/backdrop')
     assert r.status_code == 200 and r.data == JPG and r.mimetype == 'image/jpeg'
-    assert 'max-age=604800' in r.headers['Cache-Control']
+    assert r.headers['Cache-Control'] == 'no-store'
+    assert 'immutable' not in r.headers['Cache-Control'] and 'max-age' not in r.headers['Cache-Control']
     assert c.get('/api/wl-image/movie/578/logo').mimetype == 'image/png'
     n = len(calls['resolve'])
     t0 = time.monotonic()
@@ -195,6 +211,8 @@ def test_background_worker_never_blocks_the_request(tmp_path):
 def test_service_worker_never_caches_api_paths():
     sw = open(os.path.join(os.path.dirname(__file__), '..', 'static', 'sw.js'), encoding='utf-8').read()
     assert "p.startsWith('/api/')) return false" in sw
+    assert "if (path.startsWith('/api/'))" in sw and 'return; // Data and proxied images: network only, never cached' in sw
+    assert 'no-store|private' in sw
 
 
 # v348 (Designer) -----------------------------------------------------------------------------------------------
@@ -204,16 +222,18 @@ def _jpeg(w, h):
     b = BytesIO(); Image.new('RGB', (w, h), (10, 20, 30)).save(b, 'JPEG'); return b.getvalue()
 
 
-def test_backdrops_are_stored_at_most_1920_wide(tmp_path):
-    from io import BytesIO
+def test_backdrops_keep_original_pixels_and_bytes(tmp_path):
     from PIL import Image
     big = _jpeg(3840, 2160)
-    s, _ = make(tmp_path, download=lambda u: big if u.endswith('.jpg') else PNG)
+    s, calls = make(tmp_path, download=lambda u: big if u.endswith('.jpg') else PNG)
     s.sync('movie', [1]); s.drain()
-    im = Image.open(s.path(('movie', 1), 'backdrop'))
-    assert im.size == (1920, 1080)
-    small = _jpeg(1280, 720)
-    assert w.fit_backdrop(small) == small
+    stored = s.path(('movie', 1), 'backdrop').read_bytes()
+    assert stored == big, 'the original is stored byte for byte, not recompressed'
+    assert Image.open(s.path(('movie', 1), 'backdrop')).size == (3840, 2160)
+    assert (tmp_path / 'wl' / 'movie' / '1' / 'source-original').is_file()
+    n = len(calls['download'])
+    s.sync('movie', [1]); s.drain()
+    assert len(calls['download']) == n, 'an original already stored is not fetched again'
 
 
 def test_textless_flag_is_kept_with_the_backdrop_and_pruned_with_it(tmp_path, test_app, monkeypatch):
@@ -250,12 +270,12 @@ def test_resolve_prefers_the_textless_backdrop_when_there_is_a_logo(monkeypatch)
     monkeypatch.setattr(m.settings, 'get', lambda k, d=None: 'k' if k == 'apis.tmdb.api_key' else d)
     monkeypatch.setattr(m, '_fetch_one_logo', lambda *a, **k: '/logo.png')
     r = m._wl_resolve('tv', 153312)
-    assert r == {'backdrop': 'https://image.tmdb.org/t/p/w1920/best.jpg',
+    assert r == {'backdrop': 'https://image.tmdb.org/t/p/original/best.jpg',
                  'logo': 'https://image.tmdb.org/t/p/original/logo.png', 'backdrop_textless': True}
     monkeypatch.setattr(m, '_fetch_one_logo', lambda *a, **k: None)   # no logo: backdrop_path, no images call
     n = len(seen)
     r = m._wl_resolve('movie', 1)
-    assert r['backdrop'] == 'https://image.tmdb.org/t/p/w1920/withtext.jpg' and r['backdrop_textless'] is False
+    assert r['backdrop'] == 'https://image.tmdb.org/t/p/original/withtext.jpg' and r['backdrop_textless'] is False
     assert not any(u.endswith('/images') for u in seen[n:])
     assert m._wl_textless([{'file_path': '/a.jpg', 'iso_639_1': 'fr'}]) is None   # no textless: backdrop_path
 
@@ -277,8 +297,11 @@ def test_phone_copies_are_stored_and_served_with_w(tmp_path, test_app, monkeypat
     monkeypatch.setattr(m, '_wl_store_obj', s)
     c = test_app.test_client()
     r = c.get('/api/wl-image/movie/11/backdrop?w=1280')
-    assert r.status_code == 200 and Image.open(__import__('io').BytesIO(r.data)).size == (1280, 720)
-    assert c.get('/api/wl-image/movie/11/logo?w=300').status_code == 200
+    assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-store'
+    assert Image.open(__import__('io').BytesIO(r.data)).size == (1280, 720)
+    logo = c.get('/api/wl-image/movie/11/logo?w=300')
+    assert logo.status_code == 200 and logo.headers['Cache-Control'] == 'no-store'
+    assert Image.open(__import__('io').BytesIO(logo.data)).mode == 'RGBA'
     for bad in ('/api/wl-image/movie/11/backdrop?w=780', '/api/wl-image/movie/11/backdrop?w=300',
                 '/api/wl-image/movie/11/logo?w=1280', '/api/wl-image/movie/11/backdrop?w=%C2%B2'):
         assert c.get(bad).status_code == 400, bad
@@ -351,12 +374,19 @@ def test_minimal_home_watchlist_rail_and_native_watchlist_follow_the_store(test_
     assert not s.present(('movie', 578))['backdrop'], 'a native watchlist removal prunes at once'
 
 
-def test_v350_a_phone_copy_not_made_yet_serves_the_stored_image_uncached(test_app, store):
-    s, _ = store
+def test_v350_a_phone_copy_not_made_yet_is_built_and_not_the_original(test_app, tmp_path, monkeypatch):
+    from io import BytesIO
+    from PIL import Image
+    big = _jpeg(3840, 2160)
+    s, _ = make(tmp_path, download=lambda u: big if u.endswith('.jpg') else _png(800, 300))
     s.sync('movie', [578]); s.drain()
     s.path(('movie', 578), 'backdrop', 1280).unlink()
+    monkeypatch.setattr(m, '_wl_store_obj', s)
     r = test_app.test_client().get('/api/wl-image/movie/578/backdrop?w=1280')
-    assert r.status_code == 200 and r.data == JPG and r.headers['Cache-Control'] == 'no-cache'
+    assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-store'
+    assert r.data != big
+    assert Image.open(BytesIO(r.data)).size == (1280, 720)
+    assert s.path(('movie', 578), 'backdrop', 1280), 'the phone copy is written for the next request'
 
 
 def test_v350_the_first_request_never_waits_on_the_reconcile(test_app, tmp_path, monkeypatch):
@@ -370,3 +400,110 @@ def test_v350_the_first_request_never_waits_on_the_reconcile(test_app, tmp_path,
     gate.set()
     assert r.status_code == 404 and time.time() - t0 < 2
     monkeypatch.setattr(m, '_wl_store_obj', None)
+
+
+# originals (the w1920 source/desktop ceiling is gone) --------------------------------------------------------
+def test_phone_logo_variant_keeps_transparency(tmp_path):
+    from PIL import Image
+    logo = _png(600, 200)   # half-transparent red, so a resize must not flatten onto black
+    s, _ = make(tmp_path, download=lambda u: _jpeg(3840, 2160) if u.endswith('.jpg') else logo)
+    s.sync('movie', [3]); s.drain()
+    assert s.path(('movie', 3), 'logo').read_bytes() == logo
+    im = Image.open(s.path(('movie', 3), 'logo', 300))
+    assert im.mode == 'RGBA' and im.size[0] == 300
+    assert im.getpixel((8, 50))[3] < 200, 'the translucent logo stays translucent'
+    assert im.getpixel((8, 50))[3] > 0
+
+
+def test_capped_backdrop_is_replaced_by_the_original_once(tmp_path):
+    from PIL import Image
+    capped = _jpeg(1920, 1080)
+    original = _jpeg(3840, 2160)
+    logo = _png(400, 160)
+    served = {'backdrop': capped}
+
+    def dl(u):
+        return served['backdrop'] if u.endswith('.jpg') else logo
+    s, calls = make(tmp_path, download=dl)
+    s.sync('movie', [9]); s.drain()
+    # What the previous ceiling left on disk: a 1920 file and no original mark.
+    src = s.path(('movie', 9), 'backdrop')
+    src.write_bytes(capped)
+    (tmp_path / 'wl' / 'movie' / '9' / 'source-original').unlink()
+    n_logo = sum(1 for u in calls['download'] if u.endswith('.png'))
+    n = len(calls['download'])
+    served['backdrop'] = original
+    s.sync('movie', [9]); s.drain()
+    assert len(calls['download']) == n + 1, 'only the backdrop is fetched again'
+    assert sum(1 for u in calls['download'] if u.endswith('.png')) == n_logo
+    stored = s.path(('movie', 9), 'backdrop').read_bytes()
+    assert stored == original and Image.open(s.path(('movie', 9), 'backdrop')).size == (3840, 2160)
+    assert Image.open(s.path(('movie', 9), 'backdrop', 1280)).size == (1280, 720)
+    n = len(calls['download'])
+    s.sync('movie', [9]); s.drain()
+    assert len(calls['download']) == n
+
+
+def test_desktop_source_is_the_original_and_phone_width_never_is(test_app, tmp_path, monkeypatch):
+    from io import BytesIO
+    from PIL import Image
+    big = _jpeg(3840, 2160)
+    s, _ = make(tmp_path, download=lambda u: big if u.endswith('.jpg') else _png(800, 300))
+    s.sync('movie', [4]); s.drain()
+    monkeypatch.setattr(m, '_wl_store_obj', s)
+    c = test_app.test_client()
+    src = c.get('/api/wl-image/movie/4/backdrop')
+    assert src.status_code == 200 and src.data == big and src.headers['Cache-Control'] == 'no-store'
+    assert Image.open(BytesIO(src.data)).size == (3840, 2160)
+    phone = c.get('/api/wl-image/movie/4/backdrop?w=1280')
+    assert phone.status_code == 200 and phone.data != big and phone.headers['Cache-Control'] == 'no-store'
+    assert Image.open(BytesIO(phone.data)).size[0] == 1280
+    # An undecodable source has no phone copy and is not sent in its place.
+    s.path(('movie', 4), 'backdrop', 1280).unlink()
+    s.path(('movie', 4), 'backdrop').write_bytes(JPG)
+    miss = c.get('/api/wl-image/movie/4/backdrop?w=1280')
+    assert miss.status_code == 404 and miss.headers['Cache-Control'] == 'no-store'
+    assert miss.data != JPG
+
+
+def test_removal_drops_measured_bytes_and_markers_are_not_counted(tmp_path):
+    s, _ = make(tmp_path, download=lambda u: _jpeg(640, 360) if u.endswith('.jpg') else _png(200, 80))
+    s.sync('movie', [8]); s.drain()
+    info = s.report()
+    assert info['bytes'] == sum(p.stat().st_size for _, _, p in s.files())
+    assert info['bytes'] > 0
+    assert all(p.name != 'source-original' for _, _, p in s.files())
+    s.remove(('movie', 8))
+    assert s.report()['bytes'] == 0 and s.report()['files'] == 0
+    assert not (tmp_path / 'wl' / 'movie' / '8').exists()
+
+
+def test_noise_original_is_larger_than_the_old_1920_ceiling(tmp_path):
+    """Honest sample, not a live TMDb file: noise compressed once at quality 90, then the old q86/1920 ceiling
+    and the phone copy measured from that same bitmap. The store keeps the quality-90 bytes unchanged."""
+    from io import BytesIO
+    from PIL import Image
+    im = Image.effect_noise((3840, 2160), 80).convert('RGB')
+    buf = BytesIO(); im.save(buf, 'JPEG', quality=90); original = buf.getvalue()
+    legacy = BytesIO()
+    im.resize((1920, 1080), Image.LANCZOS).convert('RGB').save(legacy, 'JPEG', quality=86, optimize=True)
+    phone = w.variant_bytes(original, 1280, keep_alpha=False)
+    s, _ = make(tmp_path, download=lambda u: original if u.endswith('.jpg') else _png(500, 180))
+    s.sync('tv', [1]); s.drain()
+    stored = s.path(('tv', 1), 'backdrop').read_bytes()
+    assert stored == original
+    assert len(stored) > len(legacy.getvalue())
+    assert len(phone) < len(stored)
+    assert Image.open(BytesIO(phone)).size == (1280, 720)
+    # Recorded for the trial note. Synthetic noise, so these are not TMDb photo sizes.
+    soft = Image.effect_noise((480, 270), 40).convert('RGB').resize((3840, 2160), Image.BICUBIC)
+    soft_buf = BytesIO(); soft.save(soft_buf, 'JPEG', quality=90)
+    soft_legacy = BytesIO()
+    soft.resize((1920, 1080), Image.LANCZOS).convert('RGB').save(soft_legacy, 'JPEG', quality=86, optimize=True)
+    soft_phone = w.variant_bytes(soft_buf.getvalue(), 1280, keep_alpha=False)
+    print(f"WL_SAMPLE noise original={len(stored)} legacy1920q86={len(legacy.getvalue())} phone1280={len(phone)} "
+          f"logo_source={s.path(('tv', 1), 'logo').stat().st_size} "
+          f"logo300={s.path(('tv', 1), 'logo', 300).stat().st_size} "
+          f"title_bytes={s.report()['bytes']}")
+    print(f"WL_SAMPLE soft original={len(soft_buf.getvalue())} legacy1920q86={len(soft_legacy.getvalue())} "
+          f"phone1280={len(soft_phone)}")

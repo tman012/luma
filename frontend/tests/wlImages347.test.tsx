@@ -10,7 +10,9 @@ vi.mock('@/contexts/ModalHostContext', async (orig) => ({ ...(await orig<typeof 
 import { MovieDetailModal } from '@/components/media/MovieDetailModal';
 import { openWhenReady, _resetModalPrefetch } from '@/services/modalPrefetch';
 import { _resetImageLoader } from '@/loading/imageLoader';
-import { parseWlImages, setLocalArt, _resetLocalArt } from '@/services/localArt';
+import { parseWlImages, setLocalArt, _resetLocalArt, LOCAL_BACKDROP_WAIT_MS } from '@/services/localArt';
+import { BACKDROP_ART_DEADLINE_MS } from '@/hooks/useSheetBackdrop';
+import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
 
 const broken = new Set<string>();
 /** v350: per-URL load time (ms; default 20) and every URL an Image was asked to load. */
@@ -167,6 +169,62 @@ describe('v348 (Designer): local art rules', () => {
       wl_images: { backdrop: '/api/wl-image/movie/603/backdrop', logo: null, backdrop_textless: true } };
     setLocalArt('movie', 603, parseWlImages(card.wl_images));
     expect(localArt('movie', 603)).toMatchObject({ backdrop: expect.stringMatching(/backdrop$/), logo: null, backdropTextless: true });
+  });
+  it('deadlines stay 1.0s text and 1.6s art, and the local backdrop wait stays inside the art deadline', () => {
+    expect(SURFACE_DEADLINE_MS).toBe(1000);
+    expect(BACKDROP_ART_DEADLINE_MS).toBe(1600);
+    expect(LOCAL_BACKDROP_WAIT_MS).toBe(700);
+    expect(LOCAL_BACKDROP_WAIT_MS).toBeLessThan(BACKDROP_ART_DEADLINE_MS);
+  });
+  function setWidth(width: number, dpr = 1) {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: dpr });
+  }
+  it('below 1024, minimal or not, gets 1280 and 300 and never the unsized original', () => {
+    const win = window as unknown as { __LUMA_MINIMAL__?: boolean };
+    const was = win.__LUMA_MINIMAL__;
+    const w = window.innerWidth;
+    const dpr = window.devicePixelRatio;
+    try {
+      win.__LUMA_MINIMAL__ = false;
+      setWidth(390, 3);
+      setLocalArt('movie', 390, LOCAL);
+      expect(localArt('movie', 390)).toMatchObject({
+        backdrop: expect.stringMatching(/\/backdrop\?w=1280$/),
+        logo: expect.stringMatching(/\/logo\?w=300$/),
+      });
+      setWidth(932, 3);   // a phone in landscape, still under the desktop breakpoint
+      setLocalArt('movie', 932, LOCAL);
+      expect(localArt('movie', 932)?.backdrop).toMatch(/\/backdrop\?w=1280$/);
+      expect(localArt('movie', 932)?.backdrop).not.toMatch(/\/backdrop$/);
+      win.__LUMA_MINIMAL__ = true;
+      setWidth(800, 2);
+      setLocalArt('movie', 800, LOCAL);
+      expect(localArt('movie', 800)?.backdrop).toMatch(/\/backdrop\?w=1280$/);
+    } finally {
+      win.__LUMA_MINIMAL__ = was;
+      setWidth(w, dpr);
+    }
+  });
+  it('desktop, including high-DPI, requests the stored original with no width cap', () => {
+    const win = window as unknown as { __LUMA_MINIMAL__?: boolean };
+    const was = win.__LUMA_MINIMAL__;
+    const w = window.innerWidth;
+    const dpr = window.devicePixelRatio;
+    try {
+      win.__LUMA_MINIMAL__ = true;
+      setWidth(1440, 2);
+      setLocalArt('movie', 1440, LOCAL);
+      expect(localArt('movie', 1440)).toMatchObject({
+        backdrop: expect.stringMatching(/\/api\/wl-image\/movie\/603\/backdrop$/),
+        logo: expect.stringMatching(/\/api\/wl-image\/movie\/603\/logo$/),
+      });
+      expect(localArt('movie', 1440)?.backdrop).not.toContain('w=1920');
+      expect(localArt('movie', 1440)?.backdrop).not.toContain('w=1280');
+    } finally {
+      win.__LUMA_MINIMAL__ = was;
+      setWidth(w, dpr);
+    }
   });
   it('the same title from another entry point after the Watchlist sheet closed: its usual art', async () => {
     layoutMode.mode = 'expanded';
