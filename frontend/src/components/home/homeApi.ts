@@ -1,3 +1,4 @@
+import { parseWlImages } from '@/services/localArt';
 import { apiFetch } from '@/apiClient';
 import { tmdbImg } from '@/utils/image';
 import { mapHeroMovie } from '@/services/api';
@@ -21,6 +22,8 @@ export interface Card {
   tmdb_id?: number;
   /** Watchlist rail cards: prod's digital-release label ('Jan 9'), shown above the title. */
   label?: string | null;
+  /** wl-images: Watchlist rail cards' stored sheet images ({backdrop, logo, backdrop_textless}). */
+  wl_images?: unknown;
 }
 export interface Rail {
   id: string; title: string; type: string; items: Card[];
@@ -71,7 +74,11 @@ export async function fetchHome(): Promise<HomeData> {
   const res = await apiFetch('/api/home');
   if (!res.ok) throw new Error(String(res.status));
   const d = await res.json();
-  return (d && typeof d === 'object' ? d : {}) as HomeData;   // a null body reads as {} (the empty state)
+  const out = (d && typeof d === 'object' ? d : {}) as HomeData;   // a null body reads as {} (the empty state)
+  // wl-images v350: the Watchlist rail's stored art is known before any warm-up (never TMDb's backdrop as well).
+  for (const r of Array.isArray(out.rails) ? out.rails : []) for (const c of Array.isArray(r?.items) ? r.items : [])
+    if (c?.wl_images && typeof c.tmdb_id === 'number') parseWlImages(c.wl_images, c.type === 'tv' ? 'tv' : 'movie', c.tmdb_id);
+  return out;
 }
 
 export async function fetchLibraries(): Promise<Library[]> {

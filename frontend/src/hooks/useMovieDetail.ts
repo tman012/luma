@@ -1,5 +1,6 @@
 import { isMinimal } from '@/minimal';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { useLocalArt, withLocalArt } from '@/services/localArt';
 import { pickBestTrailer } from '@/utils/pickBestTrailer';
 import { backdropUrl as tmdbBackdrop, plexBackdrop, plexSheetArt, finalBackdropUrl, plexArtFromPath } from '@/utils/image';
 import {
@@ -487,8 +488,12 @@ export function useMovieDetail(
     return () => { cancelled = true; };
   }, [resolvedTmdbId]);
 
+  // wl-images: a Watchlist open's server-stored backdrop / logo replace TMDb's (a failed one falls back: useLocalArt).
+  const local = useLocalArt('movie', detail?.tmdbId ?? tmdbId);
+  const shown = useMemo(() => withLocalArt(detail, local), [detail, local?.backdrop, local?.logo]);
+
   return {
-    detail,
+    detail: shown,
     ratings,
     loading: loading || (!colorsSettled && !error),
     ratingsLoading,

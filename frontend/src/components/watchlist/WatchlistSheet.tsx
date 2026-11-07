@@ -1,3 +1,4 @@
+import { parseWlImages, setLocalArt, type LocalArt } from '@/services/localArt';
 import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useModalHost, type ModalSource } from '@/contexts/ModalHostContext';
@@ -23,6 +24,8 @@ interface WatchlistMovie {
   addedDate: string | null;
   digitalReleaseDate: string | null;
   digitalReleaseLabel: string | null;
+  /** wl-images: the server-stored sheet images, when present. */
+  wlImages?: LocalArt | null;
 }
 
 /** A monitored Sonarr series that hasn't aired yet — the TV equivalent of a
@@ -38,6 +41,7 @@ interface WatchlistSeries {
   premiereDate: string | null;
   episodeOrder: number;
   qualityProfileName: string;
+  wlImages?: LocalArt | null;
 }
 
 type Tab = 'movies' | 'tv';
@@ -126,6 +130,7 @@ async function fetchWatchlist(): Promise<WatchlistMovie[]> {
       addedDate: (m.added_date as string) || null,
       digitalReleaseDate: (m.digital_release_date as string) || null,
       digitalReleaseLabel: (m.digital_release_label as string) || null,
+      wlImages: parseWlImages(m.wl_images, 'movie', tmdbId),
     };
   });
 }
@@ -149,6 +154,7 @@ async function fetchTvWatchlist(): Promise<WatchlistSeries[]> {
         premiereDate: (s.premiere_date as string) ?? null,
         episodeOrder: (s.episode_order as number) ?? 0,
         qualityProfileName: (s.quality_profile_name as string) || '',
+        wlImages: parseWlImages(s.wl_images, 'tv', tmdbId),
       };
     });
   } catch {
@@ -376,8 +382,10 @@ export function WatchlistSheet({ open, onClose }: WatchlistSheetProps) {
   // --- Modal: hide sheet behind, restore on close ---
   const [behindModal, setBehindModal] = useState(false);
 
-  const handleItemClick = useCallback((item: { mediaType: string; tmdbId: number | null; ratingKey: null }) => {
+  const handleItemClick = useCallback((item: { mediaType: string; tmdbId: number | null; ratingKey: null; wlImages?: LocalArt | null }) => {
     if (!item.tmdbId) return;
+    // wl-images: the sheet opens on the server-stored images (falls back to TMDb's on a miss or load error).
+    setLocalArt(item.mediaType === 'tv' ? 'tv' : 'movie', item.tmdbId, item.wlImages);
     setBehindModal(true);
     openModalForItem(
       { openMovie, openTv },

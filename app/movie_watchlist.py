@@ -12,7 +12,7 @@ DELETE /api/movies/watchlist/<tmdb_id>
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from flask import Blueprint, request
 
@@ -74,9 +74,22 @@ def add(body: Any, now: Optional[float] = None) -> Dict[str, Any]:
         return dict(conn.execute('SELECT * FROM watchlist WHERE tmdb_id = ?', (tid,)).fetchone())
 
 
+# wl-images: called with the tmdb id after a removal (main prunes the stored sheet images at once).
+removed_hooks: List[Callable[[int], None]] = []
+# wl-images: called with the listed movies before they are sent (main adds `wl_images`).
+list_hooks: List[Callable[[List[Dict[str, Any]]], None]] = []
+
+
 def remove(tid: int) -> bool:
     with ms.connect() as conn:
-        return conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (tid,)).rowcount > 0
+        gone = conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (tid,)).rowcount > 0
+    if gone:
+        for h in removed_hooks:
+            try:
+                h(tid)
+            except Exception:  # noqa: BLE001 - a hook never fails the removal
+                pass
+    return gone
 
 
 @bp.route('/api/movies/watchlist/tmdb-ids', methods=['GET'])
@@ -92,7 +105,16 @@ def profiles_get():
 
 @bp.route('/api/movies/watchlist', methods=['GET'])
 def list_get():
-    return _guard() or ms._out({'movies': movies()})
+    err = _guard()
+    if err:
+        return err
+    rows = movies()
+    for h in list_hooks:
+        try:
+            h(rows)
+        except Exception:  # noqa: BLE001
+            pass
+    return ms._out({'movies': rows})
 
 
 @bp.route('/api/movies/watchlist', methods=['POST'])

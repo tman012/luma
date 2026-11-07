@@ -9,6 +9,7 @@
  * Desktop/Tablet: Watchlist tab renders as a responsive poster grid.
  */
 
+import { parseWlImages, setLocalArt, type LocalArt } from '@/services/localArt';
 import { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { useRequireService } from '@/components/connect/connectService';
 import { ConnectServiceCard } from '@/components/connect/ConnectServiceCard';
@@ -42,6 +43,8 @@ interface WatchlistMovie {
   digitalReleaseDate: string | null;
   /** Compact badge e.g. "JAN 9" — null when no date. */
   digitalReleaseLabel: string | null;
+  /** wl-images: the server-stored sheet images, when present. */
+  wlImages?: LocalArt | null;
 }
 
 interface HistoryItem {
@@ -324,6 +327,7 @@ async function fetchWatchlist(): Promise<WatchlistMovie[]> {
       addedDate: (m.added_date as string) || null,
       digitalReleaseDate: (m.digital_release_date as string) || null,
       digitalReleaseLabel: (m.digital_release_label as string) || null,
+      wlImages: parseWlImages(m.wl_images, 'movie', tmdbId),
     };
   });
 }
@@ -996,6 +1000,8 @@ export function WatchlistPage() {
   }, [close, navigate]);
 
   const handleWlCardClick = useCallback((movie: WatchlistMovie) => {
+    // wl-images: the sheet opens on the server-stored images (falls back to TMDb's on a miss or load error).
+    setLocalArt('movie', movie.tmdbId, movie.wlImages);
     openModalForItem(
       { openMovie, openTv },
       movie,
