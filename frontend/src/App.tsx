@@ -1,5 +1,5 @@
-import { lazy, Suspense, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
+import { lazy, Suspense, useLayoutEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router';
 import { useVisualViewport } from '@/hooks/useVisualViewport';
 import { TVModeProvider } from '@/contexts/TVModeContext';
 import { LayoutModeProvider, useLayoutMode } from '@/contexts/LayoutModeContext';
@@ -29,6 +29,7 @@ import { ConnectServiceHost } from '@/components/connect/ConnectServiceHost';
 import { apiFetch } from './apiClient';
 import { isMinimal } from './minimal';
 import { MinimalHomePage } from '@/pages/MinimalHomePage';
+import { signalContentReady } from '@/components/start/StartupLoading';
 import { SetupToast } from '@/components/start/SetupToast';
 import { LibrariesPage, LibrariesRedirect, SettingsPage as MinimalSettingsPage } from '@/pages/LibrariesPage';
 import { getUrlBase } from '@/urlHelpers';
@@ -224,6 +225,20 @@ export function routerBasename(): string | undefined {
   return base || undefined;
 }
 
+/** Sign-in and every route other than Home are real UI: drop the document splash.
+ *  Home dismisses it itself once rows or a truthful error are on screen. */
+function StartupSplashGate() {
+  const { pathname } = useLocation();
+  const { loading, authenticated } = useAuth();
+  useLayoutEffect(() => {
+    const home = pathname === '/' || pathname === '';
+    // The installed phone app is the minimal build. Its Home dismisses the splash
+    // itself. Every other route, and the non-minimal app, is real UI on first paint.
+    if (!isMinimal() || !home || (!loading && !authenticated)) signalContentReady();
+  }, [pathname, loading, authenticated]);
+  return null;
+}
+
 /** LUMA_MINIMAL=1: Get Started, sign-in and the main screen only. */
 function MinimalApp() {
   return (
@@ -234,6 +249,7 @@ function MinimalApp() {
         <LayoutModeProvider>
         <SpatialNavProvider>
         <AppModalHost>
+        <StartupSplashGate />
         <MinimalSearchHost />
         <Routes>
           <Route path="/" element={<MinimalHomePage />} />
@@ -271,6 +287,7 @@ export default function App() {
           <LayoutModeProvider>
             <SpatialNavProvider>
               <AppModalHost>
+                <StartupSplashGate />
                 <VoiceProvider>
                 <NotificationsProvider>
                 {/* Always-mounted search overlay so the TopBar search works on

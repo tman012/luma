@@ -10,12 +10,16 @@ afterEach(() => { cleanup(); _resetModalPrefetch(); });
 
 describe('v325 motion P1 SheetFrame', () => {
   it('portals at --z-sheet with a scrim and an opaque card; keeps data-composed for the probes', () => {
-    render(<SheetFrame name="MovieDetailModal" phase="entering" composed={false} onScrimClick={() => {}}>
+    const held = render(<SheetFrame name="MovieDetailModal" phase="entering" composed={false} go={false} onScrimClick={() => {}}>
+      <SheetCard background={APP_BG}><p>x</p></SheetCard></SheetFrame>);
+    expect(document.querySelector('[data-modal="MovieDetailModal"]')).toBeNull();
+    expect(document.querySelector('[data-sheet-scrim]')).toBeNull();
+    held.rerender(<SheetFrame name="MovieDetailModal" phase="entering" composed go onScrimClick={() => {}}>
       <SheetCard background={APP_BG}><p>x</p></SheetCard></SheetFrame>);
     const root = document.querySelector<HTMLElement>('[data-modal="MovieDetailModal"]')!;
     expect(root).toBeTruthy();
     expect(root.style.zIndex).toBe(String(MOTION.z.sheet));
-    expect(root.getAttribute('data-composed')).toBe('false');
+    expect(root.getAttribute('data-composed')).toBe('true');
     expect(document.querySelector('[data-sheet-scrim]')).toBeTruthy();
     const card = document.querySelector<HTMLElement>('[data-sheet-card]')!;
     expect(card.style.opacity === '' || card.style.opacity === '1').toBe(true);

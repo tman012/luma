@@ -2,6 +2,7 @@ import { sheetBase } from '@/utils/posterColors';
 import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows, ratingsExpectedAtTap } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, useSeededHero, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { detailSheetReady, useUnopenedClose } from '@/loading/sheetOpenGate';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT, tapShell } from '@/services/modalPrefetch';
 import { isMinimal } from '@/minimal';
@@ -207,19 +208,14 @@ export function CompactLayout(props: TvModalViewProps) {
   // so a stale card orb can't keep Watch in place of Add.
   const showOwnedNow = (loading || !liveShow) ? (showOwned || seedOwned === true) : (showOwned || !!liveShow.isOwned);
   const titleState = useTitleReveal(logoInput(liveShow), liveShow?.title, finalBackdropUrl(liveShow?.backdropUrl) || liveShow?.posterUrl);
-  // Phone: `composed` once the details are in (or an error); the sheet itself moves on the seeded hero (useSeededHero),
-  // and the one reveal (useOneReveal) decides when its content shows.
-  const composed = !!error || (!loading && !!liveShow && titleState !== 'hold');
-  // Past the open budget the sheet starts on the tapped card's own art, colors and title (useSeededHero).
-  const hero = useSeededHero(composed, detailColors);
-  const heroHold = hero.seeded ? false : titleState === 'hold';
-  // ONE backdrop per open: the final (sharp, text-free when picked) image, latched once decoded and settled or at
-  // the cap, never swapped (useSheetBackdrop).
-  // The hero (backdrop + title) is ONE unit: logo vs. text and the backdrop are decided together before the reveal
-  // (1.2s cap from the tap), fade in once together, and never change for that open.
+  // The sheet stays closed until the hero (real logo or text, decoded artwork or a genuine no-art frame) is ready.
   const sheetHero = useSheetHero(finalBackdropUrl(liveShow?.backdropTextlessUrl ?? liveShow?.backdropUrl), !!liveShow && !liveShow.backdropPending, liveShow?.clearLogoUrl ? withBase(liveShow.clearLogoUrl) : null, logoInput(liveShow) !== undefined, props.openKey, !!liveShow);
   const sheetArt = sheetHero.art;
   const posterFill = liveShow && !liveShow.backdropUrl && !sheetArt ? liveShow.posterUrl : null;
+  const composed = detailSheetReady(loading, !!error, !!liveShow, liveShow?.title, sheetHero.state, true);
+  useUnopenedClose(props.openKey, composed || phase === 'exiting' || phase === 'gone', onClose);
+  const hero = useSeededHero(composed, detailColors);
+  const heroHold = hero.seeded ? false : titleState === 'hold';
   const ultraBlurColors = hero.colors;
   const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
   useEffect(() => {

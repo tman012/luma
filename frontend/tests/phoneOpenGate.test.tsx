@@ -36,12 +36,22 @@ describe('phone popup opens only when composed', () => {
     expect(card.hasAttribute('data-pressed')).toBe(false);
   });
 
-  it('ignores a second tap while the first is getting ready', async () => {
-    const open = vi.fn();
-    void openWhenReady('movie', 1, undefined, null, open);
-    void openWhenReady('movie', 2, undefined, null, open);
-    await act(async () => { await vi.advanceTimersByTimeAsync(OPEN_CAP_MS + 10); });
-    expect(open).toHaveBeenCalledTimes(1);
+  it('a second tap before any sheet is on screen replaces the first; a tap while a sheet is up is ignored', async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    void openWhenReady('movie', 1, undefined, null, first);
+    void openWhenReady('movie', 2, undefined, null, second);
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+    const sheet = document.createElement('div');
+    sheet.setAttribute('data-modal', 'MovieDetailModal');
+    document.body.appendChild(sheet);
+    const third = vi.fn();
+    void openWhenReady('movie', 3, undefined, null, third);
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(third).not.toHaveBeenCalled();
+    sheet.remove();
   });
 
   it('seeds the color blur from the tapped poster, so the first background is never navy', async () => {

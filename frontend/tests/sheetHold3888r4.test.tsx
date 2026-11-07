@@ -1,6 +1,6 @@
 /** Reviewer follow-ups on b618f7b4: a scrim tap closes the sheet during the hold (before it moves); the primed
  *  start is cancelled on unmount; SheetFrame takes `go` from its layout (no second timer of its own). */
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,9 +10,13 @@ const read = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8'
 afterEach(cleanup);
 
 describe('phone sheet hold', () => {
-  it('a scrim tap during the hold closes the sheet', () => {
+  it('the hold has no sheet and no scrim; a scrim tap only exists once the sheet is open', () => {
     const onClose = vi.fn();
-    render(<SheetFrame name="TvDetailModal" phase="entering" composed={false} go={false} onScrimClick={onClose}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>);
+    const view = render(<SheetFrame name="TvDetailModal" phase="entering" composed={false} go={false} onScrimClick={onClose}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>);
+    expect(document.querySelector('[data-sheet-scrim]')).toBeNull();
+    expect(document.querySelector('[data-modal="TvDetailModal"]')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    view.rerender(<SheetFrame name="TvDetailModal" phase="entering" composed go onScrimClick={onClose}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>);
     const scrim = document.querySelector('[data-sheet-scrim]') as HTMLElement;
     expect(scrim).toBeTruthy();
     expect(getComputedStyle(scrim).visibility).not.toBe('hidden');
@@ -32,12 +36,11 @@ describe('phone sheet hold', () => {
   it('Tester B2: close during the hold or mid-enter dismisses (exit runs, nothing re-opens)', () => {
     const calls: unknown[][] = [];
     (HTMLElement.prototype as unknown as { animate: unknown }).animate = vi.fn((k: unknown) => { calls.push([k]); return { finished: new Promise(() => {}), cancel() {}, play() {}, pause() {} }; });
-    const ui = (phase: 'entering' | 'exiting', go: boolean) => <SheetFrame name="MovieDetailModal" phase={phase} composed={false} go={go}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>;
-    // during the hold (not moving yet): exit leaves the card hidden, never starts the enter
+    const ui = (phase: 'entering' | 'exiting', go: boolean) => <SheetFrame name="MovieDetailModal" phase={phase} composed={go} go={go}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>;
+    // during the hold the sheet is not in the document, so an exit never starts an enter
     const a = render(ui('entering', false));
     a.rerender(ui('exiting', false));
-    const card = document.querySelector('[data-sheet-card]') as HTMLElement;
-    expect(card.style.visibility).toBe('hidden');
+    expect(document.querySelector('[data-sheet-card]')).toBeNull();
     expect(calls.length).toBe(0);
     a.rerender(ui('exiting', true));   // details/budget arrive after the close: still no enter
     expect(calls.some(([k]) => JSON.stringify(k).includes('"translate3d(0, 0, 0)"') && JSON.stringify(k).indexOf('100%') < JSON.stringify(k).indexOf('(0, 0, 0)'))).toBe(false);
@@ -48,6 +51,31 @@ describe('phone sheet hold', () => {
     b.rerender(ui('exiting', true));
     expect(JSON.stringify(calls[calls.length - 2]?.[0])).toContain('translate3d(0, 100%, 0)');
     b.unmount();
+    delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+  });
+  it('a second open on the same sheet freezes the slide again', async () => {
+    const finishes: Array<() => void> = [];
+    (HTMLElement.prototype as unknown as { animate: unknown }).animate = vi.fn(() => ({
+      finished: new Promise<void>((resolve) => { finishes.push(resolve); }),
+      cancel() {}, play() {}, pause() {},
+    }));
+    const ui = (go: boolean, label: string) => (
+      <SheetFrame name="MovieDetailModal" phase="entering" composed={go} go={go}>
+        <SheetCard background="#111318"><p>{label}</p></SheetCard>
+      </SheetFrame>
+    );
+    const view = render(ui(true, 'ready'));
+    expect(document.querySelector('[data-sheet-card]')?.textContent).toBe('ready');
+    await act(async () => { finishes.splice(0).forEach((resolve) => resolve()); });
+    view.rerender(ui(true, 'after'));
+    expect(document.querySelector('[data-sheet-card]')?.textContent).toBe('after');
+    view.rerender(ui(false, 'hidden'));
+    expect(document.querySelector('[data-sheet-card]')).toBeNull();
+    view.rerender(ui(true, 'reopen'));
+    expect(document.querySelector('[data-sheet-card]')?.textContent).toBe('reopen');
+    view.rerender(ui(true, 'during'));
+    expect(document.querySelector('[data-sheet-card]')?.textContent).toBe('reopen');
+    view.unmount();
     delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
   });
   it('SheetFrame has no useSheetGo of its own (layouts pass go)', () => {

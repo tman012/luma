@@ -61,7 +61,7 @@ describe('R3 layout (1440 and 1024)', () => {
     expect(screen.queryByTestId('r3-results')).toBeNull();
     expect(screen.queryByTestId('r3-cover')).toBeNull();      // the full Home hero shows at rest
     expect(screen.queryByTestId('r3-rest')).toBeNull();
-    expect(r3Css).toContain('.r3-head{position:fixed;z-index:55;top:84px;left:50%;transform:translateX(-50%)');   // v243 A1: inside the bar
+    expect(r3Css).toContain('.r3-head{position:fixed;z-index:55;top:102px;left:50%;transform:translateX(-50%)');   // under the dock
   });
   it('typing shows the band and the results; clearing goes back to rest', async () => {
     render(<HomeSearchR3 />);
@@ -284,83 +284,79 @@ describe('v228 R3 rest: Recently added under the band', () => {
   });
 });
 
-describe('v243 A1: the top bar opens from a bare chevron', () => {
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+describe('desktop dock replaces the chevron menu', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.pushState({}, '', '/'); });
   const bar = () => (screen.getByTestId('a1-bar').dataset.open === 'true' ? screen.getByTestId('a1-bar') : null);
   const head = () => { const h = screen.getByTestId('r3-head'); return { hidden: h.dataset.open !== 'true' || h.hasAttribute('inert') }; };
-  it('closed at rest: only the chevron (no circle or background, 48px); search and buttons hidden', () => {
+  const openSearch = () => fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+  it('at rest the dock is visible and the search field is hidden', () => {
     render(<HomeSearchR3 />);
     expect(bar()).toBeNull();
     expect(head().hidden).toBe(true);
-    const chev = screen.getByTestId('a1-chevron');
-    expect(chev.getAttribute('aria-expanded')).toBe('false');
-    expect(chev.querySelector('svg')!.getAttribute('width')).toBe('48');
-    expect(r3Css).toContain('.a1-chev{position:fixed;z-index:56;top:28px;left:50%;transform:translateX(-50%);width:48px;height:48px;padding:0;border:0;background:none;box-shadow:none;');
+    expect(screen.queryByTestId('a1-chevron')).toBeNull();
+    expect(screen.getByTestId('desktop-dock')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Search' }).getAttribute('aria-expanded')).toBe('false');
   });
-  it('the chevron opens the glass bar with the search and Watchlist, Library, Explore, TV Calendar; the chevron closes it', () => {
+  it('Search opens the existing field and focuses it; it does not toggle closed', () => {
     render(<HomeSearchR3 />);
-    fireEvent.click(screen.getByTestId('a1-chevron'));
+    openSearch();
     expect(bar()).toBeTruthy();
     expect(head().hidden).toBe(false);
-    expect(screen.getByTestId('a1-chevron').getAttribute('aria-expanded')).toBe('true');
-    expect([...screen.getByTestId('a1-nav').querySelectorAll('button')].map(b => b.textContent)).toEqual(['Watchlist', 'Library', 'Explore', 'TV Calendar']);
+    expect(screen.getByRole('button', { name: 'Search' }).getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(screen.getByTestId('search-input'));
     expect(r3Css).toContain('.a1-bar{position:fixed;z-index:49;top:0;left:0;right:0;height:152px;background:rgba(17,19,24,.55);backdrop-filter:blur(24px)');
-    expect(r3Css).not.toMatch(/a1-in|animation:a1/);   // v245: no separate, later backdrop animation
-    fireEvent.click(screen.getByTestId('a1-chevron'));
-    expect(bar()).toBeNull();
-    expect(head().hidden).toBe(true);
+    openSearch();
+    expect(bar()).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByTestId('search-input'));
   });
   it('Esc closes it', () => {
     render(<HomeSearchR3 />);
-    fireEvent.click(screen.getByTestId('a1-chevron'));
+    openSearch();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(bar()).toBeNull();
   });
   it('v326: Esc with a sheet open over R3 is the sheet\'s; R3 stays', () => {
     render(<><div data-modal="MovieDetailModal" /><HomeSearchR3 /></>);
-    fireEvent.click(screen.getByTestId('a1-chevron'));
+    openSearch();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(bar()).not.toBeNull();
   });
-  it('a click outside closes it; clicks inside the bar do not', () => {
+  it('a click outside closes it; clicks on the dock and in the field do not', () => {
     render(<><p data-testid="outside">hero</p><HomeSearchR3 /></>);
-    fireEvent.click(screen.getByTestId('a1-chevron'));
+    openSearch();
     fireEvent.pointerDown(screen.getByTestId('search-input'));
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Library' }));
+    fireEvent.pointerDown(screen.getByRole('link', { name: 'Libraries' }));
     fireEvent.pointerDown(screen.getByTestId('a1-bar'));
     expect(bar()).toBeTruthy();
     fireEvent.pointerDown(screen.getByTestId('outside'));
     expect(bar()).toBeNull();
   });
-  it('on the test install Watchlist, Library, Explore do nothing (no such pages)', () => {
+  it('on the test install Libraries, Explore and Watchlist do nothing (no such pages)', () => {
     render(<HomeSearchR3 />);
-    fireEvent.click(screen.getByTestId('a1-chevron'));
+    openSearch();
     const before = window.location.pathname;
-    for (const name of ['Watchlist', 'Library', 'Explore']) {
-      fireEvent.click(screen.getByRole('button', { name }));
+    for (const name of ['Libraries', 'Explore', 'Watchlist']) {
+      fireEvent.click(screen.getByRole('link', { name }));
       expect(window.location.pathname).toBe(before);
       expect(bar()).toBeTruthy();
     }
   });
-  it('on the test install TV Calendar goes to /settings/tv and closes the bar', () => {
+  it('on the test install Calendar goes to /settings/tv and closes the field', () => {
     render(<HomeSearchR3 />);
-    fireEvent.click(screen.getByTestId('a1-chevron'));
-    fireEvent.click(screen.getByRole('button', { name: 'TV Calendar' }));
+    openSearch();
+    fireEvent.click(screen.getByRole('link', { name: 'Calendar' }));
     expect(window.location.pathname).toBe('/settings/tv');
     expect(bar()).toBeNull();
-    window.history.pushState({}, '', '/');
   });
-  it('outside the test install they go to /watchlist, /browse, /explore and /settings/tv', () => {
+  it('outside the test install the links go to /browse, /explore, /settings/tv and /watchlist', () => {
     delete window.__LUMA_MINIMAL__;
     render(<HomeSearchR3 />);
     const seen: string[] = [];
-    for (const name of ['Watchlist', 'Library', 'Explore', 'TV Calendar']) {
-      fireEvent.click(screen.getByTestId('a1-chevron'));
-      fireEvent.click(screen.getByRole('button', { name }));
+    for (const name of ['Libraries', 'Explore', 'Calendar', 'Watchlist']) {
+      fireEvent.click(screen.getByRole('link', { name }));
       seen.push(window.location.pathname);
     }
-    expect(seen).toEqual(['/watchlist', '/browse', '/explore', '/settings/tv']);
-    window.history.pushState({}, '', '/');
+    expect(seen).toEqual(['/browse', '/explore', '/settings/tv', '/watchlist']);
   });
 });
 
@@ -410,10 +406,10 @@ describe('v245: one seamless reveal', () => {
     render(<HomeSearchR3 />);
     const b = screen.getByTestId('a1-bar'); const h = screen.getByTestId('r3-head');
     expect([b.dataset.open, h.dataset.open]).toEqual(['false', 'false']);
-    fireEvent.click(screen.getByTestId('a1-chevron'));
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     expect([b.dataset.open, h.dataset.open]).toEqual(['true', 'true']);
     expect(screen.getByTestId('a1-bar')).toBe(b);
-    fireEvent.click(screen.getByTestId('a1-chevron'));
+    fireEvent.keyDown(document, { key: 'Escape' });
     expect([b.dataset.open, h.dataset.open]).toEqual(['false', 'false']);
     expect(h.hasAttribute('inert')).toBe(true);
   });

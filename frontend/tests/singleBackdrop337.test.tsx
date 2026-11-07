@@ -60,9 +60,9 @@ describe('one backdrop per sheet open', () => {
     act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); });
     expect(g.result.current).toBeNull();
     await decode('/never.jpg');
-    expect(g.result.current).toBeNull();                 // past 1.6s: no art for that open, nothing arrives later
+    expect(g.result.current).toBe('/never.jpg');         // past 1.6s the sheet was never opened, so this decode is the first art
     g.rerender({ c: '/later-better.jpg', s: true, k: 'b' });
-    expect(g.result.current).toBeNull();
+    expect(g.result.current).toBe('/never.jpg');         // latched: a later URL does not swap in
   });
 
   it('v341 slow details (past 1.0s): the backdrop known then still gets 600ms to decode, so the reveal has art', async () => {
@@ -135,19 +135,16 @@ describe('one backdrop per sheet open', () => {
     expect(h.result.current).toMatchObject({ state: 'logo', art: '/art.jpg', logo: '/logo.png' });
   });
 
-  it('logo late: the text title at the cap, and no later swap to the logo', async () => {
+  it('logo still decoding past the old cap stays held, then that logo is the first reveal', async () => {
     const h = hero({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
     await decode('/art.jpg');
-    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
-    expect(h.result.current.state).toBe('hold');   // v345: a known logo waits up to the art deadline (prod's budget)
-    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); });
-    expect(h.result.current).toMatchObject({ state: 'text', art: '/art.jpg', logo: null });
-    expect(decodes.has('/logo.png')).toBe(true);
-    h.rerender({ a: '/art.jpg', l: '/logo.png', ls: true, k: 'a' });
-    expect(h.result.current.state).toBe('text');
+    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS); });
+    expect(h.result.current.state).toBe('hold');
+    await decode('/logo.png');
+    expect(h.result.current).toMatchObject({ state: 'logo', art: '/art.jpg', logo: '/logo.png' });
     h.rerender({ a: '/art.jpg', l: '/logo2.png', ls: true, k: 'a' });
     act(() => { vi.advanceTimersByTime(3000); });
-    expect(h.result.current).toMatchObject({ state: 'text', art: '/art.jpg', logo: null });
+    expect(h.result.current).toMatchObject({ state: 'logo', art: '/art.jpg', logo: '/logo.png' });
   });
 
   it('logo lookup still pending holds the hero (no text first) until the cap', async () => {

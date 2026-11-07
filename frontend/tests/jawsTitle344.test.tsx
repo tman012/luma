@@ -41,11 +41,11 @@ function shown(): string {
 }
 
 describe('v344 Jaws: never a blank title', () => {
-  it('phone: a cold open seeded from a row with no title text still shows the title text', async () => {
+  it('phone: a cold open whose logo never decodes stays closed (no blank title, no stand-in text)', async () => {
     layoutMode.mode = 'compact'; stall.logo = true; stall.plexMs = 900;
     await openJaws(document.createElement('button'));
-    expect(document.querySelector('[data-hero-title]')?.getAttribute('data-hero-title')).toBe('text');
-    expect(shown()).toBe('Jaws');
+    expect(document.querySelector('[data-modal="MovieDetailModal"]')).toBeNull();
+    expect(shown()).toBe('');
   });
   it('compact: a logo that paints stays the logo', async () => {
     layoutMode.mode = 'compact';

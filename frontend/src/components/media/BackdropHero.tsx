@@ -13,6 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import { useCallback, useMemo, useState } from 'react';
+import { isDecoded } from '@/loading/imageLoader';
 import { APP_BG, reducedMotion } from '@/theme/motion';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
@@ -68,8 +69,10 @@ export function BackdropHero({
   // has loaded, then fades in over navy: opening another title never shows
   // the previous title's art, and nothing jumps while the new one decodes.
   const src = backdropUrl || posterUrl || null;
-  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
-  const loaded = !!src && loadedSrc === src && !hold;
+  // A decode that finished before this sheet portaled is already display-ready.
+  // Starting at opacity 0 would fade the photo in over the wash after the sheet is moving.
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(src && isDecoded(src) ? src : null);
+  const loaded = !!src && (loadedSrc === src || isDecoded(src)) && !hold;
   const markLoaded = useCallback((el: HTMLImageElement | null) => {
     if (el && src && el.complete && el.naturalWidth > 0) setLoadedSrc(src);
   }, [src]);

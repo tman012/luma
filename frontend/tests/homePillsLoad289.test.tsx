@@ -35,18 +35,12 @@ const json = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 500, json: 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('v289 phone Home pills load slot (no top→under-CW jump)', () => {
-  it('keeps pills under the first skeleton rail while /api/home is pending', () => {
+  it('startup shows Loading… and does not paint pills or skeletons while /api/home is pending', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
-    const skeleton = screen.getByTestId('home-skeleton');
-    const pills = screen.getByTestId('home-pills');
-    const firstSection = skeleton.querySelector('section');
-    expect(firstSection).toBeTruthy();
-    expect(skeleton.contains(pills)).toBe(true);
-    // First CW-shaped skeleton section precedes the pill row (prod NavPills after CW).
-    expect(firstSection!.compareDocumentPosition(pills) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // Pills must not sit above the skeleton root (the pre-v289 jump).
-    expect(pills.compareDocumentPosition(skeleton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeFalsy();
+    expect(screen.getByTestId('startup-loading').textContent).toContain('Loading\u2026');
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
+    expect(screen.queryByTestId('home-pills')).toBeNull();
   });
 
   it('after load, pills stay under Continue Watching (same slot)', async () => {
@@ -78,9 +72,10 @@ describe('v289 phone Home pills load slot (no top→under-CW jump)', () => {
     expect(kids.filter(k => k.tagName === 'SECTION')).toHaveLength(3);
   });
 
-  it('source: loading path no longer paints HomePills above SkeletonRails', () => {
+  it('source: startup is the loading screen; loaded Home still puts pills after the first rail', () => {
     const home = readFileSync(resolve(__dirname, '../src/pages/MinimalHomePage.tsx'), 'utf8');
-    expect(home).toContain('SkeletonRails afterFirst={<HomePills after />}');
+    expect(home).toContain('<StartupLoading />');
+    expect(home).toContain('afterFirst={<HomePills after />}');
     expect(home).not.toMatch(/<>\s*<HomePills\s*\/>\s*<SkeletonRails\s*\/>\s*<\/>/);
   });
 });

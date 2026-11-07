@@ -9,13 +9,11 @@ type P = { k: string; d: boolean; h: boolean; r: boolean; dl: boolean; t: boolea
 const mount = (p: P) => renderHook(({ k, d, h, r, dl, t }: P) => useOneReveal(k, d, h, r, dl, t), { initialProps: p });
 
 describe('v341: one reveal for the whole sheet', () => {
-  it('opens only with the details, the latched hero and the ratings (or the deadline), on the same render', () => {
-    const h = mount({ k: 'a', d: true, h: false, r: true, dl: false, t: false });
-    expect(h.result.current.revealed).toBe(false);          // details in, hero not latched: nothing shows
+  it('opens on the same render once the details and the latched hero are in; a deadline does not release a held hero', () => {
+    const h = mount({ k: 'a', d: true, h: false, r: true, dl: true, t: false });
+    expect(h.result.current.revealed).toBe(false);          // details in, hero not latched, deadline already passed
     h.rerender({ k: 'a', d: true, h: true, r: false, dl: false, t: false });
-    expect(h.result.current.revealed).toBe(false);          // hero latched, ratings out, before the deadline
-    h.rerender({ k: 'a', d: true, h: true, r: false, dl: true, t: false });
-    expect(h.result.current.revealed).toBe(true);           // the deadline releases everything together
+    expect(h.result.current.revealed).toBe(true);           // hero latched: ratings are not required
     h.rerender({ k: 'a', d: true, h: true, r: true, dl: true, t: false });
     expect(h.result.current.revealed).toBe(true);           // latched for the open
     h.rerender({ k: 'b', d: false, h: false, r: false, dl: false, t: false });

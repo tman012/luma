@@ -25,14 +25,14 @@ export function useKioskWidth(): boolean {
   return wide;
 }
 
-export function KioskHome() {
+export function KioskHome({ onReady }: { onReady?: () => void } = {}) {
   const [movies, setMovies] = useState<HeroMovie[] | null>(null);
   useEffect(() => {
     let alive = true;
     fetchHeroMovies()
       // Only items with a backdrop can be shown; none means empty (solid navy).
-      .then(list => { if (alive) setMovies(list.filter(m => !!m.backdropUrl)); })
-      .catch(() => { if (alive) setMovies([]); });
+      .then(list => { if (alive) { setMovies(list.filter(m => !!m.backdropUrl)); onReady?.(); } })
+      .catch(() => { if (alive) { setMovies([]); onReady?.(); } });
     return () => { alive = false; };
   }, []);
 

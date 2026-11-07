@@ -25,23 +25,21 @@ describe('v341d: the clearlogo never pops in or moves the block', () => {
     await decode('/logo.png');
     expect(h.result.current).toMatchObject({ state: 'logo', logo: '/logo.png' });
   });
-  it('a logo from the late clearlogo fetch (after the art deadline) never swaps in: text title for the open', () => {
+  it('a logo from the late clearlogo fetch is the first reveal, not a swap onto text', async () => {
     const h = mount({ logo: undefined, settled: false });
-    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
-    expect(h.result.current.state).toBe('hold');   // v345: a pending lookup waits up to the art deadline
-    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); });
-    expect(h.result.current.state).toBe('text');
+    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS); });
+    expect(h.result.current.state).toBe('hold');   // a pending lookup is not forced to text
     h.rerender({ logo: '/late-logo.png', settled: true });
-    expect(h.result.current).toMatchObject({ state: 'text', logo: null });
+    expect(h.result.current.state).toBe('hold');
+    await decode('/late-logo.png');
+    expect(h.result.current).toMatchObject({ state: 'logo', logo: '/late-logo.png' });
   });
-  it('a logo URL known but decoding late: text at the art deadline, the decode afterwards changes nothing', async () => {
+  it('a logo URL still decoding past the old art deadline stays held, then reveals that logo', async () => {
     const h = mount({ logo: '/slow.png', settled: true });
-    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); });
-    expect(h.result.current.state).toBe('hold');   // v345: a known logo waits up to the art deadline
-    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); });
-    expect(h.result.current.state).toBe('text');
+    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS); });
+    expect(h.result.current.state).toBe('hold');
     await decode('/slow.png');
-    expect(h.result.current).toMatchObject({ state: 'text', logo: null });
+    expect(h.result.current).toMatchObject({ state: 'logo', logo: '/slow.png' });
   });
   it('meta offsetTop cannot depend on the logo: the title box has its final fixed height and the logo is laid out absolutely', () => {
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {

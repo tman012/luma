@@ -20,26 +20,24 @@ const mount = (x: P) => renderHook(({ a, s, p }: P) => useSheetHero(a, s, null, 
 const past = () => { act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS); }); act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); }); };
 
 describe('v341c: the TV hero is capped while TMDb is pending', () => {
-  it('TMDb pending past the 1.0s deadline: the decoded Plex art latches at once (text title), and nothing swaps in after', async () => {
+  it('TMDb still pending past the old deadline: decoded Plex art does not latch, so a later settled backdrop is the first frame', async () => {
     const h = mount({ a: '/plex-art.jpg', s: false, p: true });
     await decode('/plex-art.jpg');
-    act(() => { vi.advanceTimersByTime(BACKDROP_CAP_MS - 1); });
-    expect(h.result.current.state).toBe('hold');                 // before the deadline: still waiting for TMDb
-    act(() => { vi.advanceTimersByTime(1); });
-    expect(h.result.current).toMatchObject({ state: 'text', art: '/plex-art.jpg' });   // v341e: no 600ms wait
-    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS); });
-    expect(h.result.current).toMatchObject({ state: 'text', art: '/plex-art.jpg' });
-    h.rerender({ a: '/tmdb-textless.jpg', s: true, p: true });   // TMDb lands late
-    expect(h.result.current.art).toBe('/plex-art.jpg');
+    act(() => { vi.advanceTimersByTime(BACKDROP_ART_DEADLINE_MS); });
+    expect(h.result.current.state).toBe('hold');
+    h.rerender({ a: '/tmdb-textless.jpg', s: true, p: true });
+    expect(h.result.current.state).toBe('hold');
+    await decode('/tmdb-textless.jpg');
+    expect(h.result.current).toMatchObject({ state: 'text', art: '/tmdb-textless.jpg' });
   });
 
-  it('no decoded art by the cap: the no-art fallback, never a blank hold', () => {
+  it('no settled art by the old cap stays held (the open bound closes it; the hook does not invent a title)', () => {
     const h = mount({ a: '/plex-art.jpg', s: false, p: true });
     past();
-    expect(h.result.current).toMatchObject({ state: 'text', art: null });
+    expect(h.result.current.state).toBe('hold');
     const g = mount({ a: null, s: false, p: true });
     past();
-    expect(g.result.current.state).toBe('text');
+    expect(g.result.current.state).toBe('hold');
   });
 
   it('a TMDb error reveals on every layout: Plex fallback in the hook, error state shown on desktop', () => {

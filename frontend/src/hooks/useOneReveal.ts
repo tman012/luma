@@ -12,7 +12,10 @@ export function useOneReveal(openKey: unknown, detailsIn: boolean, heroLatched: 
   deadline: boolean, hasTrailer: boolean, owned = false, ownedKnown = true, artDeadline = false): OneReveal {
   const [st, setSt] = useState<{ key: unknown; trailer: boolean; owned: boolean } | null>(null);
   const cur = st && st.key === openKey ? st : null;
-  const ready = !cur && detailsIn && heroLatched && (ratingsShown || deadline) && (ownedKnown || artDeadline);
+  // Ratings settle into a reserved row after this reveal. The old surface and art deadlines must not
+  // release a sheet whose hero is still holding (they are reported by callers and ignored here).
+  void ratingsShown; void deadline; void artDeadline;
+  const ready = !cur && detailsIn && heroLatched && ownedKnown;
   useEffect(() => { if (ready) setSt({ key: openKey, trailer: hasTrailer, owned }); }, [ready, openKey, hasTrailer, owned]);
   useEffect(() => { if (ready) endSheetPriority(); }, [ready]);
   // Closed before its reveal: its window ends too (unless a newer open has begun its own; v341l).

@@ -44,7 +44,7 @@ describe('v341e: desktop reveal waits for its backdrop img element (warm opens: 
   it('movie and TV expanded', () => {
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
       const s = src(`components/media/${k}/ExpandedLayout.tsx`);
-      expect(s, k).toMatch(/sheetHero\.state !== 'hold' && artInFrame && !modalEntering, /);
+      expect(s, k).toMatch(/sheetHero\.state !== 'hold' && artInFrame, /);
       expect(s, k).toMatch(/onLoad=\{\(e\) => \{[^\n]*setArtPainted\(artEl\)\); \}\} onError=\{\(\) => setArtPainted\(artEl\)\}/);
       expect(s, k).toMatch(/!!artPaintedAt && artPaintedAt\.key === props\.openKey && artPaintedAt\.url === sheetArt/);
     }
@@ -59,7 +59,7 @@ describe('v341e: an open frees the connections and starts its Plex art early', (
   });
   it('the art deadline latches the last backdrop that decoded for the open when the newer pick is still decoding', () => {
     const s = src('hooks/useSheetBackdrop.ts');
-    expect(s).toMatch(/const fallback = altIn \? alt : cur\.artCapped && present && !artIn \? good\.current\.url : null;/);
+    expect(s).toMatch(/const chosen = artIn \? art! : altIn \? alt! : null;/);
   });
 });
 describe('v341f: desktop content and backdrop start their fade on one trigger', () => {
@@ -83,7 +83,8 @@ describe('v341f: Reviewer F1/F2/F4', () => {
   });
   it('F2: the desktop wait for the backdrop element is capped at the art deadline', () => {
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
-      expect(src(`components/media/${k}/ExpandedLayout.tsx`), k).toMatch(/const artInFrame = !sheetArt \|\| artWaitCapped \|\| /);
+      expect(src(`components/media/${k}/ExpandedLayout.tsx`), k).toMatch(/const artInFrame = !sheetArt \|\| sheetHero\.state !== 'hold' \|\| /);
+      expect(src(`components/media/${k}/ExpandedLayout.tsx`), k).not.toMatch(/artWaitCapped/);
     }
     expect(src('hooks/useSheetBackdrop.ts')).toMatch(/capLeft\(BACKDROP_ART_DEADLINE_MS\)\);\n    return \(\) => window\.clearTimeout\(t\);\n  \}, \[openKey\]\);\n  return k === openKey;/);
   });
@@ -138,7 +139,8 @@ describe('v341i: Tester PREP on 58ed7e21 (Plex art from the tap, one URL)', () =
   });
   it('a movie never waits on TMDb first; the reveal takes TMDb art if decoded, else the Plex art', () => {
     expect(src('hooks/useMovieDetail.ts')).not.toMatch(/Promise\.all\(\[plexPromise, tmdbPromise\]\)/);
-    expect(src('hooks/useSheetBackdrop.ts')).toMatch(/const altReady = cur\.capped && present && !artIn && altIn;/);
+    expect(src('hooks/useSheetBackdrop.ts')).toMatch(/const chosen = artIn \? art! : altIn \? alt! : null;/);
+    expect(src('hooks/useSheetBackdrop.ts')).not.toMatch(/altReady = cur\.capped/);
     for (const k of ['CompactLayout', 'ExpandedLayout']) {
       expect(src(`components/media/MovieDetailModal/${k}.tsx`), k).toMatch(/props\.openKey, !!liveDetail, finalBackdropUrl\(liveDetail\?\.plexArtUrl\)\);/);
     }

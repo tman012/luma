@@ -16,6 +16,7 @@ const css = `
 @keyframes lumaShake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,50%,70%{transform:translateX(-8px)}40%,60%{transform:translateX(8px)}}
 .luma-spin{animation:lumaSpin .9s linear infinite}
 @keyframes lumaSpin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.luma-spin,.luma-start-fade{animation:none}}
 .luma-key:active{background:rgba(255,255,255,.28)!important}
 .luma-start-btn{transition:transform .1s,opacity .2s}
 .luma-start-btn:active{transform:scale(.98)}

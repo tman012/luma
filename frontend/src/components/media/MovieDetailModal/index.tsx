@@ -124,8 +124,6 @@ export function MovieDetailModal({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleClose, showSources, showUpgrade, showFullPlot, showTrailer, showReviews, showPlayback, showSimilar, showCollection]);
 
-  if (phase === 'gone') return null;
-
   // Build view-model props
   const viewProps = {
     detail,
@@ -197,6 +195,12 @@ export function MovieDetailModal({
   };
 
   const { isTvMode } = useTVMode();
+  useEffect(() => {
+    document.documentElement.dataset.detailMounted = '1';
+    return () => { delete document.documentElement.dataset.detailMounted; };
+  }, []);
+
+  if (phase === 'gone') return null;
 
   const matchToastEl = matchToast
     ? createPortal(

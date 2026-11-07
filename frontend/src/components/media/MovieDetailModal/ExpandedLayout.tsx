@@ -5,7 +5,8 @@ import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatRuntime, finalBackdropUrl } from '@/utils/image';
-import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO, useArtWaitCap } from '@/hooks/useSheetBackdrop';
+import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO } from '@/hooks/useSheetBackdrop';
+import { detailSheetReady, useUnopenedClose } from '@/loading/sheetOpenGate';
 import {
   CARD_BG,
   PERSON_FALLBACK_SVG,
@@ -351,9 +352,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // Per open: a reopen mounts a new img, so the last open's load doesn't count.
   const [artPaintedAt, setArtPaintedAt] = useState<{ key: unknown; url: string } | null>(null);
   const setArtPainted = (url: string) => setArtPaintedAt({ key: props.openKey, url });
-  // Capped (Reviewer F2): never past the 1.6s art deadline waiting for the element's load.
-  const artWaitCapped = useArtWaitCap(props.openKey);
-  const artInFrame = !sheetArt || artWaitCapped || (!!artPaintedAt && artPaintedAt.key === props.openKey && artPaintedAt.url === sheetArt);
+  // Display-ready when the hero decoded this URL, or this element has loaded. A timer is not readiness.
+  const artInFrame = !sheetArt || sheetHero.state !== 'hold' || (!!artPaintedAt && artPaintedAt.key === props.openKey && artPaintedAt.url === sheetArt);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -419,9 +419,12 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // The card's own enter motion (scale 0.96 -> rest, 320 ms) runs first: a warm open revealed inside it, so the
   // buttons crept 1-3 px as the scale finished (N1440 Tulsa). The reveal waits for the card to rest.
   const cardRef = useRef<HTMLDivElement>(null);
-  const modalEntering = useModalMotion(phase, overlayRef, cardRef);
-  const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold' && artInFrame && !modalEntering, ratingsSettle.shown,
-    sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey), sheetHero.artDeadline);
+  const ownedKnown = !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey);
+  const showSheet = detailSheetReady(loading, !!error, !!liveDetail, liveDetail?.title, sheetHero.state, ownedKnown);
+  useUnopenedClose(props.openKey, showSheet || phase === 'exiting' || phase === 'gone', onClose);
+  const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', showSheet && phase !== 'gone');
+  const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
+    sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, ownedKnown, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);
   const actionsTrailer = reveal.trailer;
@@ -613,12 +616,13 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // Lock body scroll
   // ---------------------------------------------------------------------------
   useEffect(() => {
+    if (!showSheet) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = prev;
     };
-  }, []);
+  }, [showSheet]);
 
   // ---------------------------------------------------------------------------
   // Overlay click closes
@@ -666,7 +670,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // Animation — tablet: opacity-only (skip scale/transform for GPU savings)
   // ---------------------------------------------------------------------------
 
-  if (phase === 'gone') return null;
+  if (phase === 'gone' || !showSheet) return null;
 
   return (
     <Hold hold={modalEntering}>

@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { FONT, GlowLayer, LOGO_SRC, NAVY_BG, glowPage } from '@/components/start/StartUI';
+import { FONT, GlowLayer, LOGO_SRC, NAVY_BASE, NAVY_BG, glowPage } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { LUMA_BLUE } from '@/ui/lumaButton';
 import {
@@ -22,6 +22,8 @@ import { useKioskWidth } from '@/components/home/KioskHome';
 import { CheckIcon, ChevronIcon, ChevronLeftIcon, GripIcon, XIcon } from '@/components/nav/AppNav';
 import { UserMenu } from '@/components/nav/UserMenu';
 import { HomeLogo } from '@/components/home/HomeLogo';
+import { DOCK, DesktopDockRouted } from '@/components/home/DesktopDock';
+import { openSearch } from '@/components/search/MinimalSearchHost';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { usePlexOwner } from '@/components/home/PlexSettings';
 import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
@@ -130,16 +132,13 @@ export function SettingsPage() {
       <div style={settingsPage} data-step="settings" data-layout="desktop">
         <GlowLayer />
         <style>{css}</style>
-        <header style={calendar ? { ...deskHeader, position: 'relative' } : deskHeader}>
+        <DesktopDockRouted onSearch={openSearch} />
+        <header style={deskHeader}>
           {calendar ? (
-            // v319 (Taylor 11:08): no up arrow; Home's own logo (shared HomeLogo, same size and spot) goes Home,
-            // and a centered page title. Series / Calendar / Import share this header; the title shows on Calendar only.
-            <>
-              <Link to="/" aria-label="Home" data-testid="tv-home-link" style={{ display: 'inline-flex', borderRadius: 12 }} className="luma-focus">
-                <HomeLogo data-testid="tv-logo" />
-              </Link>
-              {tvTitleText && <h1 data-testid="tv-page-title" style={tvTitle}>{tvTitleText}</h1>}
-            </>
+            // v319: Home's logo goes Home. The page title sits under the header so it clears the top dock.
+            <Link to="/" aria-label="Home" data-testid="tv-home-link" style={{ display: 'inline-flex', borderRadius: 12 }} className="luma-focus">
+              <HomeLogo data-testid="tv-logo" />
+            </Link>
           ) : (
             <Link to="/" aria-label="Home" style={{ display: 'inline-flex', borderRadius: 12 }} className="luma-focus">
               <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="settings-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
@@ -149,6 +148,7 @@ export function SettingsPage() {
             ? <UserMenu name={user?.name || ''} admin={admin} busy={busy} onSignOut={signOut} size={48} />
             : <span style={{ width: 48 }} />}
         </header>
+        {calendar && tvTitleText && <h1 data-testid="tv-page-title" style={tvTitle}>{tvTitleText}</h1>}
         <div style={deskPage} data-view={calendar ? 'tv-calendar' : undefined}>
           {!calendar && <nav aria-label="Settings" data-testid="settings-nav" style={{ width: NAV_W, flex: 'none' }}>
             <h1 style={navHeading}>Settings</h1>
@@ -419,11 +419,15 @@ export const HEADING_GAP = 16;
 export const NAV_W = 220;
 export const NAV_GAP = 40;
 const tvTitle: React.CSSProperties = {
-  position: 'absolute', left: '50%', top: 20, height: 64, transform: 'translateX(-50%)', margin: 0, display: 'flex', alignItems: 'center',
-  fontFamily: FONT, fontSize: 24, fontWeight: 600, color: 'rgba(255,255,255,0.95)', whiteSpace: 'nowrap', pointerEvents: 'none',
+  margin: '16px 0 0', textAlign: 'center', fontFamily: FONT, fontSize: 24, fontWeight: 600,
+  color: 'rgba(255,255,255,0.95)', lineHeight: '32px',
 };
+/** Logo row is 20+64. The dock ends 10px lower; the shadow covers that strip so scrolled text does not pass under it. */
+const DOCK_OVERHANG = Math.max(0, DOCK.top + DOCK.h - (20 + 64));
 const deskHeader: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `20px 60px 0 ${LOGO_LEFT}px`,
+  position: 'sticky', top: 0, zIndex: 40, background: NAVY_BASE,
+  boxShadow: DOCK_OVERHANG ? `0 ${DOCK_OVERHANG}px 0 ${NAVY_BASE}` : undefined,
 };
 const deskPage: React.CSSProperties = {
   display: 'flex', gap: NAV_GAP, padding: `${HEADING_GAP}px 60px 32px ${LOGO_LEFT}px`, boxSizing: 'border-box',

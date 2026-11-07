@@ -5,7 +5,8 @@ import { _resetImageLoader, loadImage } from '@/loading/imageLoader';
  * logo URLs and starts loading those images, plus the color blur. When the
  * popup opens it reads the same cached responses, so images are already on
  * their way instead of waiting on a metadata round-trip. */
-import { _resetSheetPriority, afterSheetPriority, beginSheetPriority, keepHomePostersOnOpen, SEARCH_SURFACE, sheetOpening, sheetOpens } from '@/loading/sheetPriority';
+import { _resetSheetPriority, afterSheetPriority, beginSheetPriority, endSheetPriority, keepHomePostersOnOpen, SEARCH_SURFACE, sheetOpening, sheetOpens } from '@/loading/sheetPriority';
+import { SHEET_OPEN_BOUND_MS } from '@/loading/sheetOpenGate';
 import { apiFetch } from '@/apiClient';
 import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import { colorsFromImage } from '@/utils/posterColors';
@@ -387,16 +388,19 @@ export function scheduleWarm(key: string, run: () => Promise<void>, group?: stri
 }
 
 // ---------------------------------------------------------------------------
-// Phone: a tap opens the sheet within OPEN_BUDGET_MS (150 ms, MOTION.md §1.1),
-// sooner when the title is warm; the sheet slides in opaque with the seed shell
-// and fills in place. The tapped poster's pixels seed the color blur. OPEN_CAP_MS
-// is only how long the detail hooks still wait for the logo/colors (remainingCap).
+// Phone: a tap mounts the detail modal, but the sheet stays closed until the real
+// title and artwork are ready (detailSheetReady). OPEN_CAP_MS no longer forces a
+// partly-ready sheet onto the screen. The tapped poster's pixels still seed colors
+// for the composed frame. Past SHEET_OPEN_BOUND_MS an unopened sheet is abandoned.
 // ---------------------------------------------------------------------------
 
 export const OPEN_CAP_MS = 600;
 export const REVEALED_EVENT = 'luma:detail-revealed';
 let pending = false;
 let tapAt = 0;
+/** Bumped by every open attempt. A newer tap supersedes one whose sheet is not on screen yet. */
+let openGen = 0;
+let stopWatch: (() => void) | null = null;
 const now = () => Date.now();
 
 /** ms since the tap that opened the popup (null when it wasn't opened through openWhenReady just now). */
@@ -444,19 +448,20 @@ const SHEET_SEL = '[data-modal="MovieDetailModal"],[data-modal="TvDetailModal"]'
 /** How long a tap waits for a detail sheet to mount before giving up on it (no sheet: release). */
 export const SHEET_MOUNT_WAIT_MS = 1500;
 
-/** Calls `onClosed` once the detail sheet that is about to mount (or already mounted) is gone again;
- *  if none mounts within SHEET_MOUNT_WAIT_MS, calls it then. */
-export function watchSheet(onClosed: () => void): void {
+/** Calls `onClosed` once the detail sheet that is about to mount (or already mounted) is gone again.
+ *  If none mounts within the open bound, calls it then. Returns a cancel that does not call `onClosed`. */
+export function watchSheet(onClosed: () => void): () => void {
   let seen = !!document.querySelector(SHEET_SEL);
   let done = false;
   const finish = () => { if (done) return; done = true; obs.disconnect(); window.clearTimeout(t); onClosed(); };
   const obs = new MutationObserver(() => {
-    const now = !!document.querySelector(SHEET_SEL);
-    if (now) seen = true;
+    const nowSeen = !!document.querySelector(SHEET_SEL);
+    if (nowSeen) seen = true;
     else if (seen) finish();
   });
   obs.observe(document.body, { childList: true, subtree: true });
-  const t = window.setTimeout(() => { if (!seen) finish(); }, SHEET_MOUNT_WAIT_MS);
+  const t = window.setTimeout(() => { if (!seen) finish(); }, SHEET_OPEN_BOUND_MS);
+  return () => { if (done) return; done = true; obs.disconnect(); window.clearTimeout(t); };
 }
 
 /** MOTION.md §1.3: the tap waits at most this long for warm details, then opens with the seed shell. */
@@ -511,7 +516,13 @@ export async function openWhenReady(
   card: HTMLElement | null, open: () => void, onClosed?: () => void, art?: (string | null | undefined)[],
   logo?: KnownLogo,
 ): Promise<void> {
-  if (pending) return;
+  // A sheet already on screen ignores further taps. One that has not appeared yet is replaced:
+  // A→B→C must not let an older title reveal.
+  if (pending && !!document.querySelector(SHEET_SEL)) return;
+  const replacing = pending;
+  const mine = ++openGen;
+  stopWatch?.();
+  stopWatch = null;
   pending = true;
   // cw-logo: a logo the card names starts downloading at the tap, at high priority (the open's hold pauses and drops
   // only low-priority warm-ups; this load is the sheet's own: the hero's decode reuses it, see useLoadedImage).
@@ -527,7 +538,11 @@ export async function openWhenReady(
   const seed = colorsFromImage(img);
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);
   shell = card ? { title: tapTitle(card), year: tapYear(card), poster: img?.currentSrc || img?.src || null, at: now(), owned: tapOwned(card, ratingKey), plex: !!ratingKey } : null;
-  if (card) { if (pressed && pressed !== card) release(); pressed = card; card.setAttribute('data-pressed', 'true'); holdFor(card, SHEET_MOUNT_WAIT_MS); }
+  // Drop a modal that is mounted but not on screen before this open waits a tick, so the
+  // hidden title cannot latch and the host cannot stack it under the new one.
+  if (replacing) window.dispatchEvent(new Event('luma:replace-pending-modal'));
+  const cardWasConnected = !!card?.isConnected;
+  if (card) { if (pressed && pressed !== card) release(); pressed = card; card.setAttribute('data-pressed', 'true'); holdFor(card, SHEET_OPEN_BOUND_MS); }
   // The art first (v341l): its request is queued before this open's detail calls, so a slow TMDb holding the
   // other connections never leaves it waiting for a socket (Tester I1440: art at +3.7 s behind TMDb calls).
   const first = (art ?? []).filter((u): u is string => !!u);
@@ -541,15 +556,22 @@ export async function openWhenReady(
   } finally {
     window.clearTimeout(timer);
   }
+  if (mine !== openGen) return;
+  // The tapped row left the page (back, unmount) during the art tick: do not open it later.
+  if (card && cardWasConnected && !card.isConnected) {
+    if (mine === openGen) { pending = false; release(card); endSheetPriority(); }
+    return;
+  }
   try {
     open();
   } catch (e) {
-    pending = false;
-    release(card);
+    if (mine === openGen) { pending = false; release(card); }
     throw e;
   }
+  if (mine !== openGen) return;
   // The press is released by the sheet's first moving frame (SHEET_MOVING_EVENT); holdFor is the fallback.
-  watchSheet(() => { pending = false; onClosed?.(); });
+  // The sheet itself stays unmounted until its title and artwork are ready (useSheetGo).
+  stopWatch = watchSheet(() => { if (mine !== openGen) return; pending = false; onClosed?.(); });
 }
 
 export function _resetModalPrefetch(): void {
@@ -569,4 +591,7 @@ export function _resetModalPrefetch(): void {
   pending = false;
   tapAt = 0;
   shell = null;
+  openGen += 1;
+  stopWatch?.();
+  stopWatch = null;
 }

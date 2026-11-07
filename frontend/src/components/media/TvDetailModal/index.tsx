@@ -216,8 +216,6 @@ export function TvDetailModal({
     refreshSonarrSeriesStatus(150_000);
   }, [refreshSonarrSeriesStatus]);
 
-  if (phase === 'gone') return null;
-
   // Build view-model props
   const viewProps = {
     show,
@@ -300,6 +298,12 @@ export function TvDetailModal({
   };
 
   const { isTvMode } = useTVMode();
+  useEffect(() => {
+    document.documentElement.dataset.detailMounted = '1';
+    return () => { delete document.documentElement.dataset.detailMounted; };
+  }, []);
+
+  if (phase === 'gone') return null;
 
   const layout = mode === 'compact'
     ? <CompactLayout {...extendedProps} />
