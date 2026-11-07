@@ -82,8 +82,10 @@ export const code = (s: number, e: number) => `S${String(s).padStart(2, '0')}E${
 /** v184 (Taylor): the page's content width, centered */
 export const DETAIL_MAX = 1200;
 
-export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, say }: {
+export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, say, phone: forcePhone = false }: {
   seriesId: number; episodeId?: number | null; wide: boolean; onBack: () => void; onChanged?: () => void; say: (msg: string) => void;
+  /** Phone calendar sheet: the phone series layout even before the viewport query updates. */
+  phone?: boolean;
 }) {
   const [view, setView] = useState<DetailView | null>(null);
   const [failed, setFailed] = useState(false);
@@ -163,7 +165,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   if (failed) return <div role="alert" data-testid="tv-detail-failed" style={{ fontSize: 15, color: W70, fontFamily: FONT }}>{"Couldn't load"}</div>;
   if (!view) return <div data-testid="tv-detail-loading" aria-busy="true" style={{ height: 320, borderRadius: 16, background: GLASS }} />;
 
-  const phone = phoneQ && !wide;
+  const phone = !wide && (forcePhone || phoneQ);
   const eps = view.episodes;
   // v321 (Designer v8): the status keeps TMDB's casing ('Returning Series')
   const meta = [view.year ? String(view.year) : '', view.network || '', view.status || ''].filter(Boolean);
@@ -175,7 +177,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   ];
   return (
     <div data-testid="tv-detail" data-series-id={view.id}
-      style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, width: '100%', maxWidth: DETAIL_MAX, margin: '0 auto', boxSizing: 'border-box' }}>
+      style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, width: '100%', maxWidth: DETAIL_MAX, minWidth: 0, margin: '0 auto', boxSizing: 'border-box' }}>
       <style>{detailCss + monitorFlagCss}</style>
       {phone ? (
         <div data-testid="tv-detail-backrow" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

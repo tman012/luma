@@ -10,6 +10,7 @@ import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
 import { backdropUrl, posterUrl, tvdbImg } from '@/utils/image';
+import { getUrlBase } from '@/urlHelpers';
 import {
   STATE_COLOR, STATE_HEX, STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRangeParts, weekLabel, weekStart,
   type CalEpisode, type CalendarData, type Day, type EpisodeState,
@@ -24,6 +25,33 @@ const HideContext = createContext<((id: number, hidden: boolean) => void) | null
 export const shown = (e: CalEpisode) => e.monitored !== false;
 
 export const OpenShowContext = createContext<((seriesId: number, episodeId?: number | null) => void) | null>(null);
+/** Phone calendar: the show's series page. A modified click follows this href. */
+export const CAL_SCROLL_KEY = 'luma.tvCalendar.scroll';
+export function seriesPath(seriesId: number): string {
+  const base = getUrlBase().replace(/\/+$/, '');
+  return `${base}/settings/tv?view=series&show=${seriesId}`;
+}
+export function saveCalendarScroll(y: number) {
+  try { sessionStorage.setItem(CAL_SCROLL_KEY, String(Math.max(0, Math.round(y)))); } catch { /* private mode */ }
+}
+export function readCalendarScroll(): number | null {
+  try {
+    const raw = sessionStorage.getItem(CAL_SCROLL_KEY);
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch { return null; }
+}
+export function clearCalendarScroll() {
+  try { sessionStorage.removeItem(CAL_SCROLL_KEY); } catch { /* private mode */ }
+}
+export function pageScroll(): number {
+  return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+}
+/** Primary click without a modifier. Anything else is the browser's own (new tab, new window). */
+export function plainClick(e: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): boolean {
+  return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+}
 export const REFRESH_RELOAD_MS = 6000;
 export const POLL_MS = 60_000;
 const W50 = 'rgba(255,255,255,0.5)';
@@ -34,7 +62,7 @@ const W95 = 'rgba(255,255,255,0.95)';
 const calCache = new Map<string, CalendarData>();
 export function _clearCalendarCache() { calCache.clear(); }
 
-export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, phone: forcePhone = false, heroIn = null, reveal }: {
+export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, phone: forcePhone = false, heroIn = null, reveal, pickedDay, onDay }: {
   today: Day; week: Day; onWeek: (start: Day) => void; reload?: number;
   /** v204: the home screen's TV calendar sheet is always the phone layout */
   phone?: boolean;
@@ -44,6 +72,9 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
   heroIn?: HTMLElement | null;
   /** In a sheet: the first load settles in one ContentReveal (no per-row rise or stagger). */
   reveal?: { id: string; landMs: number };
+  /** Phone settings calendar: the selected day lives in the URL so Back can return to it. */
+  pickedDay?: Day;
+  onDay?: (day: Day, nextWeek?: Day) => void;
 }) {
   const key = `${week}/${reload}`;
   const [data, setData] = useState<{ key: string; cal: CalendarData } | null>(() => {
@@ -89,8 +120,14 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
   const phone = forcePhone || isPhone;
   const [dayPick, setDayPick] = useState<Day>(today);
   const inWeek = (d: Day) => d >= week && d < addDays(week, 7);
-  const day = inWeek(dayPick) ? dayPick : inWeek(today) ? today : week;
-  const step = (delta: number) => { const n = addDays(day, delta); setDayPick(n); if (!inWeek(n)) onWeek(weekStart(n)); };
+  const chosen = onDay ? (pickedDay && inWeek(pickedDay) ? pickedDay : null) : dayPick;
+  const day = chosen && inWeek(chosen) ? chosen : inWeek(today) ? today : week;
+  const step = (delta: number) => {
+    const n = addDays(day, delta);
+    const nextWeek = inWeek(n) ? undefined : weekStart(n);
+    if (onDay) onDay(n, nextWeek);
+    else { setDayPick(n); if (nextWeek) onWeek(nextWeek); }
+  };
   const loading = data?.key !== key && failed !== key;
   const end = addDays(week, 7);
   const eps = data?.key === key ? data.cal.episodes.filter(e => e.air_date >= week && e.air_date < end && shown(e)) : [];
@@ -629,13 +666,12 @@ function GlassGlow({ src }: { src: string }) {
 }
 
 /** r2-A (TOKENS-r2-a): one episode row in the two-column block; a subgrid row so every code and every title
- * starts at the same x. The code never truncates; only the title is cut off. */
-function GlassRow({ e, own }: { e: CalEpisode; own: boolean }) {
-  const open = useOpenEpisode(e);
-  const click = own ? open : {};
+ * starts at the same x. The code never truncates; only the title is cut off.
+ * The row is not its own control: the card link opens the series. */
+function GlassRow({ e }: { e: CalEpisode }) {
   return (
-    <div data-testid="tv-glass-ep" title={epLine(e)} {...click}
-      style={{ cursor: own && open.onClick ? 'pointer' : undefined, display: 'grid', gridColumn: '1 / -1', gridTemplateColumns: 'subgrid',
+    <div data-testid="tv-glass-ep" title={epLine(e)}
+      style={{ display: 'grid', gridColumn: '1 / -1', gridTemplateColumns: 'subgrid',
         columnGap: 6, lineHeight: '24px', fontSize: 13, minWidth: 0 }}>
       <span data-testid="tv-glass-code" style={{ color: GLASS.accent, fontWeight: 600, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{code(e.season, e.episode)}</span>
       <span data-testid="tv-glass-ep-title" style={{ ...one, color: GLASS.ep, fontWeight: 400, minWidth: 0 }}>
@@ -649,23 +685,41 @@ function GlassCard({ eps, today, index, rise }: { eps: CalEpisode[]; today: Day;
   const e = eps[0]!;
   const merged = eps.length > 1;
   const st = groupState(eps, today);
-  const open = useOpenEpisode(e);
+  const openShow = useContext(OpenShowContext);
+  const seriesId = e.series_id || 0;
+  const href = seriesId ? seriesPath(seriesId) : undefined;
   const t = etParts(e.airstamp);
   const art = glassArt(e);
   const label = `${GLASS_WORD[st]}: ${e.show} ${eps.map(x => code(x.season, x.episode)).join(', ')}`;
   const delay = `min(calc(${index} * var(--motion-stagger, 30ms)), var(--motion-stagger-max, 240ms))`;
-  return (
-    <div data-testid="tv-agenda-row" data-glass="c" data-state={st} data-art={art ? 'true' : 'false'} data-merged={merged ? 'true' : 'false'}
-      aria-label={label} {...(merged ? {} : open)}
-      className={[rise ? 'tvg-rise' : '', merged ? '' : open.className || ''].filter(Boolean).join(' ') || undefined}
-      style={{ cursor: !merged && open.onClick ? 'pointer' : undefined, position: 'relative', overflow: 'hidden', isolation: 'isolate',
-        borderRadius: GLASS.radius, backgroundImage: GLASS.fill, border: `1px solid ${GLASS.border}`,
-        padding: '16px 18px', boxSizing: 'border-box', textAlign: 'center', animationDelay: rise ? delay : undefined }}>
+  const onClick = (ev: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!href || !plainClick(ev) || !openShow) return;
+    ev.preventDefault();
+    openShow(seriesId);
+  };
+  const card = {
+    'data-testid': 'tv-agenda-row' as const,
+    'data-glass': 'c' as const,
+    'data-state': st,
+    'data-art': art ? 'true' : 'false',
+    'data-merged': merged ? 'true' : 'false',
+    'aria-label': label,
+    className: [rise ? 'tvg-rise' : '', href ? 'lp-focus' : ''].filter(Boolean).join(' ') || undefined,
+    style: {
+      cursor: href ? 'pointer' : undefined, position: 'relative' as const, overflow: 'hidden' as const, isolation: 'isolate' as const,
+      borderRadius: GLASS.radius, backgroundImage: GLASS.fill, border: `1px solid ${GLASS.border}`,
+      padding: '16px 18px', boxSizing: 'border-box' as const, textAlign: 'center' as const, animationDelay: rise ? delay : undefined,
+      display: 'block' as const, width: '100%', maxWidth: '100%', minWidth: 0, minHeight: 44,
+      textDecoration: 'none', color: 'inherit', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation' as const,
+    },
+  };
+  const inner = (
+    <>
       {art && <GlassGlow key={art} src={art} />}
       <span data-testid="tv-glass-dot" role="img" aria-label={GLASS_WORD[st]} className={st === 'downloading' ? 'tvg-pulse' : undefined}
         style={{ position: 'absolute', top: 16, right: 16, width: 9, height: 9, borderRadius: '50%',
           background: GLASS_DOT[st], boxShadow: '0 0 0 4px rgba(255,255,255,0.04)', zIndex: 1 }} />
-      <div style={{ position: 'relative' }}>
+      <div style={{ position: 'relative', minWidth: 0, maxWidth: '100%' }}>
         {t && (
           <div data-testid="tv-glass-time" style={{ fontSize: 12, fontWeight: 600, color: GLASS.accent, letterSpacing: '0.3px', lineHeight: '16px', marginBottom: 8 }}>
             {`${t[0]} ${t[1]}`}
@@ -674,11 +728,13 @@ function GlassCard({ eps, today, index, rise }: { eps: CalEpisode[]; today: Day;
         <div data-testid="tv-card-show" title={e.show} style={{ ...one, fontSize: 22, fontWeight: 700, lineHeight: '28px', letterSpacing: '-0.2px', color: '#fff', padding: '0 22px' }}>{e.show}</div>
         <div data-testid="tv-glass-list" style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, auto)', columnGap: 6, width: 'fit-content', maxWidth: '100%',
           margin: '10px auto 0', textAlign: 'left' }}>
-          {eps.map(x => <GlassRow key={x.episode_id} e={x} own={merged} />)}
+          {eps.map(x => <GlassRow key={x.episode_id} e={x} />)}
         </div>
       </div>
-    </div>
+    </>
   );
+  if (!href) return <div {...card}>{inner}</div>;
+  return <a {...card} href={href} onClick={onClick}>{inner}</a>;
 }
 
 /** '8:00 PM' in ET (America/New_York) from an episode's UTC airstamp; '' when untimed. */

@@ -5,8 +5,8 @@
  * (Add); Import is the Import card, Review and the shows; Libraries is the TV
  * libraries selector; Options holds Upgrades, Search (v256) and Trackers. Importing only reads
  * the library folders and Add only writes tv.db. */
-import { useCallback, useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { T } from '@/theme/tokens';
 import { FONT } from '@/components/start/StartUI';
 import { NoticeToast } from '@/components/start/SetupToast';
@@ -23,7 +23,7 @@ import { SEARCH_LIST_ID, SEARCH_MIN, TV_POPOVER_SURFACE, TvOwnedSearch, searchRo
 import { TvSeriesDetail } from './TvSeriesDetail';
 import { NamingSettings } from './TvNaming';
 import { AddSeriesButton } from './TvAddSeries';
-import { OpenShowContext, usePhone } from './TvCalendar';
+import { OpenShowContext, clearCalendarScroll, pageScroll, readCalendarScroll, saveCalendarScroll, usePhone } from './TvCalendar';
 import { TvEpisodePage } from './TvEpisodePage';
 import { LibrarySelector } from './LibrarySelector';
 import type { SelectableLibrary } from './librarySelectionApi';
@@ -34,7 +34,7 @@ import {
   saveAutomation, saveUpgrades, savePreferredGroups, showLabel, startImport,
   type ImportProgress, type Show, type TvLibrary, type TvSettingsView, type UpgradeMode,
 } from './tvLibraryApi';
-import { isDay, localDay, weekStart } from './tvCalendarApi';
+import { isDay, localDay, weekStart, type Day } from './tvCalendarApi';
 import { TvSearchSettings } from './SearchSettings';
 import { TV_SETTINGS_PATH } from './tvSettingsRoutes';
 
@@ -50,6 +50,7 @@ export const tvView = (v: string | null): TvView => (TV_VIEWS.find(x => x.id ===
 /** mode 'views': Series | Calendar | Import (Home > Calendar). mode 'settings': Settings > TV, Library options then Options. */
 export function TvLibrarySettings({ wide, options, mode = 'views' }: { wide: boolean; options?: ReactNode; mode?: 'views' | 'settings' }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const settingsMode = mode === 'settings';
   const [settingsView, setSettingsView] = useState<TvSettingsView | null>(null);
   const [lib, setLib] = useState<TvLibrary | null>(null);
@@ -101,6 +102,14 @@ export function TvLibrarySettings({ wide, options, mode = 'views' }: { wide: boo
   }, [refreshLib]);
 
   const phone = usePhone();   // v201: before the early return (hooks order)
+  useLayoutEffect(() => {
+    if (mode !== 'views' || !phone || view !== 'calendar') return;
+    const y = readCalendarScroll();
+    if (y == null) return;
+    window.scrollTo(0, y);
+    const id = window.setTimeout(() => clearCalendarScroll(), 0);
+    return () => window.clearTimeout(id);
+  }, [mode, phone, view]);
   if (!settingsView) {
     return loadFailed ? <div role="alert" style={{ ...pad(wide), ...muted }}>{"Couldn't load TV settings"}</div> : null;
   }
@@ -154,12 +163,29 @@ export function TvLibrarySettings({ wide, options, mode = 'views' }: { wide: boo
   );
 
   const onWeek = (w: string) => go({ week: w === weekStart(today) ? null : w }, false);
+  const phoneDay = isDay(params.get('day')) ? params.get('day')! : undefined;
+  const onPhoneDay = (d: Day, nextWeek?: Day) => {
+    const patch: Record<string, string | null> = { day: d === today ? null : d };
+    if (nextWeek) patch.week = nextWeek === weekStart(today) ? null : nextWeek;
+    go(patch, false);
+  };
   // v182: the series detail page (?view=series&show=<id>), from Series, the calendar and search results
   const showId = Number(params.get('show')) || 0;
   const openDetail = (id: number, episodeId?: number | null) => {
     setQ('');
     go({ view: 'series', show: String(id), episode: episodeId ? String(episodeId) : null });
   };
+  // Phone calendar: the series page, not the episode page. Back returns to this calendar entry.
+  const openPhoneSeries = (id: number) => {
+    saveCalendarScroll(pageScroll());
+    setQ('');
+    const next = new URLSearchParams(params);
+    next.set('view', 'series');
+    next.set('show', String(id));
+    next.delete('episode');
+    navigate(`${location.pathname}?${next.toString()}`, { state: { fromCalendar: true } });
+  };
+  const fromCalendar = Boolean((location.state as { fromCalendar?: boolean } | null)?.fromCalendar);
   const openShow = (s: Show) => openDetail(s.id);
   // v321 (Taylor via PM): the series detail page has no "Search your shows" box
   const detailRoute = view === 'series' && !!showId && !noLibraries;
@@ -219,8 +245,9 @@ export function TvLibrarySettings({ wide, options, mode = 'views' }: { wide: boo
   let body: ReactNode;
   if (view === 'calendar') {
     body = noLibraries ? noLibs : (
-      <OpenShowContext.Provider value={openDetail}>
-        <TvCalendar today={today} week={week} reload={reload} toolbar={!calendarTop} onWeek={onWeek} heroIn={calendarTop ? heroEl : null} />
+      <OpenShowContext.Provider value={phone ? openPhoneSeries : openDetail}>
+        <TvCalendar today={today} week={week} reload={reload} toolbar={!calendarTop} onWeek={onWeek} heroIn={calendarTop ? heroEl : null}
+          pickedDay={phone ? phoneDay : undefined} onDay={phone ? onPhoneDay : undefined} />
       </OpenShowContext.Provider>
     );
   } else if (view === 'series') {
@@ -231,7 +258,7 @@ export function TvLibrarySettings({ wide, options, mode = 'views' }: { wide: boo
         onBack={() => { if (window.history.length > 1) window.history.back(); else go({ episode: null }); }} />
     ) : showId ? (
       <TvSeriesDetail key={showId} seriesId={showId} episodeId={Number(params.get('episode')) || null} wide={wide}
-        onBack={() => go({ show: null, episode: null })} onChanged={changed} say={say} />
+        onBack={() => { if (fromCalendar) { navigate(-1); return; } go({ show: null, episode: null }); }} onChanged={changed} say={say} />
     ) : <TvSeries shows={lib ? lib.shows : null} onChanged={changed} onOpen={s => openDetail(s.id)}
       add={<AddSeriesButton paths={settingsView.paths} onAdded={changed} />} />;
   } else if (view === 'import') {
