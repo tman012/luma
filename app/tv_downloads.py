@@ -249,7 +249,7 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
             plan.append((f, season, eps))
     if not plan:
         raise mover.Refused(NO_EPISODES)
-    # A grab row places only the episodes it named. A torrent with no row is unchanged.
+    # A grab places only episodes it named. Without an open manual request, unmonitored episodes stay out.
     plan = _limit_plan(s['id'], plan, str(t.get('hash') or ''), name)
     folder = _show_folder(s)
     owner = mover._owner_of(lib_root)
@@ -561,23 +561,40 @@ def _unmonitored_release(name: Optional[str]) -> bool:
         return _monitored_n(conn, ids) == 0
 
 
+def _fully_monitored(ids: List[int]) -> bool:
+    """Every episode is monitored on a monitored show. An empty set is not."""
+    if not ids:
+        return False
+    with tv_store.connect() as conn:
+        return _monitored_n(conn, ids) == len(set(ids))
+
+
 def _limit_plan(sid: int, plan: List[Tuple[Any, int, List[int]]], h: str, name: str):
-    """Files this torrent may place. A grab row places only episodes it lists, so a pack does not import
-    episodes the request did not name. A torrent with no such row is the category watch and is unchanged.
-    Raises Refused(NO_EPISODES) when a grab names episodes and none of the files are only those episodes,
-    before any transfer."""
+    """Files this torrent may place, before any transfer.
+
+    An open manual request places only the episodes it named, monitored or not. Every other torrent
+    places a file only when it was named by the grab (if there is one) and every episode in it is
+    monitored on a monitored show. A category or a release name does not relax that. Raises
+    Pending(UNMONITORED) when monitoring removed every file, or Refused(NO_EPISODES) when a grab's
+    files are not the episodes it named."""
     with tv_store.connect() as conn:
         g = _grab_for(conn, (h or '').lower(), name)
+    manual = _open_manual(g)
     wanted = set(_want(g)) if g and _want(g) else None
-    if wanted is None:
-        return plan
     kept = []
+    blocked = False
     for item in plan:
         _f, season, nums = item
         ids = _ids(sid, season, nums)
-        if ids and set(ids) <= wanted:
-            kept.append(item)
+        if wanted is not None and (not ids or not set(ids) <= wanted):
+            continue
+        if not manual and not _fully_monitored(ids):
+            blocked = True
+            continue
+        kept.append(item)
     if not kept:
+        if blocked and not manual:
+            raise mover.Pending(UNMONITORED)
         raise mover.Refused(NO_EPISODES)
     if len(kept) != len(plan):
         logger.info('TV import: %s importing %d of %d episode file(s)', name, len(kept), len(plan))
@@ -588,25 +605,26 @@ def _no_import(h: str, name: Optional[str]) -> Optional[str]:
     """Why the watcher must not import this torrent, or None to import it.
 
     A grab that is not still downloading or importing stays closed (imported, partial, failed, skipped, or
-    manual_needed; the file may have been deleted on purpose since). Monitoring governs automatic and
-    upgrade grabs: when every grabbed episode is unmonitored, or the show is, the torrent waits. An open
-    manual grab with episode ids is the owner's request and is not refused for that. A category or a
-    release name is not that request. With no grab row, the category watch is unchanged."""
+    manual_needed; the file may have been deleted on purpose since). A category does not reopen it.
+    Monitoring governs every torrent that is not an open manual request with episode ids: when the release
+    resolves to episodes and none of them are monitored on a monitored show, the torrent waits. That
+    includes a category torrent with no grab row, and one whose grab row was deleted. An open manual grab
+    with episode ids is the owner's request and is not refused for monitoring. A category or a release
+    name is not that request."""
     with tv_store.connect() as conn:
         g = _grab_for(conn, h, name)
-        if g is None:
-            return None
-        # imported/partial, and any other row that is no longer an open request (failed, skipped,
-        # manual_needed). Reopening is an explicit new grab, which sets the row back to downloading.
-        if g['state'] not in OPEN_GRABS:
-            return ALREADY_IMPORTED
-        if _open_manual(g):
-            return None
-        ids = _want(g)
-        if ids and not _monitored_n(conn, ids):
-            return UNMONITORED
-        if not ids and _unmonitored_release(name):
-            return UNMONITORED
+        if g is not None:
+            # imported/partial, and any other row that is no longer an open request (failed, skipped,
+            # manual_needed). Reopening is an explicit new grab, which sets the row back to downloading.
+            if g['state'] not in OPEN_GRABS:
+                return ALREADY_IMPORTED
+            if _open_manual(g):
+                return None
+            ids = _want(g)
+            if ids and not _monitored_n(conn, ids):
+                return UNMONITORED
+    if _unmonitored_release(name):
+        return UNMONITORED
     return None
 
 

@@ -1,9 +1,11 @@
 """An explicit manual grab imports when the episode or the show is unmonitored.
 
-Monitoring still refuses automatic and upgrade grabs. The authorization is the grabs row Luma wrote
-(origin manual, still open, with episode ids), which survives a process restart. A qBittorrent category
-or a release name is not a request. Imported, partial, failed, skipped and manual_needed rows stay
-closed. A grab names the episodes it may place, so a pack does not import siblings that were not requested.
+Monitoring still refuses every other completed torrent: automatic and upgrade grabs, and a category
+torrent with no open manual row. The authorization is the grabs row Luma wrote (origin manual, still
+open, with episode ids), which survives a process restart. A qBittorrent category or a release name is
+not a request. Deleting that row, or leaving it failed, skipped, manual_needed, imported, or partial,
+does not let the category import an unmonitored episode. A grab names the episodes it may place, so a
+pack does not import siblings that were not requested.
 
 A file already linked by the library watcher is reconciled by the normal pass: the grab closes because
 those episodes are linked, the watcher does not copy again, and the ledger becomes refused / already
@@ -185,21 +187,80 @@ def test_automatic_does_not_import_when_only_the_show_is_unmonitored(dl, time_sh
 
 # ---------------------------------------------------------------- not a request
 
-def test_category_without_a_grab_row_is_not_a_manual_request(dl, time_show, monkeypatch):
-    """The category watch can still file a torrent that has no grab row (v158). That import is not a
-    manual request: no grabs row is created, monitoring does not change, and the history has no manual origin."""
+def test_a_category_torrent_with_no_grab_does_not_import_an_unmonitored_episode(dl, time_show, monkeypatch):
     sid, eps = time_show
-    _off(sid, [eps[3]], show=False)
+    _off(sid, [eps[3]], show=True)
+    src = _src(dl, NAME, NAME + '.mkv')
+    grab(dl, H1, NAME, [NAME + '.mkv'])
+    source = src.read_bytes()
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    now = time.time()
+    for k in range(3):
+        assert dl.tick(now + 60 * k) == {'checked': 0, 'imported': 0}
+    assert not _dest(dl, NAME + '.mkv').exists()
+    assert src.read_bytes() == source
+    assert rows('SELECT COUNT(*) AS n FROM grabs')[0]['n'] == 0
+    st = tv_downloads.status(H1)
+    assert st['state'] == 'waiting' and st['error'] == tv_downloads.UNMONITORED and 'files' not in st
+    assert _events(H1) == [] and _policy(sid) == policy
+    _no_client_write(dl)
+
+
+def test_a_category_torrent_with_no_grab_does_not_import_when_the_show_is_unmonitored(dl, time_show, monkeypatch):
+    sid, eps = time_show
+    _off(sid, [], show=False)
     grab(dl, H1, NAME, [NAME + '.mkv'])
     policy = _policy(sid)
     _forbid(monkeypatch)
-    assert dl.tick()['imported'] == 1
-    assert _dest(dl, NAME + '.mkv').is_file() and _linked(eps[3])[0]['state'] == 'linked'
+    now = time.time()
+    for k in range(2):
+        assert dl.tick(now + 60 * k)['imported'] == 0
+    assert not _dest(dl, NAME + '.mkv').exists()
+    assert (tv_downloads.status(H1) or {}).get('error') == tv_downloads.UNMONITORED
+    assert rows('SELECT monitored FROM episodes WHERE id = ?', eps[3])[0]['monitored'] == 1
+    assert rows('SELECT monitored FROM series WHERE id = ?', sid)[0]['monitored'] == 0
+    assert _policy(sid) == policy and _events(H1) == []
+
+
+def test_a_monitored_category_torrent_with_no_grab_still_imports(dl, time_show, monkeypatch):
+    """The episode and the show are monitored. The category watch files the torrent and does not
+    record a manual grab."""
+    sid, eps = time_show
+    src = _src(dl, NAME, NAME + '.mkv')
+    grab(dl, H1, NAME, [NAME + '.mkv'])
+    source = src.read_bytes()
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    now = time.time()
+    assert dl.tick(now) == {'checked': 1, 'imported': 1}
+    dest = _dest(dl, NAME + '.mkv')
+    assert dest.is_file() and not dest.is_symlink() and dest.read_bytes() == source
+    assert src.is_file() and src.read_bytes() == source
+    assert _linked(eps[3])[0]['state'] == 'linked'
     assert rows('SELECT COUNT(*) AS n FROM grabs')[0]['n'] == 0
     ev = _events(H1)
     assert len(ev) == 1 and 'origin' not in json.loads(ev[0]['detail'])
     assert _policy(sid) == policy
-    assert dl.tick()['imported'] == 0 and rows('SELECT COUNT(*) AS n FROM grabs')[0]['n'] == 0
+    assert dl.tick(now + 60) == {'checked': 0, 'imported': 0}
+    assert dest.read_bytes() == source and len(_events(H1)) == 1
+
+
+def test_a_category_pack_imports_only_the_monitored_episode(dl, time_show, monkeypatch):
+    sid, eps = time_show
+    _off(sid, [eps[3]])
+    grab(dl, H1, BOTH, [NAME + '.mkv', E4 + '.mkv'])
+    e3 = _src(dl, BOTH, NAME + '.mkv')
+    e3bytes = e3.read_bytes()
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    assert dl.tick()['imported'] == 1
+    assert not _dest(dl, NAME + '.mkv').exists()
+    assert _dest(dl, E4 + '.mkv').is_file()
+    assert _linked(eps[3]) == [] and _linked(eps[4])[0]['state'] == 'linked'
+    assert e3.read_bytes() == e3bytes
+    assert rows('SELECT COUNT(*) AS n FROM grabs')[0]['n'] == 0
+    assert _policy(sid) == policy
 
 
 def test_a_name_that_says_manual_does_not_authorize_or_monitor(dl, time_show, monkeypatch):
@@ -209,8 +270,12 @@ def test_a_name_that_says_manual_does_not_authorize_or_monitor(dl, time_show, mo
     grab(dl, H1, title, [title + '.mkv'])
     policy = _policy(sid)
     _forbid(monkeypatch)
-    dl.tick()
+    now = time.time()
+    for k in range(2):
+        assert dl.tick(now + 60 * k)['imported'] == 0
+    assert not _dest(dl, title + '.mkv').exists()
     assert rows("SELECT COUNT(*) AS n FROM grabs WHERE origin = 'manual'")[0]['n'] == 0
+    assert (tv_downloads.status(H1) or {}).get('error') == tv_downloads.UNMONITORED
     assert _policy(sid) == policy
 
 
@@ -238,8 +303,8 @@ def test_an_open_automatic_row_is_not_a_manual_request(dl, time_show, monkeypatc
 
 
 def test_a_different_hash_does_not_borrow_a_closed_manual_row(dl, time_show, monkeypatch):
-    """A closed row matches by hash only. Another torrent of the same name is not that request and
-    does not reopen it. With no open row of its own, it is the category watch, not a new manual grab."""
+    """A closed row matches by hash only. Another completed torrent of the same name is not that
+    request. With the episode unmonitored, the category does not import it either."""
     sid, eps = time_show
     _off(sid, [eps[3]])
     _grab_row(H1, sid, [eps[3]], origin='manual')
@@ -248,14 +313,52 @@ def test_a_different_hash_does_not_borrow_a_closed_manual_row(dl, time_show, mon
     grab(dl, H2, NAME, [NAME + '.mkv'])
     policy = _policy(sid)
     _forbid(monkeypatch)
-    assert tv_downloads._no_import(H2, NAME) is None
-    assert tv_downloads._no_import(H1, NAME) == tv_downloads.ALREADY_IMPORTED
-    dl.tick()
+    now = time.time()
+    for k in range(2):
+        assert dl.tick(now + 60 * k)['imported'] == 0
+    assert not _dest(dl, NAME + '.mkv').exists()
     assert rows('SELECT state, finished_at FROM grabs WHERE hash = ?', H1)[0]['finished_at'] == 5
-    assert rows("SELECT COUNT(*) AS n FROM grabs WHERE origin = 'manual' AND state = 'downloading'")[0]['n'] == 0
-    ev = _events(H2)
-    assert not ev or json.loads(ev[0]['detail']).get('origin') != 'manual'
-    assert _policy(sid) == policy
+    assert (tv_downloads.status(H2) or {}).get('error') == tv_downloads.UNMONITORED
+    assert _events(H2) == [] and _policy(sid) == policy
+
+
+def test_deleting_the_grab_row_does_not_let_the_category_import_an_unmonitored_episode(dl, time_show, monkeypatch):
+    sid, eps = time_show
+    _off(sid, [eps[3]], show=False)
+    _grab_row(H1, sid, [eps[3]], origin='manual')
+    with tv_store.write() as conn:
+        conn.execute('DELETE FROM grabs WHERE hash = ?', (H1,))
+    grab(dl, H1, NAME, [NAME + '.mkv'])
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    now = time.time()
+    for k in range(3):
+        assert dl.tick(now + 60 * k) == {'checked': 0, 'imported': 0}
+    assert not _dest(dl, NAME + '.mkv').exists()
+    assert rows('SELECT COUNT(*) AS n FROM grabs')[0]['n'] == 0
+    assert (tv_downloads.status(H1) or {}).get('state') == 'waiting'
+    assert (tv_downloads.status(H1) or {}).get('error') == tv_downloads.UNMONITORED
+    assert _policy(sid) == policy and _events(H1) == []
+
+
+@pytest.mark.parametrize('state', ['failed', 'skipped', 'manual_needed', 'imported', 'partial'])
+def test_a_closed_row_is_not_reopened_by_the_category_when_the_episode_is_monitored(dl, time_show, monkeypatch, state):
+    sid, eps = time_show
+    _grab_row(H1, sid, [eps[3]], origin='manual')
+    with tv_store.write() as conn:
+        conn.execute('UPDATE grabs SET state = ?, finished_at = 5, error = ? WHERE hash = ?',
+                     (state, 'stopped', H1))
+    grab(dl, H1, NAME, [NAME + '.mkv'])
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    now = time.time()
+    for k in range(2):
+        assert dl.tick(now + 60 * k)['imported'] == 0
+    assert not _dest(dl, NAME + '.mkv').exists()
+    row = rows('SELECT state, finished_at, error FROM grabs WHERE hash = ?', H1)[0]
+    assert (row['state'], row['finished_at'], row['error']) == (state, 5, 'stopped')
+    assert (tv_downloads.status(H1) or {}).get('error') == tv_downloads.ALREADY_IMPORTED
+    assert _events(H1) == [] and _policy(sid) == policy
 
 
 def test_hash_mismatch_still_uses_the_open_manual_row(dl, time_show, monkeypatch):
