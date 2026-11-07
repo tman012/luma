@@ -96,6 +96,9 @@ def test_the_long_title_import_lands_and_the_grab_closes(dl, monkeypatch):  # no
 
 
 def test_a_persistent_oserror_backs_off_logs_once_and_then_fails_with_retry(dl, monkeypatch, caplog):  # noqa: F811
+    # The backoff is the subject. The episode has to be monitored or the category watch never calls the mover.
+    from tests.test_tv_download_watch_v158a import _on
+    _on(1, 1)
     calls = []
 
     def boom(*a, **k):
