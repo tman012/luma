@@ -825,6 +825,8 @@ def test_a_mixed_request_stays_recoverable_until_every_requested_file_is_placed(
     assert _linked(e4)[0]['size'] == len(sources[E4 + '.mkv'])
     row = rows('SELECT state, origin, results FROM grabs WHERE hash = ?', H1)[0]
     assert row['state'] == 'imported' and row['origin'] == 'manual'
+    # files is the number of file records on this completing pass. It is not two copies:
+    # the ledger below has one how=copied (E03, the only new bytes) and one how=exists (E04, same inode).
     assert json.loads(row['results']) == {'episode_ids': [e3, e4], 'files': 2, 'via': 'import'}
     ev = _events(H1)
     assert len(ev) == 1
