@@ -10,10 +10,12 @@ const src = (f: string) => readFileSync(resolve(__dirname, '../src/' + f), 'utf8
 afterEach(cleanup);
 
 describe('v326 desktop TV Calendar clean', () => {
-  it('v319: Home keeps its HomeChevron; the TV views have no chevron and render the shared HomeLogo', () => {
-    expect(src('components/search/HomeSearchR3.tsx')).toMatch(/<HomeChevron up=\{shown\}/);
+  it('v319: TV views have no chevron and render the shared HomeLogo; Home uses the dock', () => {
+    expect(src('components/search/HomeSearchR3.tsx')).toMatch(/<DesktopDock /);
+    expect(src('components/search/HomeSearchR3.tsx')).not.toMatch(/<HomeChevron/);
     const lib = src('pages/LibrariesPage.tsx');
     expect(lib).not.toMatch(/HomeChevron|a1-chev|M7\.4 15\.4/);
+    expect(lib).toMatch(/<DesktopDockRouted /);
     expect(lib).toMatch(/<Link to="\/" aria-label="Home" data-testid="tv-home-link"[^>]*>\s*<HomeLogo data-testid="tv-logo" \/>/);
     expect(lib).toContain("'TV Calendar'");
     const home = src('pages/MinimalHomePage.tsx');

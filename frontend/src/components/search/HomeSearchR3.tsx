@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { FONT } from '@/components/start/StartUI';
-import { HomeChevron, homeChevCss } from '@/components/home/HomeChevron';
+import { DesktopDock } from '@/components/home/DesktopDock';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import {
   openResult, resultIds, warmResult, warmResults, resultWarmKey,
@@ -166,19 +166,13 @@ export function HomeSearchR3() {
     const onDown = (e: PointerEvent | MouseEvent) => {
       const t = e.target as Element | null;
       if (!t || !t.closest) return;
-      if (t.closest('.a1-bar, .r3-head, .a1-chev, .r3-body, .r3-tvadd, [role="dialog"], [data-testid="user-menu"]')) return;
+      if (t.closest('.a1-bar, .r3-head, [data-desktop-dock], .r3-body, .r3-tvadd, [role="dialog"], [data-testid="user-menu"]')) return;
       closeBar();
     };
     document.addEventListener('keydown', onKeyDoc);
     document.addEventListener('pointerdown', onDown);
     return () => { document.removeEventListener('keydown', onKeyDoc); document.removeEventListener('pointerdown', onDown); };
   }, [shown, closeBar]);
-  const go = (path: string) => {
-    if (isMinimal() && !path.startsWith('/settings')) return;
-    closeBar();
-    window.history.pushState({}, '', path);
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  };   // minimal: Watchlist/Library/Explore have no routes; Settings/TV calendar does
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('home-search', { detail: { searching } }));
   }, [searching]);
@@ -223,23 +217,9 @@ export function HomeSearchR3() {
         </div>
       )}
       <div className="a1-bar" data-testid="a1-bar" data-open={shown ? 'true' : 'false'} aria-hidden="true" />
-      <HomeChevron up={shown} data-testid="a1-chevron" aria-label={shown ? 'Close menu' : 'Open menu'}
-        aria-expanded={shown} onClick={() => (shown ? closeBar() : setBar(true))} />
+      <DesktopDock searchExpanded={shown} onBeforeNavigate={closeBar}
+        onSearch={() => { flushSync(() => setBar(true)); inputRef.current?.focus(); }} />
       <div className="r3-head" data-testid="r3-head" data-open={shown ? 'true' : 'false'} inert={!shown}>
-        <div className="a1-nav" data-testid="a1-nav">
-          <button type="button" className="a1-tb" onClick={() => go('/watchlist')} aria-label="Watchlist">
-            <svg width={20} height={20} viewBox="0 0 24 24" fill="#adc7ff" aria-hidden="true"><path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z" /></svg>
-            <span className="a1-tl">Watchlist</span></button>
-          <button type="button" className="a1-tb" onClick={() => go('/browse')} aria-label="Library">
-            <svg width={20} height={20} viewBox="0 0 24 24" fill="#adc7ff" aria-hidden="true"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z" /></svg>
-            <span className="a1-tl">Library</span></button>
-          <button type="button" className="a1-tb" onClick={() => go('/explore')} aria-label="Explore">
-            <svg width={20} height={20} viewBox="0 0 24 24" fill="#adc7ff" aria-hidden="true"><path d="M12 10.9c-.6 0-1.1.5-1.1 1.1s.5 1.1 1.1 1.1 1.1-.5 1.1-1.1-.5-1.1-1.1-1.1zM12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm2.2 12.2L6 18l3.8-8.2L18 6l-3.8 8.2z" /></svg>
-            <span className="a1-tl">Explore</span></button>
-          <button type="button" className="a1-tb" data-testid="a1-tv-calendar" onClick={() => go('/settings/tv')} aria-label="TV Calendar">
-            <svg width={20} height={20} viewBox="0 0 24 24" fill="#adc7ff" aria-hidden="true"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zM5 8V6h14v2H5z"/></svg>
-            <span className="a1-tl">TV Calendar</span></button>
-        </div>
         <label className="r3-field" data-focus-ring>
           <span className="r3-icon"><H2SearchIcon /></span>
           <input ref={inputRef} className="r3-input" data-testid="search-input" type="search" placeholder="Search movies and shows" aria-label="Search"
@@ -355,8 +335,8 @@ export const r3Css = `
 [data-r3-search]{--r3-pad:clamp(32px, 3.4vw, 48px);--r3-top:clamp(300px, 29vw, 420px);--r3-po:clamp(112px, 9.5vw, 136px);color:rgba(255,255,255,.95);line-height:normal}
 .r3-cover{position:fixed;left:0;right:0;top:0;bottom:0;z-index:40;pointer-events:none;
   background:linear-gradient(to bottom, transparent 0, rgba(21,16,42,.55) ${R3_BAND - 80}px, #15102a ${R3_BAND}px, #15102a 100%)}
-/* v235 (PM): the field sits in the top bar (logo left, avatar right), centered, at rest and while searching */
-.r3-head{position:fixed;z-index:55;top:84px;left:50%;transform:translateX(-50%);display:flex;align-items:center}
+/* Field sits under the 84px dock (bottom at 94) so the two do not overlap. */
+.r3-head{position:fixed;z-index:55;top:102px;left:50%;transform:translateX(-50%);display:flex;align-items:center}
 /* v245: one seamless reveal: the glass bar (fill + blur) and the controls share one transition, in the same frame */
 [data-r3-search]{--a1-dur:240ms;--a1-ease:cubic-bezier(.2,0,0,1)}
 .a1-bar,.r3-head{transition:transform var(--a1-dur) var(--a1-ease),opacity var(--a1-dur) var(--a1-ease),visibility 0s linear var(--a1-dur)}
@@ -366,12 +346,6 @@ export const r3Css = `
 .a1-bar{position:fixed;z-index:49;top:0;left:0;right:0;height:152px;background:rgba(17,19,24,.55);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
   border-bottom:1px solid rgba(255,255,255,.08);will-change:transform,opacity}
 @media (prefers-reduced-motion: reduce){[data-r3-search]{--a1-dur:0ms}}
-${homeChevCss}
-.a1-nav{position:absolute;left:calc(100% + 12px);top:0;display:flex;gap:12px}
-.a1-tb{height:48px;padding:0 20px;border-radius:24px;display:flex;align-items:center;gap:8px;background:rgba(51,53,58,.85);border:0;color:#e2e2e9;
-  font:inherit;font-size:15px;font-weight:500;cursor:pointer;white-space:nowrap}
-.a1-tb:focus-visible{outline:2px solid var(--color-accent, #3b82f6);outline-offset:2px}
-@media (max-width: 1279px){.a1-tb{width:48px;padding:0;justify-content:center}.a1-tl{display:none}}
 /* v241 (H2): 480x48 pill, rgba(51,53,58,.85) fill, no border, filled 20px search icon, #c4c6d0 */
 .r3-field{display:flex;align-items:center;gap:12px;width:480px;height:48px;box-sizing:border-box;padding:0 20px;border-radius:24px;
   background:rgba(51,53,58,.85);border:0;color:#c4c6d0;cursor:text;transition:box-shadow 150ms}

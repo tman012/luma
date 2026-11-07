@@ -45,6 +45,9 @@ describe('desktop TV Calendar full-width', () => {
     expect(close.closest('header')).toBeTruthy();
     expect(close.querySelector('[data-testid=tv-logo]')!.getAttribute('alt')).toBe('Luma');
     expect(document.querySelector('[data-home-chevron], .a1-chev')).toBeNull();
+    expect(screen.getByTestId('desktop-dock')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Calendar' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('link', { name: 'Libraries' }).getAttribute('aria-current')).toBeNull();
     expect(screen.getByTestId('tv-page-title').textContent).toBe('TV Calendar');
     expect(screen.getByTestId('settings-main').style.maxWidth).toBe('');   // takes the full width
   });
@@ -73,11 +76,12 @@ describe('desktop TV Calendar full-width', () => {
     expect(await screen.findByTestId('home')).toBeTruthy();
   });
 
-  it('phone is unchanged: no desktop logo link', async () => {
+  it('phone is unchanged: no desktop logo link and no dock', async () => {
     setup(false);
     at('/settings/tv');
     await screen.findByTestId('tv-stub');
     expect(screen.queryByTestId('tv-home-link')).toBeNull();
+    expect(screen.queryByTestId('desktop-dock')).toBeNull();
   });
 
   it('LUMA_MINIMAL: the reveal row path (go() pushState /settings/tv, 7a01c4be) opens the calendar and the logo closes it', async () => {
