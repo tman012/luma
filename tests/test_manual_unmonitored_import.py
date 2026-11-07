@@ -518,3 +518,189 @@ def test_already_linked_manual_file_is_reconciled_without_another_copy(dl, time_
     assert rows('SELECT state, results FROM grabs WHERE hash = ?', H1)[0]['results'] == row['results']
     assert _policy(sid) == policy
     _no_client_write(dl)
+
+
+def _stuck(dl, sid, eid):
+    """Open manual grab, unmonitored episode, ledger waiting. Returns (source path, source bytes)."""
+    _off(sid, [eid])
+    _grab_row(H1, sid, [eid], origin='manual')
+    src = _src(dl, NAME, NAME + '.mkv')
+    grab(dl, H1, NAME, [NAME + '.mkv', E4 + '.mkv'])
+    tv_downloads._save(H1, state='waiting', error=tv_downloads.UNMONITORED, at=time.time() - 50, name=NAME)
+    return src, src.read_bytes()
+
+
+def _land_linked(dl, eid):
+    dest = _dest(dl, NAME + '.mkv')
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(LANDED)
+    assert tv_watch.link_path(str(dest)) is True
+    link = _linked(eid)
+    assert len(link) == 1 and link[0]['state'] == 'linked' and link[0]['size'] == len(LANDED)
+    return dest
+
+
+def _still_open(dl, sid, src, source, policy):
+    assert rows('SELECT state FROM grabs WHERE hash = ?', H1)[0]['state'] == 'downloading'
+    assert _events(H1) == []
+    st = tv_downloads.status(H1) or {}
+    assert st.get('state') != 'imported'
+    assert not (st.get('state') == 'refused' and st.get('error') == tv_downloads.ALREADY_IMPORTED)
+    assert 'files' not in st
+    assert src.read_bytes() == source and not _dest(dl, E4 + '.mkv').exists()
+    assert _policy(sid) == policy
+    return st
+
+
+def _imported_once(dl, eid, src, source, policy, sid):
+    dest = _dest(dl, NAME + '.mkv')
+    assert dest.is_file() and not dest.is_symlink() and dest.read_bytes() == source
+    assert src.read_bytes() == source and not _dest(dl, E4 + '.mkv').exists()
+    assert _linked(eid)[0]['state'] == 'linked' and _linked(eid)[0]['size'] == len(source)
+    row = rows('SELECT state, results FROM grabs WHERE hash = ?', H1)[0]
+    assert row['state'] == 'imported'
+    results = json.loads(row['results'])
+    assert results['via'] == 'import' and results['files'] == 1 and results['episode_ids'] == [eid]
+    ev = _events(H1)
+    assert len(ev) == 1 and json.loads(ev[0]['detail'])['via'] == 'import'
+    assert json.loads(ev[0]['detail'])['files'] == 1
+    st = tv_downloads.status(H1)
+    assert st['state'] == 'imported' and st['files'][0]['how'] in ('copied', 'linked')
+    assert _policy(sid) == policy
+    assert dl.tick() == {'checked': 0, 'imported': 0}
+    assert len(_events(H1)) == 1 and dest.read_bytes() == source
+
+
+def test_a_missing_linked_file_is_not_delivery_and_imports_once(dl, time_show, monkeypatch):
+    sid, eps = time_show
+    eid = eps[3]
+    src, source = _stuck(dl, sid, eid)
+    dest = _land_linked(dl, eid)
+    dest.unlink()
+    assert _linked(eid)[0]['state'] == 'linked'
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    assert tv_downloads.reconcile() == 0
+    assert _events(H1) == []
+    assert dl.tick()['imported'] == 1
+    _imported_once(dl, eid, src, source, policy, sid)
+
+
+def test_a_linked_row_for_a_file_that_was_never_created_is_not_delivery(dl, time_show, monkeypatch):
+    sid, eps = time_show
+    eid = eps[3]
+    src, source = _stuck(dl, sid, eid)
+    dest = _dest(dl, NAME + '.mkv')
+    rel = f"Time (2021)/Season 03/{NAME}.mkv"
+    with tv_store.write() as conn:
+        conn.execute(
+            'INSERT INTO episode_files (series_id, path_id, rel_path, size, mtime, dev, ino, origin, added_at, state)'
+            " VALUES (?, ?, ?, ?, 0, 0, 0, 'scan', 1, 'linked')",
+            (sid, PID, rel, len(LANDED)))
+        fid = conn.execute('SELECT id FROM episode_files WHERE rel_path = ?', (rel,)).fetchone()['id']
+        conn.execute('INSERT INTO episode_file_links (file_id, episode_id) VALUES (?, ?)', (fid, eid))
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    assert not dest.exists()
+    assert tv_downloads.reconcile() == 0 and _events(H1) == []
+    assert dl.tick()['imported'] == 1
+    _imported_once(dl, eid, src, source, policy, sid)
+
+
+@pytest.mark.parametrize('payload', [b'trunc', b'', b'x' * 20])
+def test_a_truncated_or_empty_linked_file_stays_open_until_the_name_is_free(dl, time_show, monkeypatch, payload):
+    """Stored size stays the landed size. A shorter file, including one still over the video-size floor,
+    is not delivery and is not rewritten. The request stays waiting until the name is free."""
+    sid, eps = time_show
+    eid = eps[3]
+    src, source = _stuck(dl, sid, eid)
+    dest = _land_linked(dl, eid)
+    dest.write_bytes(payload)
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    now = time.time()
+    assert tv_downloads.reconcile(now) == 0
+    for k in range(2):
+        assert dl.tick(now + 60 * k)['imported'] == 0
+    assert dest.read_bytes() == payload and not dest.is_symlink()
+    assert _linked(eid)[0]['state'] == 'linked' and _linked(eid)[0]['size'] == len(LANDED)
+    st = _still_open(dl, sid, src, source, policy)
+    assert st.get('state') == 'waiting' and st.get('error') == tv_downloads.FILE_NOT_USABLE
+    dest.unlink()
+    assert dl.tick(now + 180)['imported'] == 1
+    _imported_once(dl, eid, src, source, policy, sid)
+
+
+def test_an_unreachable_show_directory_is_not_a_reconciled_delivery(dl, time_show, monkeypatch):
+    sid, eps = time_show
+    eid = eps[3]
+    src, source = _stuck(dl, sid, eid)
+    dest = _land_linked(dl, eid)
+    show = dest.parents[1]
+    aside = show.with_name(show.name + '-aside')
+    show.rename(aside)
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    assert tv_downloads.reconcile() == 0 and _events(H1) == []
+    assert dl.tick()['imported'] == 1
+    assert aside.is_dir() and (aside / 'Season 03' / (NAME + '.mkv')).read_bytes() == LANDED
+    _imported_once(dl, eid, src, source, policy, sid)
+
+
+def test_an_unreachable_library_root_waits_and_does_not_grow_a_tree(dl, time_show, monkeypatch):
+    sid, eps = time_show
+    eid = eps[3]
+    src, source = _stuck(dl, sid, eid)
+    dest = _land_linked(dl, eid)
+    ino = dest.stat().st_ino
+    root = dl.lib
+    away = root.with_name(root.name + '-unmounted')
+    root.rename(away)
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    now = time.time()
+    try:
+        assert tv_downloads.reconcile(now) == 0
+        for k in range(2):
+            assert dl.tick(now + 60 * k)['imported'] == 0
+        assert not root.exists()
+        kept = away / 'Time (2021)' / 'Season 03' / (NAME + '.mkv')
+        assert kept.read_bytes() == LANDED and kept.stat().st_ino == ino
+        st = _still_open(dl, sid, src, source, policy)
+        assert st.get('error') == 'library folder not available'
+    finally:
+        if away.exists() and not root.exists():
+            away.rename(root)
+    assert dl.tick(now + 180)['imported'] == 0
+    assert dest.read_bytes() == LANDED and dest.stat().st_ino == ino
+    row = rows('SELECT state, results FROM grabs WHERE hash = ?', H1)[0]
+    assert row['state'] == 'imported' and json.loads(row['results'])['via'] == 'reconciled'
+    assert json.loads(row['results'])['files'] == 0
+    assert len(_events(H1)) == 1 and 'files' not in (tv_downloads.status(H1) or {})
+    assert _policy(sid) == policy
+
+
+def test_a_destination_symlink_is_not_delivery_and_is_left_in_place(dl, time_show, monkeypatch):
+    sid, eps = time_show
+    eid = eps[3]
+    src, source = _stuck(dl, sid, eid)
+    outside = dl.root / 'outside-target.mkv'
+    outside.write_bytes(LANDED)
+    dest = _dest(dl, NAME + '.mkv')
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.symlink_to(outside)
+    assert tv_watch.link_path(str(dest)) is False
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    now = time.time()
+    for k in range(2):
+        assert dl.tick(now + 60 * k)['imported'] == 0
+    assert dest.is_symlink() and os.readlink(dest) == str(outside)
+    assert outside.read_bytes() == LANDED and src.read_bytes() == source
+    assert _linked(eid) == []
+    st = _still_open(dl, sid, src, source, policy)
+    assert st.get('state') == 'waiting' and st.get('error') == tv_downloads.FILE_NOT_USABLE
+    dest.unlink()
+    assert dl.tick(now + 180)['imported'] == 1
+    assert not dest.is_symlink() and outside.read_bytes() == LANDED
+    _imported_once(dl, eid, src, source, policy, sid)

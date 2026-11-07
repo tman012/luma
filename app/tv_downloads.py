@@ -277,19 +277,30 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
                     if not fname or '/' in fname or fname in ('.', '..'):
                         raise mover.Refused('unsafe file name')
                     how = mover.transfer(f.path, dfd, dpath, fname, mode, owner, root, f)
-                    if how != 'exists':
+                    dest = os.path.join(dpath, fname)
+                    # An existing name is not delivery unless it is already a real library file.
+                    # A symlink, a 0-byte file, or a file that no longer matches its linked size stays
+                    # where it is: this pass does not replace it.
+                    if how == 'exists' and not _existing_delivery(dest, lib_root, s.get('path_id')):
+                        how = None
+                    elif how != 'exists':
                         extra = _sidecars(f, fname, dfd, dpath, mode, owner, root)
                 finally:
                     if close:
                         os.close(dfd)
-                dest = os.path.join(dpath, fname)
-                linked = tv_watch.episode_imported(dest)          # the import hook: the card turns now
-                files.append({'path': dest, 'how': how, 'linked': bool(linked), 'episode_ids': _ids(s['id'], season, nums),
+                if not how:
+                    continue
+                linked = bool(tv_watch.episode_imported(dest))   # the import hook: the card turns now
+                if how == 'exists' and not linked:
+                    continue
+                files.append({'path': dest, 'how': how, 'linked': linked, 'episode_ids': _ids(s['id'], season, nums),
                               **({'sidecars': extra} if extra else {})})
         finally:
             os.close(sfd)
     finally:
         os.close(rfd)
+    if not files:
+        raise mover.Pending(FILE_NOT_USABLE)
     return {'state': 'imported', 'files': files, 'series_id': s['id'],
             'episode_ids': sorted({i for x in files for i in x['episode_ids']})}
 
@@ -373,6 +384,75 @@ def _ids(sid: int, season: int, nums: List[int]) -> List[int]:
 OPEN_GRABS = ('downloading', 'importing')
 LINKED = ("EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id"
           " WHERE l.episode_id = episodes.id AND f.state = 'linked')")
+FILE_NOT_USABLE = 'library file is not usable'
+
+
+def _disk_size(path: str, root: str) -> Optional[int]:
+    """Size of a regular file inside *root*. A symlink, a directory, a 0-byte file, a missing
+    path, or a path that resolves outside the library is None. The symlink is not followed."""
+    if not path or not root:
+        return None
+    root_real = os.path.realpath(root)
+    if not os.path.isdir(root_real):
+        return None
+    try:
+        parent = os.path.realpath(os.path.dirname(path))
+        if os.path.commonpath([parent, root_real]) != root_real:
+            return None
+        st = os.lstat(path)
+    except (OSError, ValueError):
+        return None
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode) or st.st_size <= 0:
+        return None
+    return int(st.st_size)
+
+
+def _stored_linked_size(path_id: Optional[str], rel_path: str) -> Optional[int]:
+    if not path_id or not rel_path:
+        return None
+    with tv_store.connect() as conn:
+        row = conn.execute("SELECT size FROM episode_files WHERE path_id = ? AND rel_path = ? AND state = 'linked'",
+                           (path_id, rel_path)).fetchone()
+    if row is None or row['size'] is None:
+        return None
+    return int(row['size'])
+
+
+def _existing_delivery(dest: str, root: str, path_id: Optional[str]) -> bool:
+    """True when a name already in the library is a real file this pass may count.
+    A stored linked size that no longer matches the bytes is not delivery, and nothing is replaced."""
+    size = _disk_size(dest, root)
+    if size is None:
+        return False
+    rel = os.path.relpath(dest, os.path.realpath(root)).replace('\\', '/')
+    stored = _stored_linked_size(path_id, rel)
+    return stored is None or stored == size
+
+
+def _verified(conn, ids: List[int]) -> set:
+    """Wanted episodes whose linked row is a regular non-symlink file in that show's library,
+    with a positive size equal to the stored size. The row alone is not enough."""
+    if not ids:
+        return set()
+    from app import tv_scan
+    found = conn.execute(
+        'SELECT l.episode_id, f.rel_path, f.size, f.path_id FROM episode_file_links l'
+        ' JOIN episode_files f ON f.id = l.file_id WHERE f.state = \'linked\''
+        f" AND l.episode_id IN ({','.join('?' * len(ids))})", ids).fetchall()
+    roots: Dict[str, Optional[str]] = {}
+    ok = set()
+    for r in found:
+        pid = r['path_id']
+        if pid not in roots:
+            roots[pid] = tv_scan._root_for(pid)
+        root = roots[pid]
+        stored = int(r['size'] or 0)
+        rel = str(r['rel_path'] or '').replace('\\', '/')
+        if not root or stored <= 0 or not rel or rel.startswith('/') or '..' in rel.split('/'):
+            continue
+        if _disk_size(os.path.join(root, *rel.split('/')), root) == stored:
+            ok.add(int(r['episode_id']))
+    return ok
 
 
 def _want(g) -> List[int]:
@@ -447,14 +527,18 @@ def finish_grab(h: str, name: Optional[str], series_id: Optional[int], covered: 
 
 def reconcile(now: Optional[float] = None) -> int:
     """Self-heal (v184): a grab still downloading/importing whose torrent this watch already imported
-    (tvdl:<hash> says imported), or whose every episode now has a linked file, is finished now.
-    DB only (never contacts qBittorrent). Returns how many rows moved on."""
+    (tvdl:<hash> says imported), or whose every wanted episode has a linked file that is still on disk,
+    is finished now. The import record closes the row even when that file was deleted on purpose.
+    A linked row counts only when its path is a regular non-symlink file in the library and its size
+    matches the stored size and is greater than zero. Never contacts qBittorrent. Returns how many
+    rows moved on."""
     now = time.time() if now is None else now
     with tv_store.connect() as conn:
         rows = [dict(r) for r in conn.execute(
             f"SELECT hash, series_id, episode_ids, release_title FROM grabs WHERE state IN ({','.join('?' * len(OPEN_GRABS))})",
             OPEN_GRABS)]
         linked = {r['hash']: _linked(conn, _want(r)) for r in rows}
+        verified = {r['hash']: _verified(conn, _want(r)) for r in rows}
     n = 0
     for r in rows:
         want = _want(r)
@@ -469,8 +553,8 @@ def reconcile(now: Optional[float] = None) -> int:
                 cov = sorted(set(want) | linked[r['hash']]) if want else None
             got = finish_grab(r['hash'], None, r['series_id'], cov,  # never by name on reconcile
                               len(st.get('files') or []), float(st.get('at') or now), via='reconciled')
-        elif want and set(want) <= linked[r['hash']]:
-            got = finish_grab(r['hash'], None, r['series_id'], None, 0, now, via='reconciled')
+        elif want and set(want) <= verified[r['hash']]:
+            got = finish_grab(r['hash'], None, r['series_id'], sorted(want), 0, now, via='reconciled')
         else:
             continue
         n += 1 if got else 0
