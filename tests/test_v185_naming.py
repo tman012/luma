@@ -124,6 +124,9 @@ def _title(season, ep):
 
 
 def test_an_import_gets_the_sonarr_name_with_its_sidecars(dl):  # noqa: F811
+    # Future leaves this aired episode off. The category watch imports it only while it is monitored.
+    from tests.test_tv_download_watch_v158a import _on
+    _on(2, 3)
     rel = 'Severance.S02E03.1080p.WEB-DL.DDP5.1-GRP'
     d = dl.root / rel
     grab(dl, H1, rel, [rel + '.mkv'])
@@ -142,6 +145,8 @@ def test_an_import_gets_the_sonarr_name_with_its_sidecars(dl):  # noqa: F811
 
 
 def test_never_overwrites_an_existing_name(dl):  # noqa: F811
+    from tests.test_tv_download_watch_v158a import _on
+    _on(2, 4)
     season = dl.lib / 'Severance (2022)' / 'Season 02'
     stem = f'Severance (2022) - S02E04 - {tv_naming.clean_text(_title(2, 4), D)}'
     (season / f'{stem}.mkv').write_bytes(b'already-here')

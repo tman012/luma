@@ -55,6 +55,7 @@ def dl(scanned, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.delenv('LUMA_TEST_TV_TAG', raising=False)
     monkeypatch.delenv('LUMA_TV_CATEGORY', raising=False)
     monkeypatch.setenv('LUMA_INSTANCE', 'test')              # v158b: on prod the watch is a setting (off)
+    monkeypatch.setenv('LUMA_REMOTE_MOVER', '0')             # local mover: the temp library is not /media
     from app import tv_plex                                   # v158c: no Plex keys left by an earlier test
     monkeypatch.setattr(tv_plex, '_have', set())
     monkeypatch.setitem(tv_plex._state, 'down', False)
@@ -88,7 +89,19 @@ def _down(season, episode):
     return next(x['downloaded'] for x in out if x['show'] == 'Severance' and (x['season'], x['episode']) == (season, episode))
 
 
+def _on(season, episode):
+    """The scanned library is Future, and the fake air date is 2022, so this episode is unmonitored.
+    A category torrent is not a manual request and must not import it that way. These tests are the
+    monitored category watch, so this one episode is turned on here. That does not start a search."""
+    with tv_store.write() as conn:
+        sid = conn.execute("SELECT id FROM series WHERE title = 'Severance'").fetchone()['id']
+        conn.execute('UPDATE series SET monitored = 1 WHERE id = ?', (sid,))
+        conn.execute('UPDATE episodes SET monitored = 1 WHERE series_id = ? AND season_number = ? AND episode_number = ?',
+                     (sid, season, episode))
+
+
 def test_imports_only_the_tv_tag_and_links_the_card_on_the_same_pass(dl):
+    _on(2, 3)
     src = grab(dl, H1, 'Severance.S02E03.1080p.WEB-DL.DDP5.1-GRP', ['Severance.S02E03.1080p.WEB-DL.DDP5.1-GRP.mkv'])
     other = grab(dl, H2, 'Severance.S02E04.1080p.WEB-DL-GRP', ['Severance.S02E04.1080p.WEB-DL-GRP.mkv'], tags='luma-test')
     prod = grab(dl, H3, 'Severance.S02E06.1080p.WEB-DL-GRP', ['Severance.S02E06.1080p.WEB-DL-GRP.mkv'], tags='sonarr')
@@ -111,6 +124,7 @@ def test_imports_only_the_tv_tag_and_links_the_card_on_the_same_pass(dl):
 
 
 def test_never_overwrites_and_waits_while_incomplete_or_unwritable(dl, monkeypatch):
+    _on(2, 3)
     season = dl.lib / 'Severance (2022)' / 'Season 02'
     season.mkdir(parents=True, exist_ok=True)
     keep = season / 'Severance.S02E03.720p.HDTV-OLD.mkv'
@@ -171,6 +185,7 @@ def test_v158b_category_comes_from_the_instance_and_never_takes_the_others(monke
 
 def test_v158b_prod_watch_is_off_unless_the_setting_is_on(dl, monkeypatch):
     from app import tv_settings
+    _on(2, 3)
     monkeypatch.setenv('LUMA_INSTANCE', 'prod')
     grab(dl, H1, 'Severance.S02E03.1080p.WEB-DL-GRP', ['Severance.S02E03.1080p.WEB-DL-GRP.mkv'], tags='luma-tv')
     assert not tv_downloads.watch_enabled()
@@ -196,6 +211,7 @@ def test_v158b_no_space_uses_the_movers_rule_once_then_retry(dl, monkeypatch):
     lib_ = dl.lib
     (lib_ / 'x').mkdir(exist_ok=True)
     monkeypatch.setattr(tv_downloads.fm, 'load', (lambda real: (lambda: {**real(), 'transfer': 'copy'}))(tv_downloads.fm.load))
+    _on(2, 3)
     grab(dl, H1, 'Severance.S02E03.1080p.WEB-DL-GRP', ['Severance.S02E03.1080p.WEB-DL-GRP.mkv'])
     t0 = 10_000.0
     dl.tick(now=t0)
