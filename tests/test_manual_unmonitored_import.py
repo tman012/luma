@@ -26,9 +26,12 @@ from tests.test_tv_scan import PID, lib, rows, select  # noqa: F401
 from tests.test_v184_grab_import import NAME, _grab_row, time_show  # noqa: F401
 from tests.tv_fake import fake_tmdb  # noqa: F401
 
+E1 = 'Time.S03E01.1080p.WEBRip.X264-DEADPOOL'
 E4 = 'Time.S03E04.1080p.WEBRip.X264-DEADPOOL'
 BOTH = 'Time.S03E03E04.1080p.WEBRip.X264-DEADPOOL'
+PACK = 'Time.S03.1080p.WEBRip.X264-DEADPOOL'
 LANDED = b'landed-by-recovery-not-the-importer'
+OUTSIDE = b'outside-target-not-the-episode'
 
 
 @pytest.fixture(autouse=True)
@@ -704,3 +707,226 @@ def test_a_destination_symlink_is_not_delivery_and_is_left_in_place(dl, time_sho
     assert dl.tick(now + 180)['imported'] == 1
     assert not dest.is_symlink() and outside.read_bytes() == LANDED
     _imported_once(dl, eid, src, source, policy, sid)
+
+
+# ---------------------------------------------------------------- a requested sibling is still missing
+
+def _fresh(h):
+    """A new read of tv.db. The qBit stand-in stays in this process; the file is what a restart sees."""
+    import sqlite3
+    conn = sqlite3.connect(f'file:{tv_store.db_path()}?mode=ro', uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        grab_row = conn.execute(
+            'SELECT state, origin, episode_ids, results, finished_at, error FROM grabs WHERE hash = ?', (h,)).fetchone()
+        meta = conn.execute('SELECT value FROM meta WHERE key = ?', (f'tvdl:{h}',)).fetchone()
+    finally:
+        conn.close()
+    return (dict(grab_row) if grab_row is not None else None,
+            json.loads(meta['value']) if meta is not None else None)
+
+
+def _pack_request(dl, sid, eps, monitored, sibling=True):
+    e3, e4 = eps[3], eps[4]
+    if not monitored:
+        _off(sid, [e3, e4])
+    _grab_row(H1, sid, [e3, e4], title=PACK, origin='manual')
+    names = [NAME + '.mkv', E4 + '.mkv'] + ([E1 + '.mkv'] if sibling else [])
+    folder = grab(dl, H1, PACK, names)
+    sources = {name: (folder / name).read_bytes() for name in names}
+    return e3, e4, folder, sources
+
+
+def _sources_unchanged(folder, sources):
+    for name, data in sources.items():
+        path = folder / name
+        assert path.is_file() and not path.is_symlink() and path.read_bytes() == data
+
+
+@pytest.mark.parametrize('monitored', [True, False])
+def test_a_two_episode_request_with_both_names_free_imports_once(dl, time_show, monkeypatch, monitored):
+    sid, eps = time_show
+    e3, e4, folder, sources = _pack_request(dl, sid, eps, monitored)
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    now = time.time()
+    assert dl.tick(now) == {'checked': 1, 'imported': 1}
+    for name, eid in ((NAME + '.mkv', e3), (E4 + '.mkv', e4)):
+        dest = _dest(dl, name)
+        assert dest.is_file() and not dest.is_symlink() and dest.read_bytes() == sources[name]
+        assert _linked(eid)[0]['state'] == 'linked' and _linked(eid)[0]['size'] == len(sources[name])
+    assert not _dest(dl, E1 + '.mkv').exists()
+    _sources_unchanged(folder, sources)
+    row = rows('SELECT state, origin, results FROM grabs WHERE hash = ?', H1)[0]
+    assert row['state'] == 'imported' and row['origin'] == 'manual'
+    assert json.loads(row['results']) == {'episode_ids': [e3, e4], 'files': 2, 'via': 'import'}
+    ev = _events(H1)
+    assert len(ev) == 1
+    detail = json.loads(ev[0]['detail'])
+    assert detail['state'] == 'imported' and detail['files'] == 2 and detail['via'] == 'import'
+    assert detail['origin'] == 'manual'
+    assert json.loads(ev[0]['episode_ids']) == [e3, e4]
+    assert dl.tick(now + 60) == {'checked': 0, 'imported': 0}
+    assert tv_downloads.retry(H1) is False and len(_events(H1)) == 1
+    assert _policy(sid) == policy
+    _no_client_write(dl)
+
+
+@pytest.mark.parametrize('monitored', [True, False])
+def test_a_mixed_request_stays_recoverable_until_every_requested_file_is_placed(dl, time_show, monkeypatch, monitored):
+    """E03's library name is a symlink and E04's is free. E04 may copy. The request stays open, with no
+    imported history, until E03's name is free. The next pass and Retry then place only E03."""
+    sid, eps = time_show
+    e3, e4, folder, sources = _pack_request(dl, sid, eps, monitored)
+    outside = dl.root / 'outside-target.mkv'
+    outside.write_bytes(OUTSIDE)
+    e3dest = _dest(dl, NAME + '.mkv')
+    e3dest.parent.mkdir(parents=True, exist_ok=True)
+    e3dest.symlink_to(outside)
+    policy = _policy(sid)
+    _forbid(monkeypatch)
+    now = time.time()
+    assert dl.tick(now) == {'checked': 1, 'imported': 0}
+    e4dest = _dest(dl, E4 + '.mkv')
+    e4_ino = e4dest.stat().st_ino
+    assert e4dest.is_file() and not e4dest.is_symlink() and e4dest.read_bytes() == sources[E4 + '.mkv']
+    assert _linked(e4)[0]['state'] == 'linked' and _linked(e4)[0]['size'] == len(sources[E4 + '.mkv'])
+    assert _linked(e3) == [] and not _dest(dl, E1 + '.mkv').exists()
+    grab_row, ledger = _fresh(H1)
+    assert grab_row['state'] == 'downloading' and grab_row['origin'] == 'manual'
+    assert grab_row['finished_at'] is None and grab_row['results'] is None
+    assert json.loads(grab_row['episode_ids']) == [e3, e4]
+    assert ledger['state'] == 'waiting' and ledger['error'] == tv_downloads.FILE_NOT_USABLE
+    assert e3 not in (ledger.get('episode_ids') or []) and 'files' not in ledger
+    assert _events(H1) == []
+    assert tv_downloads.reconcile(now + 30) == 0
+    for k in (1, 2):
+        assert dl.tick(now + 60 * k) == {'checked': 1, 'imported': 0}
+    assert e4dest.stat().st_ino == e4_ino and e4dest.read_bytes() == sources[E4 + '.mkv']
+    assert e3dest.is_symlink() and os.readlink(e3dest) == str(outside)
+    assert outside.read_bytes() == OUTSIDE and _sources_unchanged(folder, sources) is None
+    assert tv_downloads.retry(H1) is True
+    assert H1 not in {row['hash'] for row in tv_downloads.failures(now + 150)}
+    assert dl.tick(now + 180) == {'checked': 1, 'imported': 0}
+    assert _events(H1) == [] and rows('SELECT state FROM grabs WHERE hash = ?', H1)[0]['state'] == 'downloading'
+    e3dest.unlink()
+    assert not e3dest.exists()
+    grab_row, ledger = _fresh(H1)
+    assert grab_row['state'] == 'downloading' and grab_row['origin'] == 'manual'
+    assert ledger['state'] == 'waiting'
+    assert tv_downloads.reconcile(now + 200) == 0
+    assert tv_downloads.retry(H1) is True
+    assert dl.tick(now + 240) == {'checked': 1, 'imported': 1}
+    assert e3dest.is_file() and not e3dest.is_symlink() and e3dest.read_bytes() == sources[NAME + '.mkv']
+    assert e4dest.stat().st_ino == e4_ino and e4dest.read_bytes() == sources[E4 + '.mkv']
+    assert outside.read_bytes() == OUTSIDE and not _dest(dl, E1 + '.mkv').exists()
+    _sources_unchanged(folder, sources)
+    assert _linked(e3)[0]['state'] == 'linked' and _linked(e3)[0]['size'] == len(sources[NAME + '.mkv'])
+    assert _linked(e4)[0]['size'] == len(sources[E4 + '.mkv'])
+    row = rows('SELECT state, origin, results FROM grabs WHERE hash = ?', H1)[0]
+    assert row['state'] == 'imported' and row['origin'] == 'manual'
+    assert json.loads(row['results']) == {'episode_ids': [e3, e4], 'files': 2, 'via': 'import'}
+    ev = _events(H1)
+    assert len(ev) == 1
+    detail = json.loads(ev[0]['detail'])
+    assert detail == {'hash': H1, 'title': PACK, 'files': 2, 'via': 'import', 'origin': 'manual', 'state': 'imported'}
+    assert json.loads(ev[0]['episode_ids']) == [e3, e4]
+    final = tv_downloads.status(H1)
+    assert final['state'] == 'imported' and sorted(final['episode_ids']) == [e3, e4]
+    by_name = {os.path.basename(f['path']): f for f in final['files']}
+    assert by_name[NAME + '.mkv']['how'] == 'copied' and by_name[NAME + '.mkv']['linked'] is True
+    assert by_name[E4 + '.mkv']['how'] == 'exists' and by_name[E4 + '.mkv']['linked'] is True
+    assert set(by_name) == {NAME + '.mkv', E4 + '.mkv'}
+    assert dl.tick(now + 300) == {'checked': 0, 'imported': 0}
+    assert tv_downloads.retry(H1) is False and len(_events(H1)) == 1
+    assert e4dest.stat().st_ino == e4_ino and _policy(sid) == policy
+    _no_client_write(dl)
+
+
+@pytest.mark.parametrize('monitored', [True, False])
+@pytest.mark.parametrize('stopped', ['failed', 'skipped'])
+def test_cancelling_a_mixed_request_does_not_place_the_remaining_file(dl, time_show, monkeypatch, monitored, stopped):
+    """The stored cancel is the grab leaving downloading. Retry and the next pass do not finish it."""
+    sid, eps = time_show
+    e3, e4, folder, sources = _pack_request(dl, sid, eps, monitored)
+    outside = dl.root / 'outside-target.mkv'
+    outside.write_bytes(OUTSIDE)
+    e3dest = _dest(dl, NAME + '.mkv')
+    e3dest.parent.mkdir(parents=True, exist_ok=True)
+    e3dest.symlink_to(outside)
+    _forbid(monkeypatch)
+    now = time.time()
+    assert dl.tick(now)['imported'] == 0
+    e4dest = _dest(dl, E4 + '.mkv')
+    e4_ino = e4dest.stat().st_ino
+    assert rows('SELECT state FROM grabs WHERE hash = ?', H1)[0]['state'] == 'downloading'
+    assert _events(H1) == []
+    with tv_store.write() as conn:
+        conn.execute('UPDATE grabs SET state = ?, finished_at = ?, error = ? WHERE hash = ?',
+                     (stopped, now, 'stopped', H1))
+    e3dest.unlink()
+    grab_row, ledger = _fresh(H1)
+    assert grab_row['state'] == stopped and ledger['state'] == 'waiting'
+    assert tv_downloads.reconcile(now + 30) == 0
+    assert dl.tick(now + 60)['imported'] == 0
+    assert not e3dest.exists() and e4dest.stat().st_ino == e4_ino
+    assert _events(H1) == []
+    assert rows('SELECT state, finished_at, error FROM grabs WHERE hash = ?', H1)[0]['state'] == stopped
+    assert tv_downloads.retry(H1) is True
+    assert dl.tick(now + 120)['imported'] == 0
+    assert not e3dest.exists() and e4dest.read_bytes() == sources[E4 + '.mkv'] and e4dest.stat().st_ino == e4_ino
+    assert outside.read_bytes() == OUTSIDE and _sources_unchanged(folder, sources) is None
+    assert _linked(e3) == [] and _events(H1) == []
+    assert rows('SELECT state, error FROM grabs WHERE hash = ?', H1)[0]['state'] == stopped
+    _no_client_write(dl)
+
+
+def test_a_historical_partial_is_not_resumed(dl, time_show, monkeypatch):
+    """A partial row that already existed is not this request's unfinished pass. It stays partial."""
+    sid, eps = time_show
+    e3, e4 = eps[3], eps[4]
+    _grab_row(H1, sid, [e3, e4], title=PACK, origin='manual')
+    with tv_store.write() as conn:
+        conn.execute("UPDATE grabs SET state = 'partial', finished_at = 5, results = ?, error = NULL WHERE hash = ?",
+                     (json.dumps({'episode_ids': [e4], 'files': 1, 'via': 'import'}), H1))
+    tv_downloads._save(H1, state='imported', episode_ids=[e4], files=[{'path': 'old', 'how': 'copied', 'linked': True}],
+                       at=5, name=PACK)
+    folder = grab(dl, H1, PACK, [NAME + '.mkv', E4 + '.mkv'])
+    _forbid(monkeypatch)
+    now = time.time()
+    assert tv_downloads.reconcile(now) == 0
+    assert dl.tick(now)['imported'] == 0
+    assert tv_downloads.retry(H1) is False
+    assert dl.tick(now + 60)['imported'] == 0
+    assert not _dest(dl, NAME + '.mkv').exists() and not _dest(dl, E4 + '.mkv').exists()
+    row = rows('SELECT state, finished_at, results FROM grabs WHERE hash = ?', H1)[0]
+    assert row['state'] == 'partial' and row['finished_at'] == 5
+    assert json.loads(row['results'])['episode_ids'] == [e4]
+    assert _events(H1) == []
+    assert (folder / (NAME + '.mkv')).read_bytes() == b'episode-bytes' * 10
+    _no_client_write(dl)
+
+
+def test_deleting_an_unmonitored_mixed_request_does_not_import_the_rest(dl, time_show, monkeypatch):
+    sid, eps = time_show
+    e3, e4, folder, sources = _pack_request(dl, sid, eps, monitored=False, sibling=False)
+    outside = dl.root / 'outside-target.mkv'
+    outside.write_bytes(OUTSIDE)
+    e3dest = _dest(dl, NAME + '.mkv')
+    e3dest.parent.mkdir(parents=True, exist_ok=True)
+    e3dest.symlink_to(outside)
+    _forbid(monkeypatch)
+    now = time.time()
+    assert dl.tick(now)['imported'] == 0
+    e4_ino = _dest(dl, E4 + '.mkv').stat().st_ino
+    with tv_store.write() as conn:
+        conn.execute('DELETE FROM grabs WHERE hash = ?', (H1,))
+    e3dest.unlink()
+    assert tv_downloads.reconcile(now + 30) == 0
+    assert dl.tick(now + 60)['imported'] == 0
+    assert not e3dest.exists() and _dest(dl, E4 + '.mkv').stat().st_ino == e4_ino
+    assert rows('SELECT COUNT(*) AS n FROM grabs')[0]['n'] == 0
+    assert _events(H1) == [] and _linked(e3) == []
+    assert (tv_downloads.status(H1) or {}).get('state') != 'imported'
+    assert outside.read_bytes() == OUTSIDE and _sources_unchanged(folder, sources) is None
+    _no_client_write(dl)

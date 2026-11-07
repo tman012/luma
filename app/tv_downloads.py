@@ -212,7 +212,9 @@ def _show_folder(s: Dict[str, Any]) -> str:
 
 def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
                    list_files: Optional[Callable] = None) -> Dict[str, Any]:
-    """File one completed TV torrent. Returns {state, files, error}. Raises mover.Pending / Refused."""
+    """File one completed TV torrent. Returns {state, files, episode_ids} when every planned file was
+    placed. A planned file whose destination is not a real delivery is not dropped so the others can
+    close the request: the pass raises Pending and the torrent stays waiting. Raises mover.Refused too."""
     from app import tv_watch
     name = str(t.get('name') or '')
     s = _series_for(name)
@@ -257,6 +259,7 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
     if mode == 'copy':
         mover._check_space(lib_root, sum(f.size for f, _, _ in plan))
     files = []
+    unusable = False
     rfd = mover._open_root(lib_root)
     try:
         sfd, _, show_path = mover._ensure_folder(rfd, lib_root, folder, owner)
@@ -289,9 +292,11 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
                     if close:
                         os.close(dfd)
                 if not how:
+                    unusable = True
                     continue
                 linked = bool(tv_watch.episode_imported(dest))   # the import hook: the card turns now
                 if how == 'exists' and not linked:
+                    unusable = True
                     continue
                 files.append({'path': dest, 'how': how, 'linked': linked, 'episode_ids': _ids(s['id'], season, nums),
                               **({'sidecars': extra} if extra else {})})
@@ -299,7 +304,9 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
             os.close(sfd)
     finally:
         os.close(rfd)
-    if not files:
+    # One sibling on disk is not the request. Leave the grab open and write no imported history;
+    # a later pass places the name that was unusable and counts the file already copied as exists.
+    if unusable or not files:
         raise mover.Pending(FILE_NOT_USABLE)
     return {'state': 'imported', 'files': files, 'series_id': s['id'],
             'episode_ids': sorted({i for x in files for i in x['episode_ids']})}
