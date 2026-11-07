@@ -13562,9 +13562,9 @@ _wl_store_lock = threading.Lock()
 
 
 def _wl_resolve(type_: str, tmdb_id: int) -> dict:
-    """The TMDb URLs of a title's sheet backdrop (w1920) and clearlogo (original; None: it has none). With a logo the
-    backdrop is the textless one (no language, highest vote: the logo never sits over a second title); backdrop_path
-    only when no textless image exists (v348, Designer)."""
+    """The TMDb URLs of a title's sheet backdrop and clearlogo, both at original size (None: it has none). With a
+    logo the backdrop is the textless one (no language, highest vote, then widest: the logo never sits over a second
+    title); backdrop_path only when no textless image exists (v348, Designer). The bytes are stored as downloaded."""
     api_key = settings.get('apis.tmdb.api_key') or Config.TMDB_API_KEY
     if not api_key:
         raise RuntimeError('no TMDb key')
@@ -13582,7 +13582,7 @@ def _wl_resolve(type_: str, tmdb_id: int) -> dict:
         if pick:
             bd, textless = pick, True
     img = 'https://image.tmdb.org/t/p'
-    return {'backdrop': f"{img}/w1920{bd}" if bd else None, 'logo': f"{img}/original{logo}" if logo else None,
+    return {'backdrop': f"{img}/original{bd}" if bd else None, 'logo': f"{img}/original{logo}" if logo else None,
             'backdrop_textless': textless}
 
 
@@ -13621,7 +13621,11 @@ def _wl_store():
 
 
 def _wl_url(type_: str, tmdb_id: int, kind: str) -> str:
-    return f"{(app.config.get('URL_BASE') or '').rstrip('/')}/api/wl-image/{type_}/{tmdb_id}/{kind}"
+    """The URL a client requests. `r` is the cache revision (app.wl_images.URL_REV): distinct from the unversioned
+    v348–v350 URLs a browser may still hold as immutable. `w` is added by the client for a phone copy."""
+    from app.wl_images import URL_REV
+    base = (app.config.get('URL_BASE') or '').rstrip('/')
+    return f"{base}/api/wl-image/{type_}/{tmdb_id}/{kind}?r={URL_REV}"
 
 
 def _wl_enabled() -> bool:
@@ -13669,9 +13673,10 @@ _wl_native.list_hooks.append(lambda rows: _wl_sync_and_annotate('movie', rows))
 @app.route('/api/wl-image/<type_>/<tmdb_id>/<kind>')
 def wl_image(type_, tmdb_id, kind):
     """A Watchlist item's stored sheet image. A miss is a fast 404 (never fetched inline: the background worker
-    fills the store); the browser may cache a hit (the service worker never caches /api/)."""
-    from flask import send_file
-    from app.wl_images import valid, CTYPES, VARIANTS
+    fills the store). Sources and phone copies are Cache-Control: no-store (the service worker never caches /api/).
+    No width: the original. ?w=: the phone copy, built from the original when it is not on disk yet — never the
+    raw original bytes. ?r= is the client's cache revision and is ignored here; it does not change `w` parsing."""
+    from app.wl_images import valid, CTYPES, VARIANTS, variant_servable, bytes_servable
     key = valid(type_, tmdb_id, kind)
     w = request.args.get('w')
     if not key or (w is not None and w != str(VARIANTS[kind])):
@@ -13679,16 +13684,28 @@ def wl_image(type_, tmdb_id, kind):
     if not _wl_enabled():
         return jsonify({'error': 'off'}), 404, {'Cache-Control': 'no-store'}
     store = _wl_store()
-    # ?w=: the phone copy; until the worker has made it (a title stored before v349) the stored image itself, never a
-    # 404 (v350: a phone open must not lose its local art to a pending backfill).
-    p = (store.path(key, kind, VARIANTS[kind]) if w else None) or store.path(key, kind)
-    if p is None:
-        return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
+    if w:
+        width = VARIANTS[kind]
+        p = store.ensure_variant(key, kind)
+        if p is None or not variant_servable(p, width):
+            return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
+    else:
+        width = None
+        p = store.path(key, kind)
+        if p is None:
+            return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
     store.touch(p)
-    resp = send_file(str(p), mimetype=CTYPES[p.suffix[1:]], conditional=True, max_age=604800)
-    # A stand-in for a phone copy not made yet is never cached under the copy's URL.
-    stand_in = bool(w) and '@' not in p.name
-    resp.headers['Cache-Control'] = 'no-cache' if stand_in else 'public, max-age=604800, immutable'
+    # Removed between the check and the read: a miss, not a 500. The bytes we send are checked again for `w`
+    # so a phone response cannot be a wider file that landed in that slot.
+    try:
+        data = p.read_bytes()
+    except FileNotFoundError:
+        return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
+    if width is not None and not bytes_servable(data, width):
+        return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
+    resp = Response(data, mimetype=CTYPES[p.suffix[1:]])
+    resp.headers['Cache-Control'] = 'no-store'
+    resp.headers.pop('Expires', None)
     resp.headers['X-Content-Type-Options'] = 'nosniff'
     return resp
 
