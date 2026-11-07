@@ -1,14 +1,15 @@
 /**
  * TvCalendarSheet: the phone home screen's TV calendar, on Luma's own TV data (/api/tv/calendar, the same
  * as Settings > TV > Calendar; Sonarr is not read). v204: Taylor's phone picks: day-nav A (one day at a
- * time with ‹ ›), the Q2a quality chip, T2 air-time headers in ET, and a tap opens the E2 episode page.
+ * time with ‹ ›), the Q2a quality chip, T2 air-time headers in ET, and a tap opens that show's series page.
  *
  * The slide-up shell (grab-handle drag-to-dismiss, tap-outside to close) is unchanged.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { OpenShowContext, TvCalendar } from '@/components/library/TvCalendar';
-import { TvEpisodePage } from '@/components/library/TvEpisodePage';
+import { TvSeriesDetail } from '@/components/library/TvSeriesDetail';
+import { NoticeToast } from '@/components/start/SetupToast';
 import { localDay, weekStart, type Day } from '@/components/library/tvCalendarApi';
 
 const DISMISS_THRESHOLD = 120;
@@ -85,16 +86,30 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
   // --- Day and week (Luma's TV calendar; the day is picked inside TvCalendar's day-nav A) ---
   const [today, setToday] = useState<Day>(() => localDay());
   const [week, setWeek] = useState<Day>(() => weekStart(localDay()));
-  const [ep, setEp] = useState<{ seriesId: number; episodeId: number } | null>(null);
+  const [seriesId, setSeriesId] = useState<number | null>(null);
+  const [toast, setToast] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const savedScroll = useRef(0);
   useEffect(() => {
     if (!open) return;
     const t = localDay();
-    setToday(t); setWeek(weekStart(t)); setEp(null);
+    setToday(t); setWeek(weekStart(t)); setSeriesId(null);
+    savedScroll.current = 0;
   }, [open]);
-  // a tap opens the E2 episode page inside the sheet; back returns to the same day
-  const openEpisode = useCallback((seriesId: number, episodeId?: number | null) => {
-    if (episodeId) setEp({ seriesId, episodeId });
+  // a tap opens the series page inside the sheet; the calendar stays mounted so the day survives Back
+  const openSeries = useCallback((id: number) => {
+    savedScroll.current = scrollRef.current?.scrollTop ?? 0;
+    setSeriesId(id);
   }, []);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (seriesId != null) { el.scrollTop = 0; return; }
+    const y = savedScroll.current;
+    el.scrollTop = y;
+    const id = requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = y; });
+    return () => cancelAnimationFrame(id);
+  }, [seriesId]);
 
   if (phase === 'gone' && !open) return null;
 
@@ -148,17 +163,22 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
         </div>
 
         <div
+          ref={scrollRef}
           data-scroll-container
           className="luma-scroll-y flex-1 px-4"
-          style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
+          style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y', overflowX: 'hidden', overflowY: 'auto', minWidth: 0, maxWidth: '100%' }}
         >
-          {ep ? (
-            <TvEpisodePage key={`${ep.seriesId}/${ep.episodeId}`} seriesId={ep.seriesId} episodeId={ep.episodeId}
-              onBack={() => setEp(null)} />
-          ) : (
-            <OpenShowContext.Provider value={openEpisode}>
+          {toast && <NoticeToast key={toast} text={toast} onDone={() => setToast('')} />}
+          <div style={{ display: seriesId ? 'none' : undefined }} hidden={seriesId != null}>
+            <OpenShowContext.Provider value={openSeries}>
               <TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone reveal={{ id: 'tv-calendar-sheet', landMs: ENTER_DURATION }} />
             </OpenShowContext.Provider>
+          </div>
+          {seriesId != null && (
+            <div data-testid="tv-cal-series" style={{ minWidth: 0, width: '100%', maxWidth: '100%', overflowX: 'hidden' }}>
+              <TvSeriesDetail key={seriesId} seriesId={seriesId} episodeId={null} wide={false} phone
+                onBack={() => setSeriesId(null)} say={setToast} />
+            </div>
           )}
           <div data-scroll-content className="shrink-0" style={{ height: 'calc(var(--luma-end-pad) + 12px)' }} />
         </div>

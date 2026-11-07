@@ -1,5 +1,5 @@
 """v204 (Taylor's phone picks on the home 'TV calendar' sheet): Luma's own TV calendar data (not Sonarr),
-day-nav A, the Q2a quality chip, T2 air-time headers in ET, a tap opens the E2 episode page; and the movie
+day-nav A, the Q2a quality chip, T2 air-time headers in ET, a tap opens the series page; and the movie
 modal's Add to watchlist is prod 1b4ea74's white pill."""
 import pathlib
 import shutil
@@ -23,12 +23,14 @@ def test_sheet_reads_luma_calendar_not_sonarr():
     assert '<QualityChip' not in card and '<Stripe' not in card and 'tv-glass-dot' in card
 
 
-def test_tap_opens_e2_episode_page():
-    assert '<OpenShowContext.Provider value={openEpisode}>' in SHEET
-    assert 'if (episodeId) setEp({ seriesId, episodeId });' in SHEET
-    assert '<TvEpisodePage key={`${ep.seriesId}/${ep.episodeId}`} seriesId={ep.seriesId} episodeId={ep.episodeId}' in SHEET
-    assert 'onBack={() => setEp(null)}' in SHEET
-    # the calendar row calls the context with the episode id
+def test_tap_opens_the_series_page():
+    assert '<OpenShowContext.Provider value={openSeries}>' in SHEET
+    assert 'TvEpisodePage' not in SHEET
+    assert '<TvSeriesDetail key={seriesId} seriesId={seriesId} episodeId={null} wide={false} phone' in SHEET
+    assert 'onBack={() => setSeriesId(null)}' in SHEET
+    # the phone card links to the series route and does not pass an episode id
+    assert 'openShow(seriesId)' in CAL and 'seriesPath(seriesId)' in CAL
+    # desktop cards still open that episode
     assert 'const go = () => openShow(e.series_id, e.episode_id);' in CAL
 
 
