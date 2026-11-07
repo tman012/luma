@@ -103,7 +103,7 @@ describe('web kiosk home (>=1024px)', () => {
     const focusable = container.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"]), [role="button"], input, select, textarea');
     // v215 C2: search is the hero pill after the header (logo + avatar only); the round header button is gone.
     expect(container.querySelector('[data-testid="kiosk-header"] button[aria-label="Search"]')).toBeNull();
-    expect([...focusable].filter(e => !e.closest('[hidden],[inert]')).map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Account', 'Open menu']);   // v243 A1
+    expect([...focusable].filter(e => !e.closest('[hidden],[inert]')).map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Account', 'Search', 'Libraries', 'Explore', 'Calendar', 'Watchlist']);
     const hero = container.querySelector('[data-hero-display-only]') as HTMLElement;
     // The backdrop, plot and genres open nothing; a drag doesn't swipe.
     fireEvent.click(hero);
@@ -250,6 +250,7 @@ describe('v227 R3 on Home: desktop and tablet only, phone unchanged', () => {
     renderHome();
     expect(screen.getByTestId('search-button')).toBeTruthy();
     expect(screen.queryByTestId('r3-search')).toBeNull();
+    expect(screen.queryByTestId('desktop-dock')).toBeNull();
     expect(screen.queryByTestId('home-search-pill')).toBeNull();
   });
 });
