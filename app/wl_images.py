@@ -12,6 +12,9 @@ report() is the measured size of the source and variant files on disk, not an es
 Only watchlist items are stored. Downloads run on one background worker (never inside a request). A failed fetch
 is retried after FAIL_RETRY_S (never remembered for good). Files: <root>/<movie|tv>/<id>/<backdrop|logo>.<ext>.
 A backdrop left by the old w1920 ceiling (no source-original mark) is fetched again once, as the original.
+A phone copy is published by writing a unique temp and atomically replacing the final name, so overlapping
+requests, store instances, and the worker cannot trip over one shared `.part` file. A lost attempt reuses a
+valid winner or misses; it does not raise and it does not serve the raw original.
 Nothing here is cached on any device: responses are Cache-Control: no-store, and the endpoint is under /api/
 (the service worker never caches /api/).
 """
@@ -102,14 +105,35 @@ def variant_bytes(body: bytes, max_w: int, keep_alpha: bool) -> Optional[bytes]:
     return out.getvalue()
 
 
-def variant_servable(path: Path, max_w: int) -> bool:
-    """True when `path` decodes and is at most max_w wide. A phone response must not be the raw original."""
+def bytes_servable(body: bytes, max_w: int) -> bool:
+    """True when `body` decodes and is at most max_w wide. A phone response must not be the raw original."""
     try:
+        from io import BytesIO
         from PIL import Image
-        with Image.open(path) as im:
+        with Image.open(BytesIO(body)) as im:
+            im.load()
             return 0 < im.width <= max_w
     except Exception:
         return False
+
+
+def variant_servable(path: Path, max_w: int) -> bool:
+    """True when `path` decodes and is at most max_w wide. A phone response must not be the raw original."""
+    try:
+        return bytes_servable(path.read_bytes(), max_w)
+    except OSError:
+        return False
+
+
+def _file_sig(path: Path):
+    """Identity of the bytes at `path` now. A refresh replaces the file; a resize started earlier must not
+    publish over the copy made from the new bytes."""
+    st = path.stat()
+    return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+# Patched in tests so overlapping replaces can be forced without replacing os.replace process-wide.
+_atomic_replace = os.replace
 
 
 def _decodable(path: Path) -> bool:
@@ -167,47 +191,127 @@ class WlImageStore:
             return True
         return self._source_mark(key).is_file()
 
+    def _good_variant(self, key: Key, kind: str) -> Optional[Path]:
+        """A phone copy that decodes at the variant width. A file that is missing, unreadable, or too wide is not."""
+        w = VARIANTS[kind]
+        p = self.path(key, kind, w)
+        if p is not None and variant_servable(p, w):
+            return p
+        return None
+
     def _variants_missing(self, key: Key) -> bool:
-        for kind, width in VARIANTS.items():
+        for kind in VARIANTS:
             src = self.path(key, kind)
-            if src and not self.path(key, kind, width) and _decodable(src):
+            if src and self._good_variant(key, kind) is None and _decodable(src):
                 return True
         return False
+
+    def _publish(self, directory: Path, filename: str, body: bytes, keep: Optional[Callable[[], bool]] = None) -> bool:
+        """Atomically publish `body` as `directory/filename`.
+
+        Each attempt has its own temp (`.<filename>.<pid>.<tid>.<ns>.part`), so two callers never share a name:
+        not two requests, not the worker, not a second store on this directory. The replace is atomic on the
+        same filesystem. `keep` is checked after the bytes are on disk and before the replace; a false result
+        (the title was removed, or the source was refreshed) drops this attempt. The temp is always removed.
+        False means this attempt did not publish. It does not mean the final file is absent: another caller
+        may have published a valid one. This never raises for a missing temp or a missing directory.
+        """
+        directory.mkdir(parents=True, exist_ok=True)
+        tmp = directory / f'.{filename}.{os.getpid()}.{threading.get_ident()}.{time.monotonic_ns()}.part'
+        published = False
+        try:
+            tmp.write_bytes(body)
+            if keep is not None and not keep():
+                return False
+            _atomic_replace(tmp, directory / filename)
+            published = True
+            return True
+        except OSError:
+            return False
+        finally:
+            try:
+                if tmp.is_file():
+                    tmp.unlink()
+            except OSError:
+                pass
+            if not published:
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
 
     def _needs_fetch(self, key: Key) -> bool:
         if not all(self.present(key).values()) or not self._backdrop_current(key):
             return True
         return self._variants_missing(key)
 
-    def _make_variant(self, key: Key, kind: str) -> bool:
-        src = self.path(key, kind)
-        if not src:
-            return False
-        w = VARIANTS[kind]
-        body = variant_bytes(src.read_bytes(), w, keep_alpha=kind == 'logo')
-        if body is None:
-            return False
-        ext = _sniff(body) or src.suffix[1:]
-        d = self._dir(key)
+    def _drop_other_exts(self, directory: Path, stem: str, ext: str) -> None:
         for old in CTYPES:
-            o = d / f'{kind}@{w}.{old}'
-            if o.exists() and old != ext:
-                o.unlink()
-        tmp = d / f'.{kind}@{w}.part'
-        tmp.write_bytes(body)
-        os.replace(tmp, d / f'{kind}@{w}.{ext}')
-        return True
+            if old == ext:
+                continue
+            o = directory / f'{stem}.{old}'
+            try:
+                if o.is_file():
+                    o.unlink()
+            except OSError:
+                pass
+
+    def _make_variant(self, key: Key, kind: str) -> bool:
+        """Build the phone copy from the current source. Overlapping callers each publish their own temp.
+
+        A source that changes mid-resize is not published over the newer copy (bounded retries, not a stall).
+        A temp lost to a concurrent remove is a miss for this attempt when no valid winner is left. A file
+        that exists but is too wide is rebuilt. This does not raise FileNotFoundError.
+        """
+        w = VARIANTS[kind]
+        for _attempt in range(3):
+            src = self.path(key, kind)
+            if src is None:
+                return self._good_variant(key, kind) is not None
+            try:
+                sig = _file_sig(src)
+                raw = src.read_bytes()
+                if len(raw) != sig[3] or _file_sig(src) != sig:
+                    continue
+            except OSError:
+                continue
+            body = variant_bytes(raw, w, keep_alpha=kind == 'logo')
+            if body is None:
+                return False
+            ext = _sniff(body) or src.suffix[1:]
+
+            def _same_source(src: Path = src, sig=sig) -> bool:
+                try:
+                    return src.is_file() and _file_sig(src) == sig
+                except OSError:
+                    return False
+
+            if not self._publish(self._dir(key), f'{kind}@{w}.{ext}', body, keep=_same_source):
+                # A refreshed source is retried from the new bytes. A removed source, or a lost temp, is a miss
+                # unless a valid winner is already in place.
+                try:
+                    if src.is_file() and _file_sig(src) != sig:
+                        continue
+                except OSError:
+                    pass
+                return self._good_variant(key, kind) is not None
+            if not _same_source():
+                continue
+            self._drop_other_exts(self._dir(key), f'{kind}@{w}', ext)
+            return self._good_variant(key, kind) is not None
+        return self._good_variant(key, kind) is not None
 
     def ensure_variant(self, key: Key, kind: str) -> Optional[Path]:
-        """The phone copy, built from the stored source when it is not on disk yet. None when it cannot be built.
-        Never a network fetch, and never the raw original."""
-        w = VARIANTS[kind]
-        p = self.path(key, kind, w)
-        if p is not None:
-            return p
-        if not self._make_variant(key, kind):
-            return None
-        return self.path(key, kind, w)
+        """The phone copy, built from the stored source when it is missing or not a valid width.
+
+        None when it cannot be built. Never a network fetch, never the raw original, and never an exception
+        because another caller published or removed the same copy first.
+        """
+        got = self._good_variant(key, kind)
+        if got is not None:
+            return got
+        self._make_variant(key, kind)
+        return self._good_variant(key, kind)
 
     def present(self, key: Key) -> Dict[str, bool]:
         return {k: self.path(key, k) is not None for k in KINDS}
@@ -322,7 +426,7 @@ class WlImageStore:
             return True
         if all(self.present(key).values()) and self._backdrop_current(key):
             for kind in KINDS:
-                if not self.path(key, kind, VARIANTS[kind]):
+                if self.path(key, kind) and self._good_variant(key, kind) is None:
                     self._make_variant(key, kind)
             return True
         try:
@@ -336,7 +440,7 @@ class WlImageStore:
             have = self.path(key, kind)
             stale = kind == 'backdrop' and bool(have) and not self._backdrop_current(key)
             if have and not stale:
-                if not self.path(key, kind, VARIANTS[kind]):
+                if self._good_variant(key, kind) is None:
                     self._make_variant(key, kind)
                 continue
             if not url:
@@ -353,14 +457,17 @@ class WlImageStore:
                     if key not in self._wanted:   # removed while downloading
                         return False
                 d = self._dir(key)
-                d.mkdir(parents=True, exist_ok=True)
-                tmp = d / f'.{kind}.part'
-                tmp.write_bytes(body)
-                os.replace(tmp, d / f'{kind}.{ext}')
-                for old in CTYPES:
-                    prev = d / f'{kind}.{old}'
-                    if prev.exists() and old != ext:
-                        prev.unlink()
+
+                def _still_wanted() -> bool:
+                    with self._lock:
+                        return key in self._wanted
+
+                if not self._publish(d, f'{kind}.{ext}', body, keep=_still_wanted):
+                    with self._lock:
+                        if key not in self._wanted:
+                            return False
+                    raise OSError('source publish lost')
+                self._drop_other_exts(d, kind, ext)
                 self._make_variant(key, kind)
                 if kind == 'backdrop':
                     self._source_mark(key).write_bytes(b'')

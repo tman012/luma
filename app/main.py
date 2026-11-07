@@ -13676,8 +13676,7 @@ def wl_image(type_, tmdb_id, kind):
     fills the store). Sources and phone copies are Cache-Control: no-store (the service worker never caches /api/).
     No width: the original. ?w=: the phone copy, built from the original when it is not on disk yet — never the
     raw original bytes. ?r= is the client's cache revision and is ignored here; it does not change `w` parsing."""
-    from flask import send_file
-    from app.wl_images import valid, CTYPES, VARIANTS, variant_servable
+    from app.wl_images import valid, CTYPES, VARIANTS, variant_servable, bytes_servable
     key = valid(type_, tmdb_id, kind)
     w = request.args.get('w')
     if not key or (w is not None and w != str(VARIANTS[kind])):
@@ -13691,11 +13690,20 @@ def wl_image(type_, tmdb_id, kind):
         if p is None or not variant_servable(p, width):
             return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
     else:
+        width = None
         p = store.path(key, kind)
         if p is None:
             return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
     store.touch(p)
-    resp = send_file(str(p), mimetype=CTYPES[p.suffix[1:]], conditional=False, max_age=0)
+    # Removed between the check and the read: a miss, not a 500. The bytes we send are checked again for `w`
+    # so a phone response cannot be a wider file that landed in that slot.
+    try:
+        data = p.read_bytes()
+    except FileNotFoundError:
+        return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
+    if width is not None and not bytes_servable(data, width):
+        return jsonify({'error': 'not stored'}), 404, {'Cache-Control': 'no-store'}
+    resp = Response(data, mimetype=CTYPES[p.suffix[1:]])
     resp.headers['Cache-Control'] = 'no-store'
     resp.headers.pop('Expires', None)
     resp.headers['X-Content-Type-Options'] = 'nosniff'

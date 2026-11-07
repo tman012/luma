@@ -2,6 +2,7 @@
 import os
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -544,3 +545,330 @@ def test_revisioned_urls_route_no_store_and_are_not_the_immutable_ones(test_app,
     assert Image.open(BytesIO(logo.data)).size[0] == 300
     assert c.get(f'{legacy}?r={rev}&w=780').status_code == 400
     assert c.get(f'{legacy}?r={rev}&w=1920').status_code == 400
+
+
+# concurrent phone-copy publication -------------------------------------------------------------------------------
+def _jpeg_rgb(w, h, rgb):
+    from io import BytesIO
+    from PIL import Image
+    b = BytesIO(); Image.new('RGB', (w, h), rgb).save(b, 'JPEG', quality=95); return b.getvalue()
+
+
+def _stored_pair(tmp_path):
+    """A wide backdrop and a translucent logo, already on disk, with no network left to do."""
+    backdrop = _jpeg_rgb(1600, 900, (10, 20, 30))
+    logo = _png(600, 200)
+    s, calls = make(tmp_path, download=lambda u: backdrop if u.endswith('.jpg') else logo)
+    s.sync('movie', [41]); s.drain()
+    return s, calls, ('movie', 41), backdrop, logo
+
+
+def _drop_variants(s, key):
+    for kind, width in w.VARIANTS.items():
+        p = s.path(key, kind, width)
+        if p is not None:
+            p.unlink()
+
+
+def _parts(root):
+    return [p for p in Path(root).rglob('*') if p.is_file() and p.name.endswith('.part')]
+
+
+def _assert_pair(s, key, backdrop, logo):
+    from PIL import Image
+    assert s.path(key, 'backdrop').read_bytes() == backdrop
+    assert s.path(key, 'logo').read_bytes() == logo
+    b = Image.open(s.path(key, 'backdrop', 1280))
+    assert b.size == (1280, 720)
+    lg = Image.open(s.path(key, 'logo', 300))
+    assert lg.mode == 'RGBA' and lg.size[0] == 300
+    px = lg.getpixel((4, 8))
+    assert 0 < px[3] < 200
+    info = s.report()
+    assert info['bytes'] == s.size()
+    assert info['bytes'] == info['source_bytes'] + info['variant_bytes']
+    assert _parts(s.root) == []
+
+
+def _run_together(n, fn):
+    errors = []
+    lock = threading.Lock()
+
+    def run():
+        try:
+            fn()
+        except Exception as e:
+            with lock:
+                errors.append(f'{type(e).__name__}: {e}')
+
+    threads = [threading.Thread(target=run) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return errors
+
+
+def test_a_too_wide_variant_is_rebuilt_and_the_original_stays(tmp_path):
+    from PIL import Image
+    s, _, key, backdrop, _logo = _stored_pair(tmp_path)
+    slot = s.path(key, 'backdrop', 1280)
+    slot.write_bytes(backdrop)   # the raw original parked in the phone slot
+    assert Image.open(slot).size[0] > 1280
+    p = s.ensure_variant(key, 'backdrop')
+    assert p is not None and Image.open(p).size == (1280, 720)
+    assert s.path(key, 'backdrop').read_bytes() == backdrop
+    assert _parts(s.root) == []
+
+
+def test_overlapping_replaces_use_distinct_temps(tmp_path, monkeypatch):
+    """The old bug was one shared `.{kind}@{width}.part`. Both callers must still have their own temp at the
+    moment of replace, and both replaces must succeed."""
+    from PIL import Image
+    s, _, key, backdrop, logo = _stored_pair(tmp_path)
+    _drop_variants(s, key)
+    n = 8
+    gate = threading.Barrier(n)
+    names = []
+    real = w._atomic_replace
+
+    def blocked(src, dst):
+        src_p = Path(src)
+        assert src_p.is_file() and src_p.stat().st_size > 0
+        names.append(src_p.name)
+        gate.wait(5)
+        assert src_p.is_file(), 'another caller consumed this temp'
+        return real(src, dst)
+
+    monkeypatch.setattr(w, '_atomic_replace', blocked)
+    errors = _run_together(n, lambda: s.ensure_variant(key, 'backdrop'))
+    assert errors == []
+    assert len(names) == n and len(set(names)) == n
+    assert all(name.startswith('.backdrop@1280.') and name.endswith('.part') for name in names)
+    assert Image.open(s.path(key, 'backdrop', 1280)).size == (1280, 720)
+    monkeypatch.setattr(w, '_atomic_replace', real)
+    s.ensure_variant(key, 'logo')
+    _assert_pair(s, key, backdrop, logo)
+
+
+def test_two_threads_forty_times_and_eight_threads_fifteen_times(tmp_path):
+    """The reported race: 2 threads failed 9/40 trials and 8 threads failed 15/15, winner left intact.
+    Overlap here must not raise, and must not miss, corrupt, or resize the original."""
+    s, _, key, backdrop, logo = _stored_pair(tmp_path)
+    for threads, trials in ((2, 40), (8, 15)):
+        for _ in range(trials):
+            _drop_variants(s, key)
+            errors = _run_together(threads, lambda: (
+                s.ensure_variant(key, 'backdrop'), s.ensure_variant(key, 'logo')))
+            assert errors == [], (threads, errors)
+        _assert_pair(s, key, backdrop, logo)
+
+
+def test_two_stores_and_the_worker_publish_the_same_variant(tmp_path, monkeypatch):
+    s, calls, key, backdrop, logo = _stored_pair(tmp_path)
+    other = w.WlImageStore(s._resolve, s._download, root=s.root, cap=s.cap, clock=s._clock, start_worker=False)
+    _drop_variants(s, key)
+    n = len(calls['download'])
+    errors = _run_together(8, lambda: (s.ensure_variant(key, 'backdrop'), other.ensure_variant(key, 'logo')))
+    assert errors == []
+    # Hold the worker inside the resize, then let request threads publish the same slots before it does.
+    entered = threading.Event()
+    release = threading.Event()
+    real = w.variant_bytes
+    state = {'n': 0}
+
+    def slow(body, max_w, keep_alpha, _real=real, _state=state, _entered=entered, _release=release):
+        _state['n'] += 1
+        if _state['n'] == 1:
+            _entered.set()
+            assert _release.wait(5)
+        return _real(body, max_w, keep_alpha)
+
+    monkeypatch.setattr(w, 'variant_bytes', slow)
+    s._start = True
+    _drop_variants(s, key)
+    s.want(key)
+    assert entered.wait(5)
+    errors = _run_together(8, lambda: (other.ensure_variant(key, 'backdrop'), s.ensure_variant(key, 'logo')))
+    release.set()
+    deadline = time.time() + 5
+    while time.time() < deadline and (s._good_variant(key, 'backdrop') is None or s._good_variant(key, 'logo') is None):
+        time.sleep(0.02)
+    if s._worker is not None:
+        s._q.put(None)
+        s._worker.join(timeout=2)
+    assert errors == []
+    assert len(calls['download']) == n, 'overlap must not download the title again'
+    _assert_pair(s, key, backdrop, logo)
+
+
+def test_a_refresh_during_resize_does_not_publish_the_old_copy(tmp_path, monkeypatch):
+    from PIL import Image
+    old = _jpeg_rgb(1600, 900, (220, 10, 10))
+    new = _jpeg_rgb(1600, 900, (10, 10, 220))
+    s, _ = make(tmp_path, download=lambda u: old if u.endswith('.jpg') else _png(600, 200))
+    key = ('movie', 41)
+    s.sync('movie', [41]); s.drain()
+    s.path(key, 'backdrop', 1280).unlink()
+    entered = threading.Event()
+    release = threading.Event()
+    real = w.variant_bytes
+    state = {'n': 0}
+
+    def slow(body, max_w, keep_alpha):
+        state['n'] += 1
+        if state['n'] == 1:
+            entered.set()
+            assert release.wait(5)
+        return real(body, max_w, keep_alpha)
+
+    monkeypatch.setattr(w, 'variant_bytes', slow)
+    held = {}
+
+    def run():
+        try:
+            held['path'] = s.ensure_variant(key, 'backdrop')
+        except Exception as e:
+            held['err'] = e
+
+    t = threading.Thread(target=run)
+    t.start()
+    assert entered.wait(5)
+    src = s.path(key, 'backdrop')
+    tmp = src.with_name('.backdrop.refresh')
+    tmp.write_bytes(new)
+    os.replace(tmp, src)
+    release.set()
+    t.join(5)
+    assert not t.is_alive()
+    assert held.get('err') is None
+    assert s.path(key, 'backdrop').read_bytes() == new
+    im = Image.open(s.path(key, 'backdrop', 1280))
+    px = im.getpixel((8, 8))
+    assert px[2] > px[0] + 40, px   # the blue refresh, not the red bytes we were resizing
+    assert im.size == (1280, 720)
+    assert _parts(s.root) == []
+
+
+def test_remove_during_resize_is_a_miss_and_leaves_no_temp(tmp_path, monkeypatch):
+    s, _, key, backdrop, _logo = _stored_pair(tmp_path)
+    _drop_variants(s, key)
+    entered = threading.Event()
+    release = threading.Event()
+    real = w.variant_bytes
+
+    def slow(body, max_w, keep_alpha):
+        entered.set()
+        assert release.wait(5)
+        return real(body, max_w, keep_alpha)
+
+    monkeypatch.setattr(w, 'variant_bytes', slow)
+    held = {}
+
+    def run():
+        try:
+            held['path'] = s.ensure_variant(key, 'backdrop')
+        except Exception as e:
+            held['err'] = e
+
+    t = threading.Thread(target=run)
+    t.start()
+    assert entered.wait(5)
+    s.remove(key)
+    release.set()
+    t.join(5)
+    assert held.get('err') is None
+    assert held.get('path') is None
+    assert not t.is_alive()
+    assert s.path(key, 'backdrop') is None
+    assert _parts(s.root) == []
+    assert not (s.root / 'movie' / '41').exists()
+
+
+def test_cap_still_bounds_a_store_published_under_overlap(tmp_path):
+    from PIL import Image
+    backdrop = _jpeg_rgb(1600, 900, (10, 20, 30))
+    logo = _png(600, 200)
+    s, _ = make(tmp_path, cap=10**12, download=lambda u: backdrop if u.endswith('.jpg') else logo)
+    s.sync('movie', [1, 2, 3, 4]); s.drain()
+    originals = {i: s.path(('movie', i), 'backdrop').read_bytes() for i in (1, 2, 3, 4)}
+    assert all(raw == backdrop for raw in originals.values())
+    s.cap = max(1, s.report()['bytes'] // 2)
+
+    def churn():
+        for i in (1, 2, 3, 4):
+            _drop_variants(s, ('movie', i))
+            s.ensure_variant(('movie', i), 'backdrop')
+            s.ensure_variant(('movie', i), 'logo')
+
+    errors = _run_together(4, churn)
+    extra = _run_together(2, s.enforce_cap)
+    assert errors == [] and extra == []
+    s.enforce_cap()
+    assert s.report()['bytes'] <= s.cap
+    assert s.report()['bytes'] == s.size()
+    for i, raw in originals.items():
+        p = s.path(('movie', i), 'backdrop')
+        if p is None:
+            continue
+        assert p.read_bytes() == raw
+        v = s.path(('movie', i), 'backdrop', 1280)
+        if v is not None:
+            assert Image.open(v).size[0] <= 1280
+    assert _parts(s.root) == []
+
+
+def test_concurrent_phone_requests_are_no_store_and_not_500(test_app, tmp_path, monkeypatch):
+    from io import BytesIO
+    from PIL import Image
+    s, _, key, backdrop, logo = _stored_pair(tmp_path)
+    monkeypatch.setattr(m, '_wl_store_obj', s)
+    _drop_variants(s, key)
+    for threads, url, size in (
+        (2, '/api/wl-image/movie/41/backdrop?r=2&w=1280', (1280, 720)),
+        (8, '/api/wl-image/movie/41/backdrop?r=2&w=1280', (1280, 720)),
+        (8, '/api/wl-image/movie/41/logo?w=300&r=2', None),
+    ):
+        _drop_variants(s, key)
+        statuses = []
+        lock = threading.Lock()
+
+        def hit(url=url, size=size):
+            r = test_app.test_client().get(url)
+            with lock:
+                statuses.append((r.status_code, r.headers.get('Cache-Control'), r.data, size))
+
+        errors = _run_together(threads, hit)
+        assert errors == [], errors
+        assert statuses and all(code == 200 and cache == 'no-store' for code, cache, _data, _size in statuses)
+        for _code, _cache, data, expected in statuses:
+            im = Image.open(BytesIO(data))
+            if expected:
+                assert im.size == expected and data != backdrop
+            else:
+                assert im.mode == 'RGBA' and im.size[0] == 300
+                assert 0 < im.getpixel((4, 8))[3] < 200
+                assert data != logo
+        assert s.path(key, 'backdrop').read_bytes() == backdrop
+        assert s.path(key, 'logo').read_bytes() == logo
+        assert _parts(s.root) == []
+
+
+def test_a_file_removed_before_the_response_is_read_is_404(test_app, tmp_path, monkeypatch):
+    s, _, _key, _backdrop, _logo = _stored_pair(tmp_path)
+    monkeypatch.setattr(m, '_wl_store_obj', s)
+    real = w.variant_servable
+    seen = {'n': 0}
+
+    def yank(path, max_w):
+        ok = real(path, max_w)
+        seen['n'] += 1
+        # The handler checks the file again after ensure_variant. Unlink on that check so the read misses.
+        if ok and seen['n'] >= 2:
+            path.unlink()
+        return ok
+
+    monkeypatch.setattr(w, 'variant_servable', yank)
+    r = test_app.test_client().get('/api/wl-image/movie/41/backdrop?r=2&w=1280')
+    assert r.status_code == 404 and r.headers['Cache-Control'] == 'no-store'
+    assert s.path(('movie', 41), 'backdrop').read_bytes() == _backdrop
