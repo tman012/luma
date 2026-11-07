@@ -249,6 +249,8 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
             plan.append((f, season, eps))
     if not plan:
         raise mover.Refused(NO_EPISODES)
+    # A grab row places only the episodes it named. A torrent with no row is unchanged.
+    plan = _limit_plan(s['id'], plan, str(t.get('hash') or ''), name)
     folder = _show_folder(s)
     owner = mover._owner_of(lib_root)
     mode = 'hardlink' if data.get('transfer') == 'hardlink' else 'copy'
@@ -515,26 +517,96 @@ ALREADY_IMPORTED = 'already imported'
 UNMONITORED = 'episode not monitored'
 
 
-def _no_import(h: str, name: Optional[str]) -> Optional[str]:
-    """v184 (PM): why the watcher must not import this torrent: its grab row is already closed as imported
-    (by an earlier pass or by hand; the file may have been deleted on purpose since), or every episode it
-    was grabbed for is unmonitored now (or the show is). None: import it."""
+def _grab_for(conn, h: str, name: Optional[str]):
+    """The grab row for this torrent. Hash only for a closed row; an open row may also match its exact
+    release name when qBittorrent's hash differs (v185). The row is Luma's record, not the client's category."""
+    g = conn.execute('SELECT * FROM grabs WHERE hash = ?', (h,)).fetchone()
+    if g is None and name:
+        g = conn.execute(f"SELECT * FROM grabs WHERE release_title = ? AND state IN ({','.join('?' * len(OPEN_GRABS))})"
+                         ' ORDER BY grabbed_at DESC LIMIT 1', (name, *OPEN_GRABS)).fetchone()
+    return dict(g) if g is not None else None
+
+
+def _open_manual(g: Optional[Dict[str, Any]]) -> bool:
+    """A still-open explicit request: origin manual, and episode ids Luma stored when it was grabbed.
+    A qBittorrent category or a release name is not a request. Imported, partial, failed, skipped and
+    manual_needed rows are not open, so they cannot authorize another import."""
+    return bool(g) and g.get('origin') == 'manual' and g.get('state') in OPEN_GRABS and bool(_want(g))
+
+
+def _monitored_n(conn, ids: List[int]) -> int:
+    """Wanted episodes that are monitored on a monitored show. Zero when the show or every episode is off."""
+    if not ids:
+        return 0
+    return conn.execute(f"SELECT COUNT(*) AS n FROM episodes e JOIN series s ON s.id = e.series_id"
+                        f" WHERE e.id IN ({','.join('?' * len(ids))}) AND e.monitored = 1 AND s.monitored = 1",
+                        ids).fetchone()['n']
+
+
+def _unmonitored_release(name: Optional[str]) -> bool:
+    """True when the release name resolves to episodes of one library show and none of them are monitored
+    on a monitored show. Unresolved names are left to the import (no show, or no episode in the file)."""
+    if not name:
+        return False
+    show = _series_for(name)
+    if not show:
+        return False
+    season, nums = _episodes(show['id'], name, name)
+    if not nums:
+        return False
+    ids = _ids(show['id'], season, nums)
+    if not ids:
+        return False
     with tv_store.connect() as conn:
-        g = conn.execute('SELECT * FROM grabs WHERE hash = ?', (h,)).fetchone()
-        if g is None and name:
-            # v185 (Reviewer b): a closed row is matched by its hash only; the name fallback is for open rows
-            g = conn.execute(f"SELECT * FROM grabs WHERE release_title = ? AND state IN ({','.join('?' * len(OPEN_GRABS))})"
-                             ' ORDER BY grabbed_at DESC LIMIT 1', (name, *OPEN_GRABS)).fetchone()
+        return _monitored_n(conn, ids) == 0
+
+
+def _limit_plan(sid: int, plan: List[Tuple[Any, int, List[int]]], h: str, name: str):
+    """Files this torrent may place. A grab row places only episodes it lists, so a pack does not import
+    episodes the request did not name. A torrent with no such row is the category watch and is unchanged.
+    Raises Refused(NO_EPISODES) when a grab names episodes and none of the files are only those episodes,
+    before any transfer."""
+    with tv_store.connect() as conn:
+        g = _grab_for(conn, (h or '').lower(), name)
+    wanted = set(_want(g)) if g and _want(g) else None
+    if wanted is None:
+        return plan
+    kept = []
+    for item in plan:
+        _f, season, nums = item
+        ids = _ids(sid, season, nums)
+        if ids and set(ids) <= wanted:
+            kept.append(item)
+    if not kept:
+        raise mover.Refused(NO_EPISODES)
+    if len(kept) != len(plan):
+        logger.info('TV import: %s importing %d of %d episode file(s)', name, len(kept), len(plan))
+    return kept
+
+
+def _no_import(h: str, name: Optional[str]) -> Optional[str]:
+    """Why the watcher must not import this torrent, or None to import it.
+
+    A grab that is not still downloading or importing stays closed (imported, partial, failed, skipped, or
+    manual_needed; the file may have been deleted on purpose since). Monitoring governs automatic and
+    upgrade grabs: when every grabbed episode is unmonitored, or the show is, the torrent waits. An open
+    manual grab with episode ids is the owner's request and is not refused for that. A category or a
+    release name is not that request. With no grab row, the category watch is unchanged."""
+    with tv_store.connect() as conn:
+        g = _grab_for(conn, h, name)
         if g is None:
             return None
-        if g['state'] in ('imported', 'partial'):
+        # imported/partial, and any other row that is no longer an open request (failed, skipped,
+        # manual_needed). Reopening is an explicit new grab, which sets the row back to downloading.
+        if g['state'] not in OPEN_GRABS:
             return ALREADY_IMPORTED
+        if _open_manual(g):
+            return None
         ids = _want(g)
-        if ids:
-            on = conn.execute(f"SELECT COUNT(*) AS n FROM episodes e JOIN series s ON s.id = e.series_id"
-                              f" WHERE e.id IN ({','.join('?' * len(ids))}) AND e.monitored = 1 AND s.monitored = 1", ids).fetchone()['n']
-            if not on:
-                return UNMONITORED
+        if ids and not _monitored_n(conn, ids):
+            return UNMONITORED
+        if not ids and _unmonitored_release(name):
+            return UNMONITORED
     return None
 
 
@@ -672,7 +744,7 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                     _save(h, auto_retried=True)
                     logger.info('TV import: %s retried once (free space grew by %d bytes)', t.get('name'), grew)
                 why = _no_import(h, t.get('name'))
-                if why:                                       # v184 (PM): never again, never for an unmonitored episode
+                if why:                                       # closed rows stay closed; automatic grabs wait while unmonitored
                     if why == ALREADY_IMPORTED:
                         _save(h, state='refused', error=why, at=now, name=t.get('name'))
                     elif st.get('error') != why:
