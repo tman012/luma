@@ -195,6 +195,10 @@ export function MovieDetailModal({
   };
 
   const { isTvMode } = useTVMode();
+  useEffect(() => {
+    document.documentElement.dataset.detailMounted = '1';
+    return () => { delete document.documentElement.dataset.detailMounted; };
+  }, []);
 
   if (phase === 'gone') return null;
 

@@ -192,8 +192,10 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
     start();
   }, [phase, go]);
 
-  // Closed until the slide may start: no portal, no scrim, nothing that looks like a detail sheet.
-  if (phase === 'gone' || (!go && !entered.current)) return null;
+  // Closed until the slide may start, and closed again if readiness drops (a reload).
+  // `entered` must reset or the next open skips its slide and a held reload stays on screen.
+  if (!go) entered.current = false;
+  if (phase === 'gone' || !go) return null;
   return createPortal(
     <div className="luma-fullscreen luma-bleed"
       data-modal={name}

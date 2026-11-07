@@ -85,6 +85,7 @@ describe('a hidden detail open is replaced, not stacked', () => {
     fireEvent.click(screen.getByText('Open B'));
     await act(async () => { await vi.advanceTimersByTimeAsync(SHEET_OPEN_BOUND_MS + SHEET_EXIT_MS + 80); });
     expect(document.querySelector('[data-modal="MovieDetailModal"]')).toBeNull();
+    expect(document.documentElement.dataset.detailMounted).toBeUndefined();
     expect(screen.queryByText('The Matrix')).toBeNull();
     expect(screen.queryByText('Pulp Fiction')).toBeNull();
     expect(matrixFetches()).toBe(before);
