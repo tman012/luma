@@ -236,7 +236,7 @@ describe('startup and background refresh', () => {
     expect(html).toContain('Loading\u2026');
     expect(html).toContain('#262a66 0%, #15102a 55%, #0a0818 100%');
     expect(html).toContain('prefers-reduced-motion: reduce');
-    expect(src('components/start/StartUI.tsx')).toContain('.luma-spin{animation:none}');
+    expect(src('components/start/StartUI.tsx')).toContain('.luma-spin,.luma-start-fade{animation:none}');
     expect(src('main.tsx')).toContain("addEventListener('luma:content-ready'");
     expect(src('main.tsx')).not.toMatch(/requestAnimationFrame\(\(\) => \{\s*document\.getElementById\('splash'\)/);
     expect(src('App.tsx')).toContain('signalContentReady');

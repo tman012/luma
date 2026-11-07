@@ -112,7 +112,12 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     const chosen = artIn ? art! : altIn ? alt! : null;
     setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: chosen, artDone: true });
   }, [art, artOk, alt, altOk, artSettled, present, logo, logoOk, logoSettled, cur, openKey]);
-  const logoFailed = useCallback(() => setSt(s => (s.key === openKey && s.title === 'logo' ? { ...s, title: 'text', logo: null } : s)), [openKey]);
+  const logoFailed = useCallback(() => setSt(s => {
+    if (!(s.key === openKey && s.title === 'logo')) return s;
+    // The latch already decoded this URL. A later <img> error must not swap the title.
+    if (s.logo && isDecoded(s.logo)) return s;
+    return { ...s, title: 'text', logo: null };
+  }), [openKey]);
   // v346: the latch already required this exact logo URL to decode, so the text hides in the latch commit itself (no
   // second render: v345's ref/latch setState re-rendered the whole sheet in the reveal commit and the phone backdrop
   // painted a frame or more after the content, Tester Escape from L.A. 390). Only a logo <img> that is missing or not

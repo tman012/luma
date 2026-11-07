@@ -23,12 +23,8 @@ createRoot(document.getElementById('root')!).render(
 // The startup splash stays until the app has real content, a truthful error, or a
 // sign-in screen. A full refresh shows it again because the document reloads.
 window.addEventListener('luma:content-ready', () => {
-  const splash = document.getElementById('splash');
-  if (!splash || splash.classList.contains('hide')) return;
-  const reduce = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  if (reduce) { splash.remove(); return; }
-  splash.classList.add('hide');
-  setTimeout(() => splash.remove(), 400);
+  // Remove immediately. A fade left the loader painted over the screen that was already ready.
+  document.getElementById('splash')?.remove();
 });
 
 // =============================================================================

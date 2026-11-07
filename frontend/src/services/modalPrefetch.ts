@@ -519,6 +519,7 @@ export async function openWhenReady(
   // A sheet already on screen ignores further taps. One that has not appeared yet is replaced:
   // A→B→C must not let an older title reveal.
   if (pending && !!document.querySelector(SHEET_SEL)) return;
+  const replacing = pending;
   const mine = ++openGen;
   stopWatch?.();
   stopWatch = null;
@@ -537,6 +538,9 @@ export async function openWhenReady(
   const seed = colorsFromImage(img);
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);
   shell = card ? { title: tapTitle(card), year: tapYear(card), poster: img?.currentSrc || img?.src || null, at: now(), owned: tapOwned(card, ratingKey), plex: !!ratingKey } : null;
+  // Drop a modal that is mounted but not on screen before this open waits a tick, so the
+  // hidden title cannot latch and the host cannot stack it under the new one.
+  if (replacing) window.dispatchEvent(new Event('luma:replace-pending-modal'));
   const cardWasConnected = !!card?.isConnected;
   if (card) { if (pressed && pressed !== card) release(); pressed = card; card.setAttribute('data-pressed', 'true'); holdFor(card, SHEET_OPEN_BOUND_MS); }
   // The art first (v341l): its request is queued before this open's detail calls, so a slow TMDb holding the

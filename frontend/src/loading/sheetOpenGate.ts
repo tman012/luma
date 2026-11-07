@@ -19,6 +19,16 @@ import { SHEET_PRIORITY_MS } from '@/loading/sheetPriority';
 
 export const SHEET_OPEN_BOUND_MS = SHEET_PRIORITY_MS;
 
+const DETAIL_SHEET = '[data-modal="MovieDetailModal"], [data-modal="TvDetailModal"]';
+const PERSON_SHEET = '[data-modal="PersonDetailModal"]';
+
+/** True only when that surface is actually portaled. A mounted modal whose sheet is still
+ *  closed is not a surface to return to. */
+export function detailSurfaceOpen(which: 'detail' | 'person' = 'detail'): boolean {
+  if (typeof document === 'undefined') return false;
+  return !!document.querySelector(which === 'person' ? PERSON_SHEET : DETAIL_SHEET);
+}
+
 export function detailSheetReady(
   loading: boolean, error: boolean, hasDetail: boolean, title: string | null | undefined,
   hero: 'hold' | 'logo' | 'text', ownedKnown = true,

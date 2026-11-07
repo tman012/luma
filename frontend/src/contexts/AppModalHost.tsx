@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { ModalHostContext, type ModalOpenOptions } from './ModalHostContext';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { MOTION } from '@/theme/motion';
+import { detailSurfaceOpen } from '@/loading/sheetOpenGate';
 import { MovieDetailModal } from '@/components/media/MovieDetailModal';
 import { TvDetailModal } from '@/components/media/TvDetailModal';
 import { PersonDetailModal } from '@/components/media/PersonDetailModal';
@@ -50,6 +51,11 @@ export function AppModalHost({ children }: { children: ReactNode }) {
   // Modal stack mirror for the popstate handler (avoids stale closures).
   const stackRef = useRef(stack);
   stackRef.current = stack;
+  useEffect(() => {
+    const onReplace = () => { if (!detailSurfaceOpen()) setTarget(null); };
+    window.addEventListener('luma:replace-pending-modal', onReplace);
+    return () => window.removeEventListener('luma:replace-pending-modal', onReplace);
+  }, []);
   // Nested UI (Sources sheet, etc.) can consume system/gesture back first.
   const nestedBackHandlerRef = useRef<(() => boolean) | null>(null);
   const registerBackHandler = useCallback((handler: (() => boolean) | null) => {
@@ -64,9 +70,10 @@ export function AppModalHost({ children }: { children: ReactNode }) {
     // Unless this is an arrival from outside the app, which replaces.
     if (opts.replaceStack) {
       setStack([]);
-    } else if (target || personTarget) {
+    } else if ((target && detailSurfaceOpen()) || (personTarget && detailSurfaceOpen('person'))) {
       // Drilling from More Like This: remember to reopen Similar when this
-      // movie is restored from the stack.
+      // movie is restored from the stack. A modal that has not portaled its
+      // sheet yet is replaced, not nested.
       const stackedTarget = target && opts.origin === 'similar_movies'
         ? { ...target, restoreSimilar: true }
         : target;
@@ -81,7 +88,7 @@ export function AppModalHost({ children }: { children: ReactNode }) {
     console.log('[MODAL OPEN]', { mode, source: opts.origin ?? 'unknown', mediaType: 'tv', tmdbId: opts.tmdbId, ratingKey: opts.ratingKey });
     if (opts.replaceStack) {
       setStack([]);
-    } else if (target || personTarget) {
+    } else if ((target && detailSurfaceOpen()) || (personTarget && detailSurfaceOpen('person'))) {
       setStack(s => [...s, { target, personTarget }]);
     }
     setTarget({ ...opts, mediaType: 'tv' });

@@ -54,7 +54,9 @@ function currentY(el: HTMLElement): number {
  *  An elapsed open budget must not slide in a color wash or a partial sheet. Latched: it does not go back. */
 export function useSheetGo(composed: boolean): boolean {
   const [go, setGo] = useState(composed);
-  useLayoutEffect(() => { if (composed) setGo(true); }, [composed]);
+  // Follow readiness both ways. A latched `true` kept a Fix Match reload on screen
+  // with the hero held and the previous meta still showing.
+  useLayoutEffect(() => { setGo(composed); }, [composed]);
   return go;
 }
 

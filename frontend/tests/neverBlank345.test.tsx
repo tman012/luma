@@ -136,12 +136,13 @@ for (const mode of ['compact', 'expanded'] as const) {
         expect(shows === 'logo' || shows === s.title, `hero shows "${shows}"`).toBe(true);
         if (name !== 'slow details (2s)') expect(shows).toBe(s.title);
       });
-      it(`${s.name}: a logo <img> that errors in the DOM leaves the text title`, async () => {
+      it(`${s.name}: a decoded logo stays the logo if its <img> errors after the reveal`, async () => {
         layoutMode.mode = mode;
         await open(s, s.title);
         const img = document.querySelector<HTMLImageElement>('img[src*="logo.png"]');
-        if (img) act(() => { fireEvent.error(img); });
-        expect(heroShows()).toBe(s.title);
+        expect(img).not.toBeNull();
+        act(() => { fireEvent.error(img!); });
+        expect(heroShows()).toBe('logo');
       });
     }
   });
