@@ -46,8 +46,10 @@ describe('Home', () => {
     const fetchMock = vi.fn(() => d.promise);
     vi.stubGlobal('fetch', fetchMock);
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
-    expect(screen.getByTestId('home-skeleton')).toBeTruthy();
+    expect(screen.getByTestId('startup-loading').textContent).toContain('Loading\u2026');
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
     expect(screen.queryByTestId('home-rails')).toBeNull();
+    expect(screen.queryByText('Nothing here yet')).toBeNull();
     // v260: the Home row's Storage pill reads /api/storage/downloads too; Home itself asks once.
     const homeCalls = () => fetchMock.mock.calls.filter(c => String((c as unknown[])[0]).includes('/api/home'));
     expect(homeCalls()).toHaveLength(1);
@@ -139,11 +141,11 @@ describe('Home', () => {
     expect(box.textContent).toBe("Can't reach PlexRetry");
   });
 
-  it("gives up on the skeleton after 7 s", async () => {
+  it("gives up on the startup loading screen after 7 s", async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
-    expect(screen.getByTestId('home-skeleton')).toBeTruthy();
+    expect(screen.getByTestId('startup-loading')).toBeTruthy();
     await act(async () => { vi.advanceTimersByTime(6900); });
     expect(screen.queryByTestId('home-down')).toBeNull();
     await act(async () => { vi.advanceTimersByTime(200); });
@@ -156,7 +158,7 @@ describe('Home', () => {
     vi.stubGlobal('fetch', vi.fn(() => d.promise));
     const seen: string[] = [];
     const obs = new MutationObserver(() => {
-      const s = screen.queryByTestId('home-skeleton') ? 'skeleton' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
+      const s = screen.queryByTestId('startup-loading') ? 'loading' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
       if (seen[seen.length - 1] !== s) seen.push(s);
     });
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
@@ -165,7 +167,7 @@ describe('Home', () => {
     await act(async () => { d.resolve(json(HOME)); });
     await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
     obs.disconnect();
-    expect(seen.filter(x => x !== 'skeleton')).toEqual(['rails:3']);       // never a partial set of rails
+    expect(seen.filter(x => x !== 'loading')).toEqual(['rails:3']);       // never a partial set of rails
     expect(screen.queryByTestId('home-skeleton')).toBeNull();
   });
 
@@ -208,7 +210,8 @@ describe('Home', () => {
       render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
       await waitFor(() => expect(made.length).toBeGreaterThan(0));
       await act(async () => { await new Promise(r => setTimeout(r, 50)); });
-      expect(screen.getByTestId('home-skeleton')).toBeTruthy();
+      expect(screen.getByTestId('startup-loading')).toBeTruthy();
+      expect(screen.queryByTestId('home-skeleton')).toBeNull();
       expect(screen.queryByTestId('home-rails')).toBeNull();
       const srcs = made.map(m => m.src);
       expect(srcs).toContain('/api/img/plex?url=art10');          // Continue watching decodes its art (what WideCard shows)
@@ -228,9 +231,10 @@ describe('Home', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(10); });
       expect(made.length).toBeGreaterThan(0);
       await act(async () => { await vi.advanceTimersByTimeAsync(1480); });
-      expect(screen.getByTestId('home-skeleton')).toBeTruthy();
+      expect(screen.getByTestId('startup-loading')).toBeTruthy();
       await act(async () => { await vi.advanceTimersByTimeAsync(30); });
       expect(screen.getByTestId('home-rails')).toBeTruthy();
+      expect(screen.queryByTestId('startup-loading')).toBeNull();
       expect(screen.queryByTestId('home-skeleton')).toBeNull();
       vi.useRealTimers();
     });
@@ -248,7 +252,7 @@ describe('Home', () => {
       vi.stubGlobal('fetch', vi.fn(async () => json(POSTERS)));
       const seen: string[] = [];
       const obs = new MutationObserver(() => {
-        const st = screen.queryByTestId('home-skeleton') ? 'skeleton' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
+        const st = screen.queryByTestId('startup-loading') ? 'loading' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
         if (seen[seen.length - 1] !== st) seen.push(st);
       });
       render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
@@ -261,7 +265,7 @@ describe('Home', () => {
       }
       await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
       obs.disconnect();
-      expect(seen.filter(x => x !== 'skeleton')).toEqual(['rails:3']);
+      expect(seen.filter(x => x !== 'loading')).toEqual(['rails:3']);
       expect(document.querySelectorAll('.luma-rails-in')).toHaveLength(1);   // one container, one fade
     });
   });

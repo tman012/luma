@@ -119,6 +119,19 @@ for (const mode of ['compact', 'expanded'] as const) {
       for (const [name, setup, rowText] of cases) it(`${s.name}: ${name}`, async () => {
         layoutMode.mode = mode; setup();
         await open(s, rowText, 4000);
+        // A logo that never finishes is not a title: the sheet stays closed (no cap-forced text).
+        if (name.startsWith('logo never finishes')) {
+          expect(document.querySelector('[data-modal="MovieDetailModal"], [data-modal="TvDetailModal"]')).toBeNull();
+          expect(heroShows()).toBe('');
+          return;
+        }
+        // Offscreen decode is display readiness. A DOM `complete` lie does not hide a decoded logo.
+        if (name.startsWith('logo img stalls')) {
+          expect(document.querySelector('img[src*="logo.png"]')).not.toBeNull();
+          const h1 = Array.from(document.querySelectorAll('h1')).find((h) => (h.textContent ?? '').trim() === s.title);
+          if (h1) expect(h1.style.display === 'none' || h1.style.visibility === 'hidden').toBe(true);
+          return;
+        }
         const shows = heroShows();
         expect(shows === 'logo' || shows === s.title, `hero shows "${shows}"`).toBe(true);
         if (name !== 'slow details (2s)') expect(shows).toBe(s.title);
@@ -138,25 +151,23 @@ describe('v345b: desktop movie, logo shown means the text is hidden (kept in the
   const s = SHEETS[1];
   const h1 = () => Array.from(document.querySelectorAll('h1')).find((h) => (h.textContent ?? '').trim() === s.title)!;
   const visible = (h: HTMLElement) => h.style.display !== 'none' && h.style.visibility !== 'hidden';
-  it('the candidate logo loads while the hero holds (its load before the latch): text hidden once the logo shows', async () => {
+  it('the sheet stays closed while art holds, then shows the decoded logo with the text hidden', async () => {
     layoutMode.mode = 'expanded'; cfg.domStall = true; cfg.artMs = 1300;   // the backdrop holds the hero
     const row = document.createElement('button'); row.setAttribute('aria-label', s.title); document.body.appendChild(row);
     void openWhenReady(s.kind, s.rk, s.id, row, () => {}, undefined, []);
     render(s.el());
     for (let i = 0; i < 6; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-    const img = document.querySelector<HTMLImageElement>('img[src*="logo.png"]');
-    expect(img, 'candidate logo mounted during the hold').not.toBeNull();
-    expect(document.querySelector('[data-hero-title], [data-reveal]')).toBeTruthy();
-    cfg.domStall = false; act(() => { fireEvent.load(img!); });   // the browser finishes loading it while the hero still holds
+    expect(document.querySelector('[data-modal="MovieDetailModal"]'), 'no sheet while art is undecoded').toBeNull();
     for (let i = 0; i < 40; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
     expect(document.querySelector('img[src*="logo.png"]')).not.toBeNull();
     expect(h1(), 'text kept in the DOM').toBeTruthy();
     expect(visible(h1()), 'text hidden under a shown logo').toBe(false);
   });
-  it('logo failed or stalled: the text title is visible', async () => {
+  it('a failed logo shows the text title; a decoded logo does not', async () => {
     layoutMode.mode = 'expanded'; cfg.domStall = true;
     await open(s, s.title);
-    expect(visible(h1())).toBe(true);
+    expect(document.querySelector('img[src*="logo.png"]')).not.toBeNull();
+    expect(visible(h1())).toBe(false);
     cleanup(); _resetModalPrefetch(); _resetImageLoader(); cfg.domStall = false; cfg.img = 'fail';
     await open(s, s.title);
     expect(visible(h1())).toBe(true);

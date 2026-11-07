@@ -1,6 +1,7 @@
 import { useOneReveal, useEndPriorityOnError, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
-import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO, useArtWaitCap } from '@/hooks/useSheetBackdrop';
+import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO } from '@/hooks/useSheetBackdrop';
+import { detailSheetReady, useUnopenedClose } from '@/loading/sheetOpenGate';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -1194,9 +1195,8 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // Per open: a reopen mounts a new img, so the last open's load doesn't count.
   const [artPaintedAt, setArtPaintedAt] = useState<{ key: unknown; url: string } | null>(null);
   const setArtPainted = (url: string) => setArtPaintedAt({ key: props.openKey, url });
-  // Capped (Reviewer F2): never past the 1.6s art deadline waiting for the element's load.
-  const artWaitCapped = useArtWaitCap(props.openKey);
-  const artInFrame = !sheetArt || artWaitCapped || (!!artPaintedAt && artPaintedAt.key === props.openKey && artPaintedAt.url === sheetArt);
+  // Display-ready when the hero decoded this URL, or this element has loaded. A timer is not readiness.
+  const artInFrame = !sheetArt || sheetHero.state !== 'hold' || (!!artPaintedAt && artPaintedAt.key === props.openKey && artPaintedAt.url === sheetArt);
 
   // Determine if we're in active episode-mode display
   const isEpisodeIntent = !showFullShow && !!episodeContext;
@@ -1223,8 +1223,10 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // The card's own enter motion (scale 0.96 -> rest, 320 ms) runs first: a warm open revealed inside it, so the
   // buttons crept 1-3 px as the scale finished (N1440 Tulsa). The reveal waits for the card to rest.
   const cardRef = useRef<HTMLDivElement>(null);
-  const modalEntering = useModalMotion(phase, overlayRef, cardRef);
-  const reveal = useOneReveal(props.openKey, !loading && !!liveShow, sheetHero.state !== 'hold' && artInFrame && !modalEntering, ratingsSettle.shown,
+  const showSheet = detailSheetReady(loading, !!error, !!liveShow, liveShow?.title, sheetHero.state, true);
+  useUnopenedClose(props.openKey, showSheet || phase === 'exiting' || phase === 'gone', onClose);
+  const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', showSheet && phase !== 'gone');
+  const reveal = useOneReveal(props.openKey, !loading && !!liveShow, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const show = useRevealFreeze(liveShow, reveal.revealed, props.openKey, TV_TEXT);
@@ -1319,10 +1321,11 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // Lock body scroll
   // ---------------------------------------------------------------------------
   useEffect(() => {
+    if (!showSheet) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prev; };
-  }, []);
+  }, [showSheet]);
 
   // ---------------------------------------------------------------------------
   // Overlay click closes
@@ -1336,9 +1339,10 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // Animation
   // ---------------------------------------------------------------------------
 
-  if (phase === 'gone') return null;
+  if (phase === 'gone' || !showSheet) return null;
 
   return (
+    <Hold hold={modalEntering}>
     <LumaMonitorContext.Provider value={lumaMon}>
     <>
     {createPortal(
@@ -2011,6 +2015,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
     )}
     </>
     </LumaMonitorContext.Provider>
+    </Hold>
   );
 }
 

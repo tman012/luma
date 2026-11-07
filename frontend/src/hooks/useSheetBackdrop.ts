@@ -14,6 +14,7 @@ import { tapElapsed } from '@/services/modalPrefetch';
 import type { TitleState } from '@/hooks/useTitleReveal';
 import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
 import { reuseLoad } from '@/hooks/useLoadedImage';
+import { isDecoded } from '@/loading/imageLoader';
 
 export const BACKDROP_CAP_MS = SURFACE_DEADLINE_MS;
 /** A cold open's backdrop-only deadline (PM, v341): past BACKDROP_CAP_MS the whole reveal still waits up to this
@@ -77,11 +78,6 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
   // `alt`: a second sharp backdrop (an owned movie's Plex art), loaded in parallel: the reveal takes `art` when it has
   // decoded, else `alt` (never past the reveal: the latch is final).
   const altOk = useDecoded(cur.artDone || !alt || alt === art ? null : alt);
-  // The last backdrop that decoded for this open (TV: the Plex art before a TMDb pick replaced the candidate), so the
-  // art deadline latches it rather than no art when the newer pick is still decoding.
-  const good = useRef<{ key: unknown; url: string | null }>({ key: openKey, url: null });
-  if (good.current.key !== openKey) good.current = { key: openKey, url: null };
-  if (artOk.ok && artOk.url && artOk.url === art) good.current.url = artOk.url;
   useEffect(() => {
     setSt(s => (s.key === openKey ? s : fresh(openKey)));
     const t = window.setTimeout(() => setSt(s => (s.key === openKey && !s.capped ? { ...s, capped: true } : s)), capLeft());
@@ -99,28 +95,22 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
   }, [lateKnown, openKey]);
   useEffect(() => {
     if (cur.title) return;
+    if (!present || !artSettled) return;
     // Only a successful decode counts; a 404 or corrupt image is settled as absent (text title / no art).
+    // A timer does not settle either: the sheet stays closed until this decision is real.
     const logoIn = !!logo && logoOk.url === logo && logoOk.ok;
     const logoBad = !!logo && logoOk.url === logo && !logoOk.ok;
+    const logoKnownAbsent = !logo && logoSettled;
+    if (!(logoIn || logoBad || logoKnownAbsent)) return;
     const artIn = !!art && artOk.url === art && artOk.ok;
-    const ready = artSettled && (art ? artOk.url === art : true) && (logo ? logoIn || logoBad : logoSettled);
-    // Past the deadline: latch once the pick is settled (the details are in), with what has decoded; a known backdrop
-    // still decoding holds the latch until it decodes, fails, or BACKDROP_ART_DEADLINE_MS.
-    const artWait = !!art && artOk.url !== art && !cur.artCapped;
-    // v345 (prod's logo budget): a logo whose URL is known (decoding) or whose lookup is still out holds the latch past
-    // the 1.0s deadline up to the same art deadline (BACKDROP_ART_DEADLINE_MS), never longer; then text, no late swap.
-    const logoWait = !cur.artCapped && (logo ? logoOk.url !== logo : !logoSettled);
-    // At the art deadline a pick still pending (TMDb slow or failing) latches with what has decoded (the Plex art), or
-    // no art: never a blank sheet past the cap, and nothing swaps in after.
-    // Past the 1.0s deadline with the details in and their backdrop already decoded (TV: the Plex art while TMDb
-    // is still out): latch now; a better pick still on its way doesn't hold a sheet that has its art.
-    const artReady = cur.capped && present && artIn;
+    const artBad = !!art && artOk.url === art && !artOk.ok;
     const altIn = !!alt && alt !== art && altOk.url === alt && altOk.ok;
-    // Past the 1.0s deadline with `art` still loading but `alt` decoded: latch on `alt` now.
-    const altReady = cur.capped && present && !artIn && altIn;
-    if (!ready && !(cur.capped && artSettled && !artWait && !logoWait) && !(cur.artCapped && present) && !(artReady && !logoWait) && !(altReady && !logoWait)) return;
-    const fallback = altIn ? alt : cur.artCapped && present && !artIn ? good.current.url : null;
-    setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: artIn ? art! : fallback, artDone: true });
+    const altBad = !!alt && alt !== art && altOk.url === alt && !altOk.ok;
+    if (art && !artIn && !artBad) return;
+    // Primary missing or failed: wait for the alternate (Plex art) to decode or fail before the no-art frame.
+    if (!artIn && alt && alt !== art && !altIn && !altBad) return;
+    const chosen = artIn ? art! : altIn ? alt! : null;
+    setSt({ ...cur, capped: true, title: logoIn ? 'logo' : 'text', logo: logoIn ? logo! : null, art: chosen, artDone: true });
   }, [art, artOk, alt, altOk, artSettled, present, logo, logoOk, logoSettled, cur, openKey]);
   const logoFailed = useCallback(() => setSt(s => (s.key === openKey && s.title === 'logo' ? { ...s, title: 'text', logo: null } : s)), [openKey]);
   // v346: the latch already required this exact logo URL to decode, so the text hides in the latch commit itself (no
@@ -141,7 +131,8 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
   const logoRef = useCallback((el: HTMLImageElement | null) => { logoEl.current = el; }, []);
   const latched = cur.title === 'logo' ? cur.logo : null;
   useLayoutEffect(() => {
-    if (latched && !isLoaded(logoEl.current, latched)) setUnpainted(latched);
+    // The tap's decode lives on another Image. A decoded logo is display-ready; don't flash the text title first.
+    if (latched && !isDecoded(latched) && !isLoaded(logoEl.current, latched)) setUnpainted(latched);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latched]);
   return { state: cur.title ?? 'hold', art: cur.art, logo: cur.logo, deadline: cur.capped, artDeadline: !!cur.artCapped, logoFailed,

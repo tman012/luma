@@ -2,6 +2,7 @@ import { sheetBase } from '@/utils/posterColors';
 import { ACTION_CIRCLE_SLOT, ACTION_LABEL_LINE, META_ROW, ratingsExpectedAtTap, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, useSeededHero, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { detailSheetReady, useUnopenedClose } from '@/loading/sheetOpenGate';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput } from '@/hooks/useTitleReveal';
@@ -142,18 +143,16 @@ export function CompactLayout(props: MovieModalViewProps) {
     onWatchlistRemoved,
   } = props;
   const titleState = useTitleReveal(logoInput(liveDetail), liveDetail?.title, finalBackdropUrl(liveDetail?.backdropUrl) || liveDetail?.posterUrl);
-  // Phone: `composed` once the details are in (or an error); the sheet itself moves on the seeded hero (useSeededHero),
-  // and the one reveal (useOneReveal) decides when its content shows.
-  const composed = !!error || (!loading && !!liveDetail && titleState !== 'hold');
-  // Past the open budget the sheet starts on the tapped card's own art, colors and title (useSeededHero).
-  const hero = useSeededHero(composed, paletteColors);
-  const heroHold = hero.seeded ? false : titleState === 'hold';
-  // ONE backdrop per open: the final (sharp) image, latched once decoded or at the cap, never swapped (useSheetBackdrop).
-  // The hero (backdrop + title) is ONE unit: logo vs. text and the backdrop are decided together before the reveal
-  // (1.2s cap from the tap), fade in once together, and never change for that open.
+  // ONE backdrop per open: the final image, latched once decoded (or genuinely unavailable), never swapped.
+  // The sheet stays closed until that hero and a real title are ready. A cap does not open it early.
   const sheetHero = useSheetHero(finalBackdropUrl(liveDetail?.backdropUrl), !!liveDetail && !liveDetail.backdropPending, liveDetail?.clearLogoUrl, logoInput(liveDetail) !== undefined, props.openKey, !!liveDetail, finalBackdropUrl(liveDetail?.plexArtUrl));
   const sheetArt = sheetHero.art;
   const posterFill = liveDetail && !liveDetail.backdropUrl && !sheetArt ? liveDetail.posterUrl : null;
+  const ownedKnown = !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey);
+  const composed = detailSheetReady(loading, !!error, !!liveDetail, liveDetail?.title, sheetHero.state, ownedKnown);
+  useUnopenedClose(props.openKey, composed || phase === 'exiting' || phase === 'gone', onClose);
+  const hero = useSeededHero(composed, paletteColors);
+  const heroHold = hero.seeded ? false : titleState === 'hold';
   // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
   const ultraBlurColors = hero.colors;
   const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
@@ -171,7 +170,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   // ONE reveal: backdrop, title/logo, meta, ratings and buttons together, in one fade (useOneReveal).
   useEndPriorityOnError(!loading && !!error && !liveDetail);
   const reveal = useOneReveal(props.openKey, !loading && !error && !!liveDetail, sheetHero.state !== 'hold', ratingsSettle.shown,
-    sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey), sheetHero.artDeadline);
+    sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, ownedKnown, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);
     // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed

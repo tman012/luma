@@ -58,11 +58,12 @@ describe('web kiosk home (>=1024px)', () => {
     const fetchMock = vi.fn(() => new Promise<Response>(r => { resolve = r; }));
     vi.stubGlobal('fetch', fetchMock);
     renderHome();
-    expect(screen.getByTestId('kiosk-loading')).toBeTruthy();
-    expect(screen.getByTestId('kiosk-loading').textContent).toBe('');
+    expect(screen.getByTestId('startup-loading').textContent).toContain('Loading\u2026');
+    expect(screen.getByTestId('kiosk-home').closest('[aria-hidden="true"]')).toBeTruthy();
     expect(screen.getByTestId('kiosk-home').style.background).toMatch(/#15102a|rgb\(21, 16, 42\)/);
     await act(async () => { resolve(json({ success: true, movies: TEN })); });
     await waitFor(() => screen.getByText('Movie 0'));
+    expect(screen.queryByTestId('startup-loading')).toBeNull();
     const urls = fetchMock.mock.calls.map(c => String((c as unknown[])[0]));
     expect(urls.every(u => u.includes('/api/hero/content'))).toBe(true);
     // v241 (H2): outlined chips
@@ -248,7 +249,9 @@ describe('v227 R3 on Home: desktop and tablet only, phone unchanged', () => {
     wide = false; stubMatchMedia();
     vi.stubGlobal('fetch', vi.fn(async () => json({ continue_watching: [], rails: [], plex: true })));
     renderHome();
-    expect(screen.getByTestId('search-button')).toBeTruthy();
+    expect(screen.getByTestId('startup-loading')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('search-button')).toBeTruthy());
+    expect(screen.queryByTestId('startup-loading')).toBeNull();
     expect(screen.queryByTestId('r3-search')).toBeNull();
     expect(screen.queryByTestId('home-search-pill')).toBeNull();
   });

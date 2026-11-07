@@ -14,7 +14,7 @@ import { createContext, useCallback, useContext, useLayoutEffect, useRef, useSta
 import { createPortal } from 'react-dom';
 import { APP_BG, MOTION, reducedMotion } from '@/theme/motion';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
-import { budgetLeft, SHEET_MOVING_EVENT, tapShell } from '@/services/modalPrefetch';
+import { SHEET_MOVING_EVENT, tapShell } from '@/services/modalPrefetch';
 import type { UltraBlurColors } from '@/utils/modalParsers';
 
 export type SheetPhase = 'entering' | 'visible' | 'exiting' | 'gone';
@@ -50,17 +50,11 @@ function currentY(el: HTMLElement): number {
   return m[1] ? v[13]! : v[5]!;
 }
 
-/** When the phone sheet may start its slide: once the details are composed, or when the tap's open budget
- *  (OPEN_BUDGET_MS = 150 ms from the tap, MOTION.md §1.1) is spent, whichever is first. Past the budget the sheet
- *  opens on the seeded hero (useSeededHero). State, not derived: the render that flips it holds those children. */
+/** The phone sheet starts its slide only once `composed` (real title and artwork, or the error panel).
+ *  An elapsed open budget must not slide in a color wash or a partial sheet. Latched: it does not go back. */
 export function useSheetGo(composed: boolean): boolean {
-  const [go, setGo] = useState(() => composed || budgetLeft() === 0);
-  useLayoutEffect(() => {
-    if (go) return;
-    if (composed) { setGo(true); return; }
-    const t = window.setTimeout(() => setGo(true), budgetLeft());
-    return () => window.clearTimeout(t);
-  }, [composed, go]);
+  const [go, setGo] = useState(composed);
+  useLayoutEffect(() => { if (composed) setGo(true); }, [composed]);
   return go;
 }
 
@@ -101,8 +95,9 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
   // started synchronously, so cancel whatever animations are still live).
   useLayoutEffect(() => () => { anims.current.forEach((a) => a.cancel()); anims.current = []; }, []);
 
-  // Scroll lock + app background paint, from enter start until unmount.
+  // Scroll lock + app background paint, from the frame the sheet is actually shown until unmount.
   useLayoutEffect(() => {
+    if (!go) return;
     const prevOverflow = document.body.style.overflow;
     const h = document.documentElement;
     const n = Number(h.dataset.lumaSheet || 0) + 1;   // index.css: html[data-luma-sheet] paints #111318
@@ -113,12 +108,12 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
       const left = Number(h.dataset.lumaSheet || 1) - 1;
       if (left > 0) h.dataset.lumaSheet = String(left); else delete h.dataset.lumaSheet;
     };
-  }, []);
+  }, [go]);
 
   useLayoutEffect(() => {
     const card = cardRef.current;
     const scrim = scrimRef.current;
-    if (!card || !scrim || typeof card.animate !== 'function') { setEntering(false); return; }
+    if (!card || !scrim || typeof card.animate !== 'function') { if (go) setEntering(false); return; }
     // Held off-screen until it can show composed: no frame is drawn before the slide.
     // Closed during the hold and the details landed later: it never entered, so there is no exit to play.
     if ((!go || phase === 'exiting') && !entered.current) {
@@ -195,7 +190,8 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
     start();
   }, [phase, go]);
 
-  if (phase === 'gone') return null;
+  // Closed until the slide may start: no portal, no scrim, nothing that looks like a detail sheet.
+  if (phase === 'gone' || (!go && !entered.current)) return null;
   return createPortal(
     <div className="luma-fullscreen luma-bleed"
       data-modal={name}
@@ -310,18 +306,20 @@ export const SHELL_CROSSFADE = 'm-crossfade var(--m-dur-crossfade) var(--m-ease-
 export const MODAL_ENTER_MS = 320;
 export const MODAL_EXIT_MS = 200;
 export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElement | null>,
-  cardRef: React.RefObject<HTMLElement | null>, kind: 'modal' | 'side' | 'bottom' = 'modal') {
+  cardRef: React.RefObject<HTMLElement | null>, kind: 'modal' | 'side' | 'bottom' = 'modal', armed = true) {
   const anims = useRef<Animation[]>([]);
   const entered = useRef(false);
   const [entering, setEntering] = useState(true);
   // html[data-luma-modal] while a modal is up: surfaces under it drop their backdrop blur (index.css /
   // the palette css), so the enter/exit stay compositor-only instead of re-blurring every frame.
   useLayoutEffect(() => {
+    if (!armed) return;
     const h = document.documentElement;
     h.dataset.lumaModal = String(Number(h.dataset.lumaModal || 0) + 1);
     return () => { const n = Number(h.dataset.lumaModal || 1) - 1; if (n > 0) h.dataset.lumaModal = String(n); else delete h.dataset.lumaModal; };
-  }, []);
+  }, [armed]);
   useLayoutEffect(() => {
+    if (!armed) return;
     const card = cardRef.current; const scrim = scrimRef.current;
     const ok = (el: HTMLElement | null): el is HTMLElement => !!el && typeof el.animate === 'function';
     card?.setAttribute('data-modal-card', kind);
@@ -366,7 +364,7 @@ export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElem
     const fallback = window.setTimeout(finish, (rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetEnter : MODAL_ENTER_MS) + ENTER_FALLBACK_SLACK_MS);
     enter.finished.then(finish, () => { window.clearTimeout(fallback); setEntering(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase === 'exiting']);
+  }, [phase === 'exiting', armed]);
   return entering;
 }
 

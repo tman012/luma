@@ -1,12 +1,13 @@
 /** Main screen of a LUMA_MINIMAL build: the phone-first Home (#11). */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { FONT, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
-import { HomeRails, SkeletonCrossfade, SkeletonRails, WYM_RAIL_ID, cardArt, cardIds, cardLogoOf, railCss } from '@/components/home/Rails';
+import { HomeRails, WYM_RAIL_ID, cardArt, cardIds, cardLogoOf, railCss } from '@/components/home/Rails';
+import { StartupLoading, signalContentReady } from '@/components/start/StartupLoading';
 import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
 import { localArt, parseWlImages, setLocalArt } from '@/services/localArt';
@@ -37,6 +38,8 @@ export function MinimalHomePage() {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [slow, setSlow] = useState(false);
+  const [kioskReady, setKioskReady] = useState(false);
+  const shown = useRef(false);
   const modals = useModalHost();
   // v254 What you're missing: prod's long-press dismiss (MobileHomePage confirmDismissMissing).
   const [dismissTarget, setDismissTarget] = useState<Card | null>(null);
@@ -61,31 +64,37 @@ export function MinimalHomePage() {
   useEffect(() => {
     if (!ready || kiosk) return;                // v235: KioskHome loads its own hero and rails (as before v228)
     let alive = true;
-    setFailed(false);
-    setSlow(false);
-    setData(null);
-    setWymOverride(null);
-    // v251: the skeleton stays until every rail is in, then they all swap in at once. One request returns
-    // every ready rail (the server drops a failed or slow one at 6 s); past SKELETON_TIMEOUT_MS the skeleton
-    // gives way to Retry and a late answer is dropped rather than popped in.
-    // v251: then it holds until the first on-screen posters of every rail have decoded (POSTER_HOLD_MS cap,
-    // never past SKELETON_TIMEOUT_MS), so they don't fill in after the swap.
+    const keep = shown.current;
+    // A first load starts empty. A later run (resize back from the kiosk, a retry that already had rows)
+    // keeps what is on screen. It does not blank the page for a background refetch.
+    if (!keep) {
+      setFailed(false);
+      setSlow(false);
+      setData(null);
+      setWymOverride(null);
+    }
+    // One request returns every ready rail (the server drops a failed or slow one at 6 s). Past
+    // SKELETON_TIMEOUT_MS a first load gives way to Retry and a late answer is dropped. Then the first
+    // posters decode (POSTER_HOLD_MS, never past the same cap) so they don't fill in after the swap.
     let done = false;
     const t0 = Date.now();
-    const timer = window.setTimeout(() => { if (alive && !done) { done = true; setSlow(true); } }, SKELETON_TIMEOUT_MS);
+    const timer = window.setTimeout(() => { if (alive && !done && !keep) { done = true; setSlow(true); } }, SKELETON_TIMEOUT_MS);
     fetchHome()
       .then(d => {
         if (!alive || done) return;
         done = true;
         window.clearTimeout(timer);
         const cap = Math.max(0, Math.min(POSTER_HOLD_MS, SKELETON_TIMEOUT_MS - (Date.now() - t0)));
-        void decodeAll(firstPosterUrls(d, window.innerWidth), cap).then(() => { if (alive) setData(d); });
+        void decodeAll(firstPosterUrls(d, window.innerWidth), cap).then(() => { if (alive) { shown.current = true; setData(d); } });
       })
-      .catch(() => { if (alive && !done) { done = true; setFailed(true); } });
+      .catch(() => { if (alive && !done) { done = true; shown.current = true; if (!keep) setFailed(true); } });
     return () => { alive = false; window.clearTimeout(timer); };
   }, [ready, attempt, kiosk]);
 
-  if (loading) return null;
+  const bootSettled = !!data || failed || slow || kioskReady || (!loading && !authenticated);
+  useLayoutEffect(() => { if (bootSettled) signalContentReady(); }, [bootSettled]);
+
+  if (loading && !data) return <StartupLoading />;
   if (!authenticated) return <Navigate to={needsStart ? '/start' : pinUnlock ? '/unlock' : '/login'} replace />;
   if (startInProgress) return <Navigate to="/start" replace />;
 
@@ -119,16 +128,22 @@ export function MinimalHomePage() {
   if (kiosk) {
     return (
       <div data-step="home" data-layout="kiosk">
-        <KioskHome />
+        {!kioskReady && <StartupLoading />}
+        <div style={kioskReady ? undefined : { visibility: 'hidden' }} aria-hidden={kioskReady ? undefined : true}>
+        <KioskHome onReady={() => setKioskReady(true)} />
         {/* v235: logo and avatar; the search field is centered in this bar (HomeSearchR3). */}
         <header style={kioskBar} data-testid="kiosk-header">
           <HomeLogo />
           {menu(48)}
         </header>
         <HomeSearchR3 />
+        </div>
       </div>
     );
   }
+
+  // Startup and a full document refresh have no rows yet: the navy loading screen, not skeletons.
+  if (!data && !failed && !slow) return <StartupLoading />;
 
   // v259 (Taylor): the phone header is prod 1b4ea74's TopBar (AuthenticatedHomePage.tsx:394-428) and the page
   // shell around it (:979-1077): a solid fixed bar outside the page wrapper, content 16 px below it, 48 px at the end.
@@ -187,9 +202,7 @@ export function MinimalHomePage() {
             {/* v280: prod MobilePushBanner — permission + push subscribe on MINIMAL phone Home. */}
             <MobilePushBanner />
             <main data-phone-rails>
-              <SkeletonCrossfade loading={!(data || failed || slow)}>
-                {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
-              </SkeletonCrossfade>
+              {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
             </main>
             {/* v259 Tester LOW: prod's last rail keeps its 28 px bottom margin (Rail <section style={{ marginBottom: 28 }}>,
                 AuthenticatedHomePage.tsx:272) above the 48 px spacer; test's rails have top margins only. */}
@@ -329,8 +342,7 @@ function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpe
       </>
     );
   }
-  // v289: match prod — pills under the first (CW) skeleton rail, not above it (avoids top→under-CW jump).
-  return <SkeletonRails afterFirst={<HomePills after />} />;
+  return null;
 }
 
 // Centered in the space under the header: one muted line, optional Retry pill.

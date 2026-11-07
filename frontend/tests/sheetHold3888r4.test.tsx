@@ -10,9 +10,13 @@ const read = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8'
 afterEach(cleanup);
 
 describe('phone sheet hold', () => {
-  it('a scrim tap during the hold closes the sheet', () => {
+  it('the hold has no sheet and no scrim; a scrim tap only exists once the sheet is open', () => {
     const onClose = vi.fn();
-    render(<SheetFrame name="TvDetailModal" phase="entering" composed={false} go={false} onScrimClick={onClose}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>);
+    const view = render(<SheetFrame name="TvDetailModal" phase="entering" composed={false} go={false} onScrimClick={onClose}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>);
+    expect(document.querySelector('[data-sheet-scrim]')).toBeNull();
+    expect(document.querySelector('[data-modal="TvDetailModal"]')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    view.rerender(<SheetFrame name="TvDetailModal" phase="entering" composed go onScrimClick={onClose}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>);
     const scrim = document.querySelector('[data-sheet-scrim]') as HTMLElement;
     expect(scrim).toBeTruthy();
     expect(getComputedStyle(scrim).visibility).not.toBe('hidden');
@@ -32,12 +36,11 @@ describe('phone sheet hold', () => {
   it('Tester B2: close during the hold or mid-enter dismisses (exit runs, nothing re-opens)', () => {
     const calls: unknown[][] = [];
     (HTMLElement.prototype as unknown as { animate: unknown }).animate = vi.fn((k: unknown) => { calls.push([k]); return { finished: new Promise(() => {}), cancel() {}, play() {}, pause() {} }; });
-    const ui = (phase: 'entering' | 'exiting', go: boolean) => <SheetFrame name="MovieDetailModal" phase={phase} composed={false} go={go}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>;
-    // during the hold (not moving yet): exit leaves the card hidden, never starts the enter
+    const ui = (phase: 'entering' | 'exiting', go: boolean) => <SheetFrame name="MovieDetailModal" phase={phase} composed={go} go={go}><SheetCard background="#111318"><p>x</p></SheetCard></SheetFrame>;
+    // during the hold the sheet is not in the document, so an exit never starts an enter
     const a = render(ui('entering', false));
     a.rerender(ui('exiting', false));
-    const card = document.querySelector('[data-sheet-card]') as HTMLElement;
-    expect(card.style.visibility).toBe('hidden');
+    expect(document.querySelector('[data-sheet-card]')).toBeNull();
     expect(calls.length).toBe(0);
     a.rerender(ui('exiting', true));   // details/budget arrive after the close: still no enter
     expect(calls.some(([k]) => JSON.stringify(k).includes('"translate3d(0, 0, 0)"') && JSON.stringify(k).indexOf('100%') < JSON.stringify(k).indexOf('(0, 0, 0)'))).toBe(false);

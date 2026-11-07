@@ -18,6 +18,8 @@ describe('v341b: desktop one reveal and the button set', () => {
     expect(h.result.current.owned).toBe(true);              // frozen for the open: the Watch set never re-flows
     const g = mount({ owned: false, known: false, art: false });
     g.rerender({ owned: false, known: false, art: true });
+    expect(g.result.current.revealed).toBe(false);          // the art deadline must not open an unknown action row
+    g.rerender({ owned: false, known: true, art: true });
     expect(g.result.current).toEqual({ revealed: true, trailer: false, owned: false });
     g.rerender({ owned: true, known: true, art: true });
     expect(g.result.current.owned).toBe(false);
@@ -26,7 +28,7 @@ describe('v341b: desktop one reveal and the button set', () => {
   it('movie and TV expanded layouts: backdrop, logo/title and the content block share the one gate and fade', () => {
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
       const e = src(`components/media/${k}/ExpandedLayout.tsx`);
-      expect(e, k).toMatch(/const reveal = useOneReveal\(props\.openKey, !loading && !!(liveDetail|liveShow), sheetHero\.state !== 'hold'( && artInFrame)?( && !modalEntering)?, ratingsSettle\.shown,\s*sheetHero\.deadline/);
+      expect(e, k).toMatch(/const reveal = useOneReveal\(props\.openKey, !loading && !!(liveDetail|liveShow), sheetHero\.state !== 'hold' && artInFrame, ratingsSettle\.shown,\s*sheetHero\.deadline/);
       expect(e, k).toMatch(/revealStyle\(reveal\.revealed \? sheetHero\.state : 'hold'\), animation: reveal\.revealed \? HERO_ANIM : 'none'/); // backdrop: decoded, mounted, fades at the reveal
       expect(e, k).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1/);  // logo/title
       expect(e, k).toMatch(/\.\.\.\(\(loading && !\w+\) \|\| error \? revealStyle\('text'\) : reveal\.revealed \? \{ opacity: 1, \.\.\.CONTENT_WITH_HERO \} : \{ opacity: 0, transition: 'none' \}\)/); // meta, ratings, pills
