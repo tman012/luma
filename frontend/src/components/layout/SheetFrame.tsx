@@ -113,9 +113,15 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
   }, [go]);
 
   useLayoutEffect(() => {
+    if (!go) {
+      anims.current.forEach((a) => a.cancel());
+      anims.current = [];
+      setEntering(true);
+      return;
+    }
     const card = cardRef.current;
     const scrim = scrimRef.current;
-    if (!card || !scrim || typeof card.animate !== 'function') { if (go) setEntering(false); return; }
+    if (!card || !scrim || typeof card.animate !== 'function') { setEntering(false); return; }
     // Held off-screen until it can show composed: no frame is drawn before the slide.
     // Closed during the hold and the details landed later: it never entered, so there is no exit to play.
     if ((!go || phase === 'exiting') && !entered.current) {
@@ -161,6 +167,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
       return;
     }
     entered.current = true;
+    setEntering(true);
     card.style.willChange = 'transform';
     // WAAPI from the first frame (a re-render can't reset it the way it resets inline styles).
     const enter = rm
