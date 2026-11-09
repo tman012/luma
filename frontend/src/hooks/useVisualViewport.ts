@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { applyScreenGaps } from '@/hooks/viewportGap';
 
 /**
  * Sets CSS custom properties on :root based on the Visual Viewport API.
@@ -61,24 +62,28 @@ export function useVisualViewport(): void {
       }
     }
 
-    // Initial set
-    update();
+    // Gap is the layout viewport minus 100dvh/100lvh. It does not change on scroll.
+    function updateGaps() {
+      update();
+      applyScreenGaps(document);
+    }
 
-    // Listen for changes
-    window.addEventListener('resize', update);
-    window.addEventListener('orientationchange', update);
+    updateGaps();
+
+    window.addEventListener('resize', updateGaps);
+    window.addEventListener('orientationchange', updateGaps);
 
     const vv = window.visualViewport;
     if (vv) {
-      vv.addEventListener('resize', update);
+      vv.addEventListener('resize', updateGaps);
       vv.addEventListener('scroll', update);
     }
 
     return () => {
-      window.removeEventListener('resize', update);
-      window.removeEventListener('orientationchange', update);
+      window.removeEventListener('resize', updateGaps);
+      window.removeEventListener('orientationchange', updateGaps);
       if (vv) {
-        vv.removeEventListener('resize', update);
+        vv.removeEventListener('resize', updateGaps);
         vv.removeEventListener('scroll', update);
       }
       if (debugEl) {

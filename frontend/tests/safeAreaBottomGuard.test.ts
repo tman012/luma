@@ -93,7 +93,7 @@ describe('safe-area bottom guard (full-screen pages and sheets run to the bottom
     const t = readFileSync(join(SRC, 'pages', 'LibrariesPage.tsx'), 'utf8');
     expect(t).toMatch(/data-scroll-content style=\{\{ paddingBottom: SHEET_SCROLL_PAD \}\}>\{content/);
     // v276: Home-match in-flow page; no fixed luma-fullscreen / negative-bottom
-    expect(t).toMatch(/const sheetPage:[\s\S]*minHeight:\s*'100dvh'/);
+    expect(t).toMatch(/const sheetPage:[\s\S]*minHeight:\s*'calc\(100dvh \+ var\(--luma-screen-gap, 0px\)\)'/);
     expect(t).not.toMatch(/data-layout="phone"[^>]*luma-fullscreen/);
     expect(t).not.toMatch(/bottom: 'calc\(-1 \* var\(--luma-bleed\)\)'/);
   });

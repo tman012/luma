@@ -72,6 +72,7 @@ describe("v254 Settings > Automation > What you're missing", () => {
     const chips = [...screen.getByTestId('wym-genres').querySelectorAll('button')];
     expect(chips).toHaveLength(14);
     expect(chips.every(c => c.getAttribute('data-state') === 'on')).toBe(true);
+    fireEvent.click(screen.getByTestId('wym-fold'));
     expect(screen.getByRole('switch', { name: 'Include adult' }).getAttribute('aria-checked')).toBe('false');
     expect(screen.getByRole('switch', { name: 'Require poster' }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getAllByTestId('wym-tile').map(t => t.textContent)).toContain('Pool size3,412');
@@ -83,6 +84,7 @@ describe("v254 Settings > Automation > What you're missing", () => {
     const calls = stub();
     render(<WhatsMissingSettings />);
     await waitFor(() => screen.getByTestId('whats-missing'));
+    fireEvent.click(screen.getByTestId('wym-fold'));
     fireEvent.click(screen.getByRole('button', { name: 'Horror, included' }));
     await waitFor(() => expect(puts(calls).at(-1)).toEqual({ exclude_genres: ['Horror'] }));
     const horror = screen.getByRole('button', { name: 'Horror, excluded' });
@@ -111,6 +113,7 @@ describe("v254 Settings > Automation > What you're missing", () => {
     const calls = stub((_u, init) => (init?.method === 'PUT' && String(init.body).includes('year_from') ? json({ error: 'Invalid', errors: { year_from: 'Invalid' } }, 400) : undefined));
     render(<WhatsMissingSettings />);
     await waitFor(() => screen.getByTestId('whats-missing'));
+    fireEvent.click(screen.getByTestId('wym-fold'));
     fireEvent.click(screen.getByRole('button', { name: 'English, included' }));
     expect(puts(calls)).toEqual([]);
     const y = screen.getByTestId('wym-year-from-input') as HTMLInputElement;
@@ -129,6 +132,8 @@ describe("v254 Settings > Automation > What you're missing", () => {
     await waitFor(() => expect(screen.getByTestId('wym-refresh').textContent).toBe('Rebuilding'));
     expect(screen.getByTestId('wym-state').textContent).toBe('● Rebuilding');
     expect(calls.some(c => c.url.endsWith('/api/rails/what-youre-missing/refresh') && c.init?.method === 'POST')).toBe(true);
+    expect(screen.getByTestId('wym-fold').getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(screen.getByTestId('wym-fold'));
     fireEvent.click(screen.getByRole('button', { name: 'Restore Cats' }));
     await waitFor(() => expect(screen.queryByTestId('wym-dismissed-row')).toBeNull());
     const r = calls.find(c => c.url.endsWith('/restore'))!;

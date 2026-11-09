@@ -10,7 +10,7 @@ export function StartupLoading() {
     <StartShell step="startup-loading">
       <Center>
         <div role="status" aria-live="polite" aria-busy="true" data-testid="startup-loading">
-          <Status text={STARTUP_LOADING_TEXT} />
+          <Status text={STARTUP_LOADING_TEXT} prominent />
         </div>
       </Center>
     </StartShell>

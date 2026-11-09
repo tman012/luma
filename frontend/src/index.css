@@ -150,11 +150,12 @@ html.layout-compact {
 /* Global resets */
 html {
   height: 100%;
+  min-height: calc(100dvh + var(--luma-screen-gap, 0px));
   background: var(--color-kiosk-black);
 }
 body,
 #root {
-  min-height: 100%;
+  min-height: calc(100dvh + var(--luma-screen-gap, 0px));
   background: var(--color-kiosk-black);
 }
 /* Search palette/R3 and the Libraries/Upgrades sheets: an empty reserved box, then the content fades and rises in (Home keeps its skeletons, Taylor 10/30 11:31 PM). */
@@ -187,9 +188,15 @@ html[data-luma-surface='series'] #root * {
    position:fixed + inset:0. Fixed inset:0 / negative-bottom / bleed ::after paint stay clipped on a
    real iPhone PWA (WebKit mocks passed; Taylor's shot did not). Size full-screen fixed layers by
    the large viewport — same edge as Home. Keep --luma-end-pad for scroll-content clearance only.
-   Do not put background-attachment:fixed on these layers (homePage spread). */
+   Do not put background-attachment:fixed on these layers (homePage spread).
+   Where 100dvh/100lvh stops short of the layout viewport, --luma-screen-gap / --luma-fixed-gap
+   (set from that measured difference, 0 when the unit already reaches the edge) extend the
+   paint. They are not padding, so controls are not pushed twice and the page does not grow
+   a scroll strip past the viewport. */
 :root {
   --luma-screen-h: 100dvh;
+  --luma-screen-gap: 0px;
+  --luma-fixed-gap: 0px;
   --luma-bleed: max(env(safe-area-inset-bottom, 0px), 48px);
   --luma-end-pad: calc(var(--luma-bleed) + env(safe-area-inset-bottom, 0px));
 }
@@ -199,13 +206,13 @@ html[data-luma-surface='series'] #root * {
 .luma-fullscreen {
   top: 0 !important;
   bottom: auto !important;
-  height: var(--luma-screen-h) !important;
+  height: calc(var(--luma-screen-h) + var(--luma-fixed-gap, 0px)) !important;
 }
 /* Tailwind fixed+inset-0 roots that still carry the v264 class. */
 .luma-bleed.fixed {
   top: 0 !important;
   bottom: auto !important;
-  height: var(--luma-screen-h) !important;
+  height: calc(var(--luma-screen-h) + var(--luma-fixed-gap, 0px)) !important;
 }
 /* .luma-bleed-down is a marker for offset children (SearchShelf results under header,
    CompactLayout card below safe-area). Do NOT give it top:0 / height:--luma-screen-h —
@@ -1435,7 +1442,7 @@ input[type="search"]::-webkit-search-cancel-button {
 [data-modal="MovieDetailModal"], [data-modal="TvDetailModal"] {
   top: 0 !important;
   bottom: auto !important;
-  height: var(--luma-screen-h) !important;
+  height: calc(var(--luma-screen-h) + var(--luma-fixed-gap, 0px)) !important;
 }
 
 /* LUMA_MINIMAL: the movie/TV popup is display-only (no play, request, grab,

@@ -9,6 +9,7 @@ import {
   loadGr, loadGrLive, previewGr, runGr, saveGr,
   type GrPreview, type GrRun, type GrSettings, type GrStatus, type GrView,
 } from './genreRouletteApi';
+import { FoldDetails, FoldTitle, onFoldBarClick } from './AutomationFold';
 
 const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
@@ -46,6 +47,11 @@ export const grCss = `
 .gr-hscroll::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.28)}
 @media (max-width:899px){.gr-grid{grid-template-columns:minmax(0,1fr)}.gr-hbox{position:static;min-height:0}.gr-hscroll{position:static;max-height:360px}}
 @media (max-width:599px){.gr-f4,.gr-f3{grid-template-columns:repeat(2,minmax(0,1fr))}.gr-head{flex-wrap:wrap}.gr-actions{width:100%;justify-content:flex-end}}
+button.gr-fold{display:flex;align-items:center;gap:8px;flex:1;min-width:0;background:none;border:none;color:inherit;font:inherit;text-align:left;cursor:pointer;padding:0}
+.gr-fold-text{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:12px;row-gap:2px;flex:1;min-width:0}
+.gr-chevron{flex:none;transition:transform 160ms ease}
+button.gr-fold:focus-visible{outline:2px solid #a5b4fc;outline-offset:3px;border-radius:8px}
+@media (prefers-reduced-motion:reduce){.gr-chevron{transition:none}}
 `;
 
 // ---------------------------------------------------------------- time helpers (ET)
@@ -368,6 +374,7 @@ export function GenreRouletteSettings({ wide = true }: { wide?: boolean } = {}) 
   const [bad, setBad] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<GrPreview | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [open, setOpen] = useState(false);
   const busy = useRef(false);
 
   useEffect(() => {
@@ -435,14 +442,14 @@ export function GenreRouletteSettings({ wide = true }: { wide?: boolean } = {}) 
   const running = d.status.running;
 
   return (
-    <div data-testid="genre-roulette" style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
+    <div data-testid="genre-roulette" data-open={open ? 'true' : 'false'} style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
       <style>{tvEditCss}{grCss}</style>
-      <section className="gr-head" aria-label="Genre roulette" style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
+      <section className="gr-head" aria-label="Genre roulette" onClick={e => onFoldBarClick(e, () => setOpen(v => !v))} style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
         <Toggle id="gr-enabled" on={s.enabled} onChange={v => put({ enabled: v })} label="Genre roulette" />
-        <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 12, rowGap: 2, flex: 1, minWidth: 0 }}>
-          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Genre roulette</h3>
+        <FoldTitle id="gr-fold" controls="gr-details" open={open} onToggle={() => setOpen(v => !v)}>
+          <h3 id="gr-fold-title" style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Genre roulette</h3>
           {sub && <span data-testid="gr-sub" style={{ fontSize: 12, color: W70 }}>{sub}</span>}
-        </div>
+        </FoldTitle>
         <div className="gr-actions" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span id="gr-dry-label" style={{ fontSize: 13, color: W70 }}>Dry run</span>
           <Toggle id="gr-dry" on={s.dry_run} onChange={v => put({ dry_run: v })} />
@@ -454,6 +461,7 @@ export function GenreRouletteSettings({ wide = true }: { wide?: boolean } = {}) 
       </section>
       {error && <div role="alert" style={{ fontSize: 13, color: RED }}>{error}</div>}
 
+      <FoldDetails id="gr-details" labelledBy="gr-fold-title" open={open}>
       <div className="gr-grid gr-hgrid">
         <section aria-label="Settings" style={{ ...panel, padding: 16, display: 'flex', flexDirection: 'column', gap: 18 }}>
           <div>
@@ -507,6 +515,7 @@ export function GenreRouletteSettings({ wide = true }: { wide?: boolean } = {}) 
         </section>
         <StatusPanel status={d.status} history={d.history} />
       </div>
+      </FoldDetails>
 
       {showPreview && (
         <Modal title="Preview" testid="gr-preview-modal" onClose={() => setShowPreview(false)}

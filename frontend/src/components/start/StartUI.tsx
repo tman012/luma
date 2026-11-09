@@ -48,10 +48,15 @@ export function Sub({ children }: { children: React.ReactNode }) {
 export function ErrorLine({ text }: { text: string }) {
   return <p role="alert" style={errorLine}>{text}</p>;
 }
-export function Status({ text }: { text: string }) {
+/** Startup / full-refresh spinner and the word next to it. Large enough to read
+ *  on a phone and on a desktop, same row as before. */
+export const LOADING_ICON_PX = 48;
+export const LOADING_TEXT_PX = 32;
+
+export function Status({ text, prominent = false }: { text: string; prominent?: boolean }) {
   return (
-    <p style={statusLine}>
-      <span className="luma-spin" style={spinner} /> {text}
+    <p style={prominent ? statusProminent : statusLine}>
+      <span className="luma-spin" style={prominent ? spinnerProminent : spinner} /> {text}
     </p>
   );
 }
@@ -223,8 +228,16 @@ export const linkBtn: React.CSSProperties = {
 };
 const errorLine: React.CSSProperties = { margin: 0, fontSize: 14, color: '#ff8a8a', textAlign: 'center' };
 const statusLine: React.CSSProperties = { margin: 0, fontSize: 16, color: 'rgba(255,255,255,0.8)', display: 'flex', alignItems: 'center', gap: 10, height: 50 };
+const statusProminent: React.CSSProperties = {
+  margin: 0, fontSize: LOADING_TEXT_PX, fontWeight: 600, color: 'rgba(255,255,255,0.92)',
+  display: 'flex', alignItems: 'center', gap: 18, minHeight: 56,
+};
 const spinner: React.CSSProperties = {
   width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.25)', borderTopColor: '#fff', display: 'inline-block',
+};
+const spinnerProminent: React.CSSProperties = {
+  width: LOADING_ICON_PX, height: LOADING_ICON_PX, boxSizing: 'border-box', flex: 'none',
+  borderRadius: '50%', border: '4px solid rgba(255,255,255,0.25)', borderTopColor: '#fff', display: 'inline-block',
 };
 export const list: React.CSSProperties = {
   width: '100%', maxWidth: 400, marginTop: 28, borderRadius: 14, overflow: 'hidden', background: 'rgba(255,255,255,0.07)',

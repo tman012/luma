@@ -10,6 +10,7 @@ import {
   loadWym, loadWymStatus, normalizeStatus, refreshWym, restoreWym, saveWym,
   type Opt, type WymSettings, type WymStatus, type WymView,
 } from './whatsMissingApi';
+import { FoldDetails, FoldTitle, onFoldBarClick } from './AutomationFold';
 
 const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
@@ -120,6 +121,7 @@ export function WhatsMissingSettings({ wide = true }: { wide?: boolean } = {}) {
   const [error, setError] = useState('');
   const [bad, setBad] = useState<Record<string, string>>({});
   const [restoring, setRestoring] = useState<number | null>(null);
+  const [open, setOpen] = useState(false);
   const busy = useRef(false);
 
   useEffect(() => {
@@ -185,13 +187,13 @@ export function WhatsMissingSettings({ wide = true }: { wide?: boolean } = {}) {
     d.status.next_rebuild && !building ? `Next rebuild ${when(new Date(d.status.next_rebuild))}` : null].filter(Boolean).join(' · ');
 
   return (
-    <div data-testid="whats-missing" style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
+    <div data-testid="whats-missing" data-open={open ? 'true' : 'false'} style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
       <style>{tvEditCss}{grCss}{css}</style>
-      <section className="gr-head" aria-label="What you're missing" style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 12, rowGap: 2, flex: 1, minWidth: 0 }}>
-          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>What you&apos;re missing</h3>
+      <section className="gr-head" aria-label="What you're missing" onClick={e => onFoldBarClick(e, () => setOpen(v => !v))} style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
+        <FoldTitle id="wym-fold" controls="wym-details" open={open} onToggle={() => setOpen(v => !v)}>
+          <h3 id="wym-fold-title" style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>What you&apos;re missing</h3>
           {sub && <span data-testid="wym-sub" style={{ fontSize: 12, color: W70 }}>{sub}</span>}
-        </div>
+        </FoldTitle>
         <div className="gr-actions" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button type="button" className="tve-glass lp-focus" data-testid="wym-refresh" disabled={building} onClick={refresh}
             style={{ ...glassBtn, ...pill, opacity: building ? 0.5 : 1 }}>{building ? 'Rebuilding' : 'Refresh now'}</button>
@@ -199,6 +201,7 @@ export function WhatsMissingSettings({ wide = true }: { wide?: boolean } = {}) {
       </section>
       {error && <div role="alert" style={{ fontSize: 13, color: RED }}>{error}</div>}
 
+      <FoldDetails id="wym-details" labelledBy="wym-fold-title" open={open}>
       <div className="gr-grid">
         <section aria-label="Settings" style={{ ...panel, padding: 16, display: 'flex', flexDirection: 'column', gap: 18 }}>
           <div>
@@ -263,6 +266,7 @@ export function WhatsMissingSettings({ wide = true }: { wide?: boolean } = {}) {
           <Dismissed items={d.dismissed} onRestore={restore} busy={restoring} />
         </div>
       </div>
+      </FoldDetails>
     </div>
   );
 }

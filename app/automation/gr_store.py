@@ -234,6 +234,12 @@ def _legacy() -> Dict[str, Any]:
 
 
 def settings() -> Dict[str, Any]:
+    """Active Genre Roulette config: automation.db meta.settings.
+
+    settings.json automation.genre_roulette is imported only while that meta row is
+    missing, and mirrored back on save(). A later edit to settings.json does not
+    change a run.
+    """
     with connect() as conn:
         cur = _meta(conn, 'settings', None)
         if not isinstance(cur, dict):

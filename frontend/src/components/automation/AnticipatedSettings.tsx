@@ -7,6 +7,7 @@ import { Select, Toggle, SAVE_ERROR, primaryBtn, tvEditCss } from '@/components/
 import { ADD_MONITOR, type MonitorOption } from '@/components/library/tvCalendarApi';
 import { Field, LANGUAGES, NumField, Stepper, grCss, stamp, when } from './GenreRouletteSettings';
 import { loadAn, loadAnLive, runAn, saveAn, type AnCounts, type AnEntry, type AnGroup, type AnPatch, type AnStatus, type AnView, type Kind } from './anticipatedApi';
+import { FoldDetails, FoldTitle, onFoldBarClick } from './AutomationFold';
 
 const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
@@ -151,6 +152,7 @@ export function AnticipatedSettings({ wide = true }: { wide?: boolean } = {}) {
   const [d, setD] = useState<AnView | null>(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState('');
+  const [open, setOpen] = useState(false);
   const busy = useRef(false);
 
   useEffect(() => { void loadAn().then(r => { const v = r.ok ? normAn(r.data) : null; if (v) setD(v); else setFailed(true); }); }, []);
@@ -197,19 +199,20 @@ export function AnticipatedSettings({ wide = true }: { wide?: boolean } = {}) {
   const sub = d.status.next_run && d.status.enabled ? `Next run ${when(new Date(d.status.next_run * 1000))}` : '';
 
   return (
-    <div data-testid="anticipated" style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
+    <div data-testid="anticipated" data-open={open ? 'true' : 'false'} style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
       <style>{tvEditCss}{grCss}{css}</style>
-      <section className="gr-head" aria-label="Anticipated" style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 12, rowGap: 2, flex: 1, minWidth: 0 }}>
-          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Anticipated</h3>
+      <section className="gr-head" aria-label="Anticipated" onClick={e => onFoldBarClick(e, () => setOpen(v => !v))} style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
+        <FoldTitle id="an-fold" controls="an-details" open={open} onToggle={() => setOpen(v => !v)}>
+          <h3 id="an-fold-title" style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Anticipated</h3>
           {sub && <span data-testid="an-sub" style={{ fontSize: 12, color: W70 }}>{sub}</span>}
-        </div>
+        </FoldTitle>
         <div className="gr-actions" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button type="button" className="tve-primary lp-focus" data-testid="an-run" disabled={running} onClick={run}
             style={{ ...primaryBtn(!running), ...pill }}>{running ? 'Running' : 'Run now'}</button>
         </div>
       </section>
       {error && <div role="alert" style={{ fontSize: 13, color: RED }}>{error}</div>}
+      <FoldDetails id="an-details" labelledBy="an-fold-title" open={open}>
       <div className="gr-grid gr-hgrid">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
           <section aria-label="Schedule" style={{ ...panel, padding: 16 }}>
@@ -225,6 +228,7 @@ export function AnticipatedSettings({ wide = true }: { wide?: boolean } = {}) {
         </div>
         <StatusPanel status={d.status} history={d.history} />
       </div>
+      </FoldDetails>
     </div>
   );
 }

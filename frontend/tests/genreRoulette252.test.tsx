@@ -85,6 +85,8 @@ describe('v252 Settings > Automation > Genre roulette', () => {
     const puts = () => calls.filter(c => c.init?.method === 'PUT').map(c => JSON.parse(String(c.init!.body)));
     fireEvent.click(screen.getByRole('switch', { name: 'Genre roulette' }));
     await waitFor(() => expect(puts()).toEqual([{ enabled: true }]));
+    expect(screen.getByTestId('gr-fold').getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(screen.getByTestId('gr-fold'));
     fireEvent.click(screen.getByRole('button', { name: 'Drama' }));
     await waitFor(() => expect(puts()[1]).toEqual({ include_genres: ['Action', 'Science Fiction', 'Drama'], exclude_genres: ['Documentary', 'Horror'] }));
     fireEvent.click(screen.getByRole('button', { name: 'Action, included' }));

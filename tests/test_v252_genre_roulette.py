@@ -191,12 +191,22 @@ def test_prod_keys_are_imported_once_and_off(world, monkeypatch):
 
 # ------------------------------------------------------------------ rules
 
-def test_primary_genre_only(world):
-    world.cat = {1: film(1, 'Fast', ['Action', 'Thriller'], votes=90000), 2: film(2, 'Seven', ['Thriller'])}
+def test_a_film_without_the_slot_genre_is_not_used(world):
+    world.cat = {1: film(1, 'Fast', ['Action'], votes=90000), 2: film(2, 'Seven', ['Thriller'], votes=1000)}
     world.releases = {1: [rel(1)], 2: [rel(2)]}
     r = go(world, cfg(include_genres=['Thriller'], genres_per_run=1))
     assert [p['tmdb_id'] for p in r['picks']] == [2]
+    assert r['picks'][0]['genre'] == 'Thriller'
     assert 1 not in world.searches
+
+
+def test_a_secondary_genre_fills_that_slot(world):
+    world.cat = {1: film(1, 'Fast', ['Action', 'Thriller'], votes=90000), 2: film(2, 'Seven', ['Thriller'], votes=1000)}
+    world.releases = {1: [rel(1)], 2: [rel(2)]}
+    r = go(world, cfg(include_genres=['Thriller'], genres_per_run=1))
+    assert r['grabbed'] == 1 and r['stop_reason'] == 'target_met'
+    assert r['picks'][0]['tmdb_id'] == 1 and r['picks'][0]['genre'] == 'Thriller'
+    assert 2 not in {p['tmdb_id'] for p in r['picks']}
 
 
 def test_three_genres_one_movie_each(world):
@@ -217,14 +227,16 @@ def test_per_genre_retry_tries_the_next_film_in_the_same_genre(world):
     assert {s['title'] for s in r['skips']['no_release']} == {'Action 0', 'Action 1'}
 
 
-def test_a_failed_genre_is_reported_and_its_slot_filled_from_other_genres(world):
+def test_a_failed_genre_stays_short(world):
     three_genre_world(world)
     for i in range(101, 106):
         world.releases[i] = []
     r = go(world, cfg(**ONLY3))
-    assert r['grabbed'] == 3
-    assert r['failures'] == [{'genre': 'Action', 'reason': 'No release found'}]
-    assert sum(p['genre'] == 'Action' for p in r['picks']) == 0
+    assert r['wanted'] == 3 and r['grabbed'] == 2
+    assert r['stop_reason'] == 'pool_exhausted'
+    assert {f['genre'] for f in r['failures']} == {'Action'}
+    assert r['failures'][0]['reason'] == 'No release found'
+    assert sorted(p['genre'] for p in r['picks']) == ['Comedy', 'Drama']
 
 
 def test_same_collection_never_twice_in_a_run_or_after_a_recent_grab(world):
@@ -425,14 +437,81 @@ def test_excluded_genres_are_never_spun_or_borrowed(world):
         assert 'Horror' not in r['genres'] and 'Horror' not in r.get('borrowed_genres', [])
 
 
-def test_borrowing_continues_round_after_round(world):
-    # spun genres empty; only the last borrowed genre (by shuffle) has films
+def test_an_unassigned_genre_does_not_fill_a_short_slot(world):
     cat = [film(500, 'Western 0', ['Western'])]
     world.cat = {f['id']: f for f in cat}
     world.releases = {500: [rel(500)]}
-    r = go(world, cfg(genres_per_run=1, include_genres=['Action', 'Comedy', 'Crime', 'Drama', 'Family', 'Western',
-                                                        'War', 'History']), seed=2)
-    assert r['grabbed'] == 1 and r['picks'][0]['borrowed'] in (True, False)
+    r = go(world, cfg(genres_per_run=1, include_genres=['Action', 'Comedy']), seed=1)
+    assert r['genres'][0] in ('Action', 'Comedy')
+    assert r['wanted'] == 1 and r['grabbed'] == 0 and r['picks'] == []
+    assert r['stop_reason'] == 'pool_exhausted'
+    assert r['failures'][0]['genre'] == r['genres'][0]
+    assert 'Western' not in r['genres'] and 'Western' not in r.get('borrowed_genres', [])
+
+
+def test_a_short_slot_is_not_filled_by_repeating_a_genre(world):
+    """Three assigned genres and only Comedy has a releasable film: one Comedy, not three."""
+    cat = [film(i, f'Comedy {i}', ['Comedy'], votes=50000 - i) for i in range(1, 8)]
+    world.cat = {f['id']: f for f in cat}
+    world.releases = {f['id']: [rel(f['id'])] for f in cat}
+    r = go(world, cfg(include_genres=['Romance', 'Comedy', 'Adventure'], genres_per_run=3, movies_per_genre=1))
+    assert sorted(r['genres']) == ['Adventure', 'Comedy', 'Romance']
+    assert r['wanted'] == 3 and r['grabbed'] == 1
+    assert [p['genre'] for p in r['picks']] == ['Comedy']
+    assert r['stop_reason'] == 'pool_exhausted'
+    assert sorted(f['genre'] for f in r['failures']) == ['Adventure', 'Romance']
+
+
+def test_distinct_slots_label_the_assigned_genre(world):
+    """A film that lists two assigned genres fills one slot. The pick's genre is that slot.
+    These titles match the Nov 8 history crop; their live TMDb genre lists were not read."""
+    dresses = film(6557, '27 Dresses', ['Comedy', 'Romance'], votes=50000)
+    date_night = film(35056, 'Date Night', ['Comedy'], votes=90000)
+    knight = film(559907, 'The Green Knight', ['Adventure'], votes=80000)
+    world.cat = {f['id']: f for f in (dresses, date_night, knight)}
+    world.releases = {f['id']: [rel(f['id'])] for f in (dresses, date_night, knight)}
+    r = go(world, cfg(include_genres=['Romance', 'Comedy', 'Adventure'], genres_per_run=3, movies_per_genre=1))
+    assert r['grabbed'] == 3 and r['stop_reason'] == 'target_met' and r['failures'] == []
+    assert {p['genre']: p['title'] for p in r['picks']} == {
+        'Romance': '27 Dresses', 'Comedy': 'Date Night', 'Adventure': 'The Green Knight'}
+    assert len({p['tmdb_id'] for p in r['picks']}) == 3
+
+
+def test_one_film_fills_only_one_slot(world):
+    only = film(1, 'Only', ['Comedy', 'Romance'], votes=90000)
+    world.cat = {1: only}
+    world.releases = {1: [rel(1)]}
+    r = go(world, cfg(include_genres=['Romance', 'Comedy'], genres_per_run=2, movies_per_genre=1))
+    assert r['wanted'] == 2 and r['grabbed'] == 1 and r['stop_reason'] == 'pool_exhausted'
+    assert r['picks'][0]['tmdb_id'] == 1
+    assert r['picks'][0]['genre'] in r['genres']
+    assert [f['genre'] for f in r['failures']] == [g for g in r['genres'] if g != r['picks'][0]['genre']]
+
+
+def test_engine_reads_automation_db_when_settings_json_diverges(world, monkeypatch):
+    three_genre_world(world)
+    gs.save({'include_genres': ['Drama'], 'genres_per_run': 1, 'movies_per_genre': 1,
+             'imdb_min_votes': 120000, 'year_from': 1900, 'year_to': 2026, 'min_votes': 0})
+
+    class SM:
+        def get(self, k, d=None):
+            return {
+                'automation.genre_roulette.genres_per_night': 9,
+                'automation.genre_roulette.movies_per_night': 9,
+                'automation.genre_roulette.imdb_min_votes': 250000,
+                'automation.genre_roulette.year_from': 1985,
+                'automation.genre_roulette.year_to': 0,
+                'automation.genre_roulette.genres': 'Comedy',
+            }.get(k, d)
+    import app.settings_manager as smod
+    monkeypatch.setattr(smod, 'SettingsFile', SM)
+    live = gs.settings()
+    assert live['genres_per_run'] == 1 and live['movies_per_genre'] == 1
+    assert live['imdb_min_votes'] == 120000 and live['include_genres'] == ['Drama']
+    assert live['year_from'] == 1900
+    r = eng.run('manual', now=NOW, rng=random.Random(1), sleep=lambda s: None)
+    assert r['genres'] == ['Drama'] and r['wanted'] == 1
+    assert r['picks'] and all(p['genre'] == 'Drama' for p in r['picks'])
 
 
 def test_movies_per_genre_two(world):

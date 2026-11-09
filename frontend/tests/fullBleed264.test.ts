@@ -69,7 +69,9 @@ describe('v266 full-bleed phone surfaces (Home match)', () => {
     const css = readFileSync(join(SRC, 'index.css'), 'utf8');
     expect(css).toMatch(/--luma-screen-h:\s*100dvh/);
     expect(css).toMatch(/@supports \(height: 100lvh\)\s*\{\s*:root\s*\{\s*--luma-screen-h:\s*100lvh/);
-    expect(css).toMatch(/\.luma-fullscreen\s*\{[\s\S]*?height:\s*var\(--luma-screen-h\)\s*!important/);
+    expect(css).toMatch(/--luma-screen-gap:\s*0px/);
+    expect(css).toMatch(/--luma-fixed-gap:\s*0px/);
+    expect(css).toMatch(/\.luma-fullscreen\s*\{[\s\S]*?height:\s*calc\(var\(--luma-screen-h\)\s*\+\s*var\(--luma-fixed-gap,\s*0px\)\)\s*!important/);
     expect(css).toMatch(/--luma-end-pad:\s*calc\(var\(--luma-bleed\) \+ env\(safe-area-inset-bottom, 0px\)\)/);
     // no negative-bottom / ::after workarounds
     expect(css).not.toMatch(/\.luma-bleed::after/);
@@ -83,7 +85,7 @@ describe('v266 full-bleed phone surfaces (Home match)', () => {
   it('phone Settings matches Home shell (in-flow minHeight 100dvh; no fixed overflow sheet)', () => {
     const lib = readFileSync(join(SRC, 'pages/LibrariesPage.tsx'), 'utf8');
     const page = lib.match(/const sheetPage:[\s\S]*?};/)?.[0] ?? '';
-    expect(page).toMatch(/minHeight:\s*'100dvh'/);
+    expect(page).toMatch(/minHeight:\s*'calc\(100dvh \+ var\(--luma-screen-gap, 0px\)\)'/);
     expect(page).toMatch(/position:\s*'relative'/);
     expect(page).toMatch(/background:\s*'var\(--color-kiosk-black\)'/);
     expect(page).not.toMatch(/position:\s*'fixed'/);

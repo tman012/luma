@@ -7,6 +7,7 @@ import { Select, Toggle, SAVE_ERROR, primaryBtn, tvEditCss } from '@/components/
 import { ADD_MONITOR, type MonitorOption } from '@/components/library/tvCalendarApi';
 import { Field, LANGUAGES, NumField, Stepper, grCss, stamp, when } from './GenreRouletteSettings';
 import { loadTtv, loadTtvLive, runTtv, saveTtv, type TtvCounts, type TtvEntry, type TtvPatch, type TtvStatus, type TtvView } from './trendingTvApi';
+import { FoldDetails, FoldTitle, onFoldBarClick } from './AutomationFold';
 
 const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
@@ -115,6 +116,7 @@ export function TrendingTvSettings({ wide = true }: { wide?: boolean } = {}) {
   const [d, setD] = useState<TtvView | null>(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState('');
+  const [open, setOpen] = useState(false);
   const busy = useRef(false);
 
   useEffect(() => { void loadTtv().then(r => { const v = r.ok ? normTtv(r.data) : null; if (v) setD(v); else setFailed(true); }); }, []);
@@ -164,15 +166,15 @@ export function TrendingTvSettings({ wide = true }: { wide?: boolean } = {}) {
   const flip = (code: string) => put({ languages: s.languages.includes(code) ? s.languages.filter(x => x !== code) : [...s.languages, code] });
 
   return (
-    <div data-testid="trending-tv" style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
+    <div data-testid="trending-tv" data-open={open ? 'true' : 'false'} style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
       <style>{tvEditCss}{grCss}{css}</style>
-      <section className="gr-head" aria-label="Trending TV" style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
+      <section className="gr-head" aria-label="Trending TV" onClick={e => onFoldBarClick(e, () => setOpen(v => !v))} style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
           <Toggle id="ttv-enabled" on={s.enabled} onChange={v => put({ enabled: v })} label="Trending TV" />
-          <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 12, rowGap: 2, minWidth: 0 }}>
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Trending TV</h3>
+          <FoldTitle id="ttv-fold" controls="ttv-details" open={open} onToggle={() => setOpen(v => !v)}>
+            <h3 id="ttv-fold-title" style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Trending TV</h3>
             {sub && <span data-testid="ttv-sub" style={{ fontSize: 12, color: W70 }}>{sub}</span>}
-          </div>
+          </FoldTitle>
         </div>
         <div className="gr-actions" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button type="button" className="tve-primary lp-focus" data-testid="ttv-run" disabled={running} onClick={run}
@@ -180,6 +182,7 @@ export function TrendingTvSettings({ wide = true }: { wide?: boolean } = {}) {
         </div>
       </section>
       {error && <div role="alert" style={{ fontSize: 13, color: RED }}>{error}</div>}
+      <FoldDetails id="ttv-details" labelledBy="ttv-fold-title" open={open}>
       <div className="gr-grid gr-hgrid">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
           <section aria-label="Schedule" style={{ ...panel, padding: 16 }}>
@@ -216,6 +219,7 @@ export function TrendingTvSettings({ wide = true }: { wide?: boolean } = {}) {
         </div>
         <StatusPanel status={d.status} history={d.history} />
       </div>
+      </FoldDetails>
     </div>
   );
 }

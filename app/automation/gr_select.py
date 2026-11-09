@@ -1,8 +1,9 @@
 """v252 Genre Roulette: choosing films (ported from prod 1b4ea74 app/genre_roulette.py, Radarr-free).
 
-TMDb discover, most-voted first, 20 a page, walked per genre from a saved cursor (:561-877); only films
-whose PRIMARY genre (genre_ids[0]) is the spun genre (:637-640); least-compromise widening stages (:153);
-best-first round robin per genre (:879). Ownership is the Plex movie sections plus in-flight grabs
+TMDb discover, most-voted first, 20 a page, walked per genre from a saved cursor (:561-877). A film
+may fill a slot when that genre appears anywhere in genre_ids (a multi-genre film is one film, one slot).
+Least-compromise widening stages (:153); best-first round robin per genre (:879). Ownership is the Plex
+movie sections plus in-flight grabs
 (movie_grabs and the grab_origin store), not upgrade_library.db; an empty Plex answer refuses the run
 (:927-931). IMDb numbers come from app/omdb.get_ratings (fail open; the gate applies only when an OMDb key
 is saved and a floor is above 0, :1859).
@@ -128,14 +129,15 @@ def discover_page(params: Dict[str, Any], genre: str, page: int) -> Optional[Tup
         if not tid or not rel.isdigit() or not ids:
             continue
         try:
-            if int(ids[0]) != want:                     # primary genre only
-                continue
+            id_list = [int(x) for x in ids]
         except (TypeError, ValueError):
+            continue
+        if want not in id_list:
             continue
         films.append({'tmdb_id': int(tid), 'title': m.get('title') or m.get('original_title') or '',
                       'year': int(rel), 'votes': int(m.get('vote_count') or 0),
                       'rating': float(m.get('vote_average') or 0), 'poster_path': m.get('poster_path') or '',
-                      'genre': genre})
+                      'genre': genre, 'slots': [genre]})
     return films, total
 
 
@@ -178,7 +180,20 @@ def draw_stage(params_for, s_genres, walk, target, pool, stage) -> Tuple[int, Li
 
     def absorb(found):
         for f in found:
-            pool.setdefault(f['tmdb_id'], f)
+            slot = f.get('genre')
+            cur = pool.get(f['tmdb_id'])
+            if cur is None:
+                slots = [s for s in (f.get('slots') or []) if s]
+                if slot and slot not in slots:
+                    slots.append(slot)
+                f['slots'] = slots
+                pool[f['tmdb_id']] = f
+                continue
+            if not slot:
+                continue
+            slots = cur.setdefault('slots', [cur['genre']] if cur.get('genre') else [])
+            if slot not in slots:
+                slots.append(slot)
 
     share = max(1, -(-target // max(1, len(s_genres))))
     ctxs: Dict[str, Dict[str, Any]] = {}
@@ -258,6 +273,19 @@ def next_cursors(walk: Dict[str, Any]) -> Dict[str, Any]:
         page = 1 if ctx['done'] else ctx['hold'] if ctx['hold'] is not None else ctx['last'] + 1
         pages[f'{stage}|{genre}'] = max(1, page)
     return {'sig': walk['sig'], 'pages': pages}
+
+
+def film_slots(film: Dict[str, Any]) -> List[str]:
+    slots = film.get('slots')
+    if isinstance(slots, list) and slots:
+        return [str(s) for s in slots if s]
+    g = film.get('genre')
+    return [str(g)] if g else []
+
+
+def for_slot(films: List[Dict[str, Any]], genre: str) -> List[Dict[str, Any]]:
+    """Films that list this genre, whether it is the first genre TMDb returned or another."""
+    return [f for f in films if genre in film_slots(f)]
 
 
 def best_first(films: List[Dict[str, Any]], genres: List[str], rng: random.Random) -> List[Dict[str, Any]]:

@@ -452,7 +452,7 @@ const deskTitle: React.CSSProperties = {
  * Do not spread homePage (backgroundAttachment:fixed seam). SHEET_SCROLL_PAD stays in
  * scroll content only; never on the wrapper. */
 const sheetPage: React.CSSProperties = {
-  minHeight: '100dvh',
+  minHeight: 'calc(100dvh + var(--luma-screen-gap, 0px))',
   position: 'relative',
   background: 'var(--color-kiosk-black)',
   color: '#fff',
@@ -464,7 +464,7 @@ export const SHEET_SCROLL_PAD = 'calc(var(--luma-end-pad) + 24px)';
 const sheet: React.CSSProperties = {
   // In-flow under the status bar; background runs to the page bottom (Home match).
   marginTop: 'calc(env(safe-area-inset-top) + 8px)',
-  minHeight: 'calc(100dvh - env(safe-area-inset-top) - 8px)',
+  minHeight: 'calc(100dvh - env(safe-area-inset-top) - 8px + var(--luma-screen-gap, 0px))',
   // App navy token (#15102a = --color-kiosk-black) + white 4% + the StartUI navy glow at top.
   backgroundColor: 'var(--color-kiosk-black)',
   backgroundImage: `linear-gradient(rgba(255,255,255,0.04), rgba(255,255,255,0.04)), ${NAVY_BG}`,

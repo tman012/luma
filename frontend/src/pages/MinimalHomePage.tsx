@@ -357,7 +357,7 @@ const retryBtn: React.CSSProperties = {
 };
 
 export const homePage: React.CSSProperties = {
-  minHeight: '100dvh', color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
+  minHeight: 'calc(100dvh + var(--luma-screen-gap, 0px))', color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
   background: NAVY_BG, backgroundAttachment: 'fixed',
 };
 /** v213 (Designer): the home page behind the rails is prod 1b4ea74's flat navy, no glow (settings keep homePage's). */

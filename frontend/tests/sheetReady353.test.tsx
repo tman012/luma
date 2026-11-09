@@ -226,6 +226,10 @@ describe('startup and background refresh', () => {
     const el = screen.getByTestId('startup-loading');
     expect(el.textContent).toContain(STARTUP_LOADING_TEXT);
     expect(STARTUP_LOADING_TEXT).toBe('Loading\u2026');
+    const spin = el.querySelector('.luma-spin') as HTMLElement;
+    expect(parseFloat(spin.style.width)).toBeGreaterThanOrEqual(40);
+    expect(parseFloat(spin.style.height)).toBeGreaterThanOrEqual(40);
+    expect(parseFloat((el.querySelector('p') as HTMLElement).style.fontSize)).toBeGreaterThanOrEqual(28);
     expect(screen.queryByTestId('home-skeleton')).toBeNull();
     expect(screen.queryByText('Nothing here yet')).toBeNull();
     expect(screen.queryByTestId('home-rails')).toBeNull();
@@ -234,6 +238,8 @@ describe('startup and background refresh', () => {
   it('the document splash reuses the navy glow and the same Loading… word', () => {
     const html = readFileSync(resolve(__dirname, '../index.html'), 'utf8');
     expect(html).toContain('Loading\u2026');
+    expect(html).toMatch(/#splash-ring\s*\{[^}]*width:\s*48px/);
+    expect(html).toMatch(/font:\s*600 32px/);
     expect(html).toContain('#262a66 0%, #15102a 55%, #0a0818 100%');
     expect(html).toContain('prefers-reduced-motion: reduce');
     expect(src('components/start/StartUI.tsx')).toContain('.luma-spin,.luma-start-fade{animation:none}');

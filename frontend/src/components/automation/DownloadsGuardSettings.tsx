@@ -8,6 +8,7 @@ import { FONT } from '@/components/start/StartUI';
 import { Select, Toggle, SAVE_ERROR, field, glassBtn, tvEditCss } from '@/components/library/TvEdit';
 import { formatBytes } from '@/services/storageApi';
 import { Field, NumField, grCss, when } from './GenreRouletteSettings';
+import { FoldDetails, FoldTitle, onFoldBarClick } from './AutomationFold';
 import {
   keepDg, loadDg, loadDgStatus, loadDgTrackers, normalizeDgStatus, normalizeDgView, previewDg, runDg, saveDg, unkeepDg,
   type DgEntry, type DgRow, type DgLogEntry, type DgPreview, type DgResult, type DgSettings, type DgStatus,
@@ -266,6 +267,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
   const [preview, setPreview] = useState<DgPreview | null>(null);
   const [busy, setBusy] = useState<'preview' | 'run' | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const started = useRef(false);
@@ -354,13 +356,13 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
   const off = !d.allowed;
 
   return (
-    <div data-testid="downloads-guard" style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
+    <div data-testid="downloads-guard" data-open={open ? 'true' : 'false'} style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
       <style>{tvEditCss}{grCss}</style>
-      <section className="gr-head" aria-label="Downloads Guard" style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 12, rowGap: 2, flex: 1, minWidth: 0 }}>
-          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Downloads Guard</h3>
+      <section className="gr-head" aria-label="Downloads Guard" onClick={e => onFoldBarClick(e, () => setOpen(v => !v))} style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
+        <FoldTitle id="dg-fold" controls="dg-details" open={open} onToggle={() => setOpen(v => !v)}>
+          <h3 id="dg-fold-title" style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Downloads Guard</h3>
           <span data-testid="dg-sub" style={{ fontSize: 12, color: W70 }}>{sub}</span>
-        </div>
+        </FoldTitle>
         <div className="gr-actions" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button type="button" className="tve-glass lp-focus" data-testid="dg-preview" disabled={busy !== null || running} onClick={doPreview}
             style={{ ...glassBtn, ...pill, opacity: busy !== null || running ? 0.5 : 1 }}>{busy === 'preview' ? 'Checking' : 'Preview'}</button>
@@ -384,6 +386,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
       )}
       {error && <div role="alert" style={{ fontSize: 13, color: RED }}>{error}</div>}
 
+      <FoldDetails id="dg-details" labelledBy="dg-fold-title" open={open}>
       <div className="gr-grid">
         <section aria-label="Settings" style={{ ...panel, padding: 16, display: 'flex', flexDirection: 'column', gap: 18 }}>
           <Switch id="dg-enabled" label="Enable Downloads Guard" on={s.enabled} onChange={v => put({ enabled: v })} />
@@ -441,6 +444,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
           <Activity log={log} />
         </div>
       </div>
+      </FoldDetails>
     </div>
   );
 }

@@ -1,20 +1,22 @@
 """v252 Genre Roulette: one run (ported from prod 1b4ea74 run_cycle, :1772-2500, without Radarr).
 
-Spin the wheel, draw unowned films (gr_select), gate on IMDb when an OMDb key is saved, then per spun genre
-try its most famous passers until one grabs (one per genre; a failed genre's slot is never handed to more
-of the same genre before the others have had their turn), then fill by fame, relax the IMDb vote floor and
-borrow enabled genres. Each try searches the trackers on in Settings > Movies (tv_search.query_trackers, the
-movie scanner's automatic budget), ranks by the chosen Settings > Movies quality profile and minimum seeders,
-and grabs through the movie scanner's qBittorrent path (movie_scanner.grab: duplicate check, movie category,
-movie_grabs row). The movie importer files it under Settings > Library Paths / Movies naming.
+Spin the wheel, draw unowned films (gr_select), gate on IMDb when an OMDb key is saved, then for each spun
+genre try films that list that genre until its per-genre count grabs. A film fills at most one slot. The
+stored genre on a pick is that slot. A short slot stays short: leftover count is not taken from a genre
+that already met its count, and a genre that was not spun is not grabbed to make the total. While a slot
+is still short the run relaxes the IMDb vote floor and walks that spun genre deeper. Each try searches
+the trackers on in Settings > Movies (tv_search.query_trackers, the movie scanner's automatic budget),
+ranks by the chosen Settings > Movies quality profile and minimum seeders, and grabs through the movie
+scanner's qBittorrent path (movie_scanner.grab: duplicate check, movie category, movie_grabs row). The
+movie importer files it under Settings > Library Paths / Movies naming.
 
-Rules kept from prod: primary genre only; one pick per spun genre; per-genre retry through the bucket;
-collection dedupe against recent grabs and this run (:2148); a run that fails early does not advance the
-wheel or cursors (:2468). v252 fixes: (1b) no fixed 25-search exit: the run keeps filling until the target is
-met, the attempt or time budget is spent, the pool is exhausted, or trackers/qBittorrent are unreachable, and
-records that stop_reason; (2b) a film whose TMDb collection already has a part in the library is skipped
-(logged with the owned title). A grab that reports the film already in the library or in qBittorrent is
-never retried with another release (the old duplicate/undo loop).
+Rules kept from prod: one pick per spun genre; per-genre retry through that genre's films; collection
+dedupe against recent grabs and this run (:2148); a run that fails early does not advance the wheel or
+cursors (:2468). A film may fill a slot when that genre is anywhere in its TMDb genre_ids. v252: no fixed
+25-search exit while a spun genre still has films and budget remains. A shortfall records pool_exhausted
+(or the real abort) and the short slots; it is not target_met. (2b) a film whose TMDb collection already
+has a part in the library is skipped (logged with the owned title). A grab that reports the film already
+in the library or in qBittorrent is never retried with another release (the old duplicate/undo loop).
 """
 from __future__ import annotations
 
@@ -34,7 +36,6 @@ MAX_RELEASE_ATTEMPTS = 4
 MAX_SEARCH_FAILURES = 3
 IMDB_MAX_LOOKUPS = 200
 IMDB_MAX_FAILURES = 3
-FILL_EXTRA_GENRES = 3
 # v303: when every tracker is paced (tv spacing / SLOT_BUSY / rate), wait for the
 # next Luma spacing slot (~AUTO_MIN_GAP_S) and keep searching remaining films
 # instead of aborting the night at 1/3. Cap waits so a real long rate backoff
@@ -456,34 +457,27 @@ def _run(cfg, dry, kind, now, rng, run_id, sleep, clock) -> Dict[str, Any]:
         sleep(SEARCH_PAUSE)
         return 'none'
 
-    def drain(bucket: List[Dict[str, Any]], genre: Optional[str]) -> None:
+    def drain(bucket: List[Dict[str, Any]], genre: str) -> None:
+        """Try films for this slot only. The copy carries the slot as its genre so history
+        matches the assignment even when the shared film was first tagged with another slot."""
         for film in bucket:
             if budget_left():
                 return
-            if genre and by_genre_got.get(genre, 0) >= per_genre:
+            if by_genre_got.get(genre, 0) >= per_genre:
                 return
-            if attempt(film) == 'grabbed':
-                by_genre_got[film['genre']] = by_genre_got.get(film['genre'], 0) + 1
+            bound = dict(film)
+            bound['genre'] = genre
+            if attempt(bound) == 'grabbed':
+                by_genre_got[genre] = by_genre_got.get(genre, 0) + 1
 
-    def fill(pool: List[Dict[str, Any]]) -> None:
-        drain(sorted([f for f in pool if int(f['tmdb_id']) not in tried], key=lambda f: fame_key(f, this_year)), None)
+    def ranked(pool: List[Dict[str, Any]], genre: str) -> List[Dict[str, Any]]:
+        return sorted(sel.for_slot(pool, genre), key=lambda f: fame_key(f, this_year))
 
-    def buckets(pool: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-        out: Dict[str, List[Dict[str, Any]]] = {}
-        for f in pool:
-            out.setdefault(f['genre'], []).append(f)
-        for b in out.values():
-            b.sort(key=lambda f: fame_key(f, this_year))
-        return out
-
-    # Phase 1: a fair shot per spun genre
-    by_genre = buckets(passers)
+    # One pass per spun genre. A film that lists the genre may fill that slot once.
+    # Nothing grabs a second film of a genre that already met its count, and nothing
+    # grabs a genre that was not spun, to fill a short count.
     for g in spun:
-        drain(by_genre.get(g) or [], g)
-    # Phase 2: leftover slots by fame among the passers
-    if not budget_left():
-        fill(passers)
-    # Phase 3: relax the IMDb vote floor and keep filling
+        drain(ranked(passers, g), g)
     floors = sel.relax_ladder(imdb_votes) if gate and imdb_votes else []
     for floor in floors:
         if budget_left():
@@ -492,13 +486,10 @@ def _run(cfg, dry, kind, now, rng, run_id, sleep, clock) -> Dict[str, Any]:
         held = [f for f in held if f not in newly]
         if not newly:
             continue
-        nb = buckets(newly)
         for g in spun:
             if by_genre_got.get(g, 0) < per_genre:
-                drain(nb.get(g) or [], g)
-        if not budget_left():
-            fill(newly)
-    # Phase 3b (1b): walk this run's genres deeper (next pages from the cursors) until they run out
+                drain(ranked(newly, g), g)
+    # Walk this run's genres deeper while a slot is still short.
     while not budget_left():
         more = sel.deeper(cand, tried | grabbed_now, max((want - got['n']) * sel.FRESH_PER_WANTED, sel.MIN_FRESH_POOL),
                           own.get('title_years') or set())
@@ -508,35 +499,11 @@ def _run(cfg, dry, kind, now, rng, run_id, sleep, clock) -> Dict[str, Any]:
         lowest = (floors[-1] if floors else imdb_votes)
         admitted = [f for f in more if verdict(f, lowest)]
         held += [f for f in more if f not in admitted]
-        nb = buckets(admitted)
         for g in spun:
             if by_genre_got.get(g, 0) < per_genre:
-                drain(nb.get(g) or [], g)
-        if not budget_left():
-            fill(admitted)
+                drain(ranked(admitted, g), g)
         if not admitted and not [f for f in more if int(f['tmdb_id']) not in tried]:
             break
-    # Phase 4 (1b): borrow more enabled genres, in rounds, until a stop condition
-    borrowed: List[str] = []
-    extras = [g for g in sel.wheel(cfg) if g not in spun]
-    rng.shuffle(extras)
-    while not budget_left() and extras:
-        batch, extras = extras[:FILL_EXTRA_GENRES], extras[FILL_EXTRA_GENRES:]
-        borrowed += batch
-        exclude = cand['excluded'] | tried | grabbed_now | {int(f['tmdb_id']) for f in films}
-        floor_v = sel.prefilter_votes(int(cfg.get('min_votes') or 0), imdb_votes)
-        more = sel.supplement(cfg, batch, exclude, max((want - got['n']) * sel.FRESH_PER_WANTED, sel.MIN_FRESH_POOL),
-                              floor_v)
-        tys = own.get('title_years') or set()
-        more = [f for f in more if (sel.norm(f['title']), f['year']) not in tys]
-        films += more
-        lowest = (floors[-1] if floors else imdb_votes)
-        admitted = [f for f in more if verdict(f, lowest)]
-        nb = buckets(admitted)
-        for g in batch:
-            drain(nb.get(g) or [], g)
-        if not budget_left():
-            fill(admitted)
 
     stop = budget_left() or 'pool_exhausted'
     failures = []
@@ -544,15 +511,17 @@ def _run(cfg, dry, kind, now, rng, run_id, sleep, clock) -> Dict[str, Any]:
         if by_genre_got.get(g, 0) >= per_genre:
             continue
         n = genre_notes.get(g, {})
+        has = bool(sel.for_slot(films, g))
+        passed = bool(sel.for_slot(passers, g))
         reason = ('No release found' if n.get('no_release') or n.get('refused')
                   else 'Same collection' if n.get('owned_collection') or n.get('same_collection')
                   else 'Already in the library' if n.get('owned')
-                  else 'Below IMDb floors' if gate and not by_genre.get(g) and any(f['genre'] == g for f in films)
-                  else 'No candidates' if not any(f['genre'] == g for f in films)
+                  else 'Below IMDb floors' if gate and has and not passed
+                  else 'No candidates' if not has
                   else 'Not reached')
         failures.append({'genre': g, 'reason': reason})
     result = {**base, 'picks': picks, 'grabbed': got['n'], 'skips': skips, 'failures': failures,
-              'stop_reason': stop, 'borrowed_genres': borrowed,
+              'stop_reason': stop, 'borrowed_genres': [],
               'stats': {'attempts': ctr['attempts'], 'tried': ctr['tried'], 'imdb_lookups': ctr['lookups'],
                         'imdb_fail_open': ctr['imdb_open'], 'imdb_gate': gate, 'considered': cand.get('considered'),
                         'pages_read': cand.get('pages_read'), 'widened': cand.get('widened'),

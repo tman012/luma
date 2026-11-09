@@ -57,6 +57,7 @@ describe('v253 Settings > Automation > Anticipated', () => {
     render(<AnticipatedSettings />);
     await waitFor(() => expect(screen.getByTestId('anticipated')).toBeTruthy());
     expect(screen.getByRole('heading', { name: 'Anticipated' })).toBeTruthy();
+    fireEvent.click(screen.getByTestId('an-fold'));
     for (const t of ['Check every', 'When Trakt is busy', 'History kept', 'Shows per run', 'Movies per run', 'Library', 'Monitor',
       'Skip shows without a TVDB ID', "Don't re-add removed shows", "Don't re-add removed movies", 'Skip shows in Plex', 'Skip movies in Plex']) {
       expect(screen.getByText(t)).toBeTruthy();
@@ -95,6 +96,7 @@ describe('v253 Settings > Automation > Anticipated', () => {
     const calls = stub();
     render(<AnticipatedSettings />);
     await waitFor(() => expect(screen.getByTestId('anticipated')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('an-fold'));
     fireEvent.click(within(screen.getByTestId('an-movies')).getByRole('switch', { name: 'Movies' }));
     await waitFor(() => expect(puts(calls)).toEqual([{ movies: { enabled: true } }]));
     fireEvent.click(screen.getByTestId('an-shows-limit-plus'));
@@ -133,6 +135,7 @@ describe('v253 Settings > Automation > Anticipated', () => {
     stub((url, init) => (init?.method ? ok({ error: 'Sign in' }, 401) : undefined));
     render(<AnticipatedSettings />);
     await waitFor(() => expect(screen.getByTestId('anticipated')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('an-fold'));
     fireEvent.click(within(screen.getByTestId('an-shows')).getByRole('switch', { name: 'Shows' }));
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
     expect(within(screen.getByTestId('an-shows')).getByRole('switch', { name: 'Shows' }).getAttribute('aria-checked')).toBe('false');
