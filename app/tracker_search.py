@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from app import tracker_clients, tracker_types as tt
 from app.tracker_guard import TrackerGuard, address_scope, get_guard, guard_key, guarded_test, record_failure
 from app.tracker_http import TrackerError
+from app.torrent_submit import prefer_download_target
 from app.tracker_store import STATUS_ERROR, STATUS_OK, TrackerStore, get_store
 
 logger = logging.getLogger(__name__)
@@ -456,7 +457,8 @@ class TrackerSearch:
         """A client result in the shared raw item shape (indexer_api.parse_items), secrets removed."""
         link = r.get('download_url') or ''
         magnet = r.get('magnet_url') or ''
-        target = link or magnet
+        # An http download stays the payload. A trackerless magnet does not hide a magnet that has tr=.
+        target = prefer_download_target(link, magnet)
         if not target:
             return None
         title = r.get('title') or ''

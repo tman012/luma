@@ -5,9 +5,9 @@ luma-tv on prod) as BOTH its qBittorrent category and its only tag, so the TV do
 imports it and nothing else in a shared qBittorrent is touched. No save path is ever sent.
 
 On LUMA_INSTANCE=test a grab is a gated job ('tv_grab', OFF unless LUMA_TEST_ALLOW names it),
-checked here and again at the write call: the instance write guard lets exactly one kind of
-qBittorrent write through for it (instance.scoped_add: torrents/add with that category and tag),
-while every other qBittorrent write stays blocked. Prod: always allowed here; the automatic
+checked here and again at the write call: the instance write guard lets torrents/add through
+(instance.scoped_add: that category and tag) and torrents/addTrackers for the hash just named.
+Every other qBittorrent write stays blocked. Prod: always allowed here; the automatic
 searches that lead to grabs have their own switches (tv_settings automation, off by default).
 
 The release comes from one of the owner's own trackers, through the release token the search
@@ -305,6 +305,7 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         # v171 (Tester FF-1): a magnet with no (or a short) btih is a bad link: 400 at the route, no fallback
         return {'ok': False, 'error': NO_HASH, 'link': True, 'status': 400}
     reopen = False
+    existing = False
     with tv_store.connect() as conn:
         g = conn.execute('SELECT state FROM grabs WHERE hash = ?', (h,)).fetchone()
         if g is not None:
@@ -316,12 +317,20 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
             if g['state'] in REVIVE_STATES:
                 reopen = True
             elif origin != 'manual' or g['state'] not in ('imported', 'partial'):
-                return {'ok': True, 'hash': h, 'existing': True, 'grabbed': False, 'reason': 'existing'}
+                existing = True
             else:
                 reopen = True
-        if conn.execute('SELECT 1 FROM blocklist WHERE info_hash = ? OR (release_title = ? AND series_id = ?)',
-                        (h, item.get('title'), series_id)).fetchone():
+        if not existing and conn.execute(
+                'SELECT 1 FROM blocklist WHERE info_hash = ? OR (release_title = ? AND series_id = ?)',
+                (h, item.get('title'), series_id)).fetchone():
             return {'ok': False, 'error': 'Blocklisted'}
+    if existing:
+        # The row already exists. Do not upload again. If this payload carries trackers the
+        # session is missing, add those URLs; a missing tracker list is not a successful dedupe.
+        bad = _existing_trackers(session_factory, kind, payload, h, now)
+        if bad:
+            return bad
+        return {'ok': True, 'hash': h, 'existing': True, 'grabbed': False, 'reason': 'existing'}
     from app import grab_cache           # import_reconciler re-adds a grab qBittorrent lost (after the dedupe
     grab_cache.save(h, kind, payload, now)   # and blocklist checks, so a refused grab is not cached)
     eids = [int(e) for e in episode_ids]
@@ -340,8 +349,31 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         _release(eids, h)
 
 
+def _existing_trackers(session_factory, kind, payload, h, now):
+    """Repair a duplicate's missing trackers. None when the existing-row success still holds."""
+    from app import library_mover as mover, torrent_submit as submit
+    info = submit.inspect(kind, payload)
+    if info.private is not True and not info.has_usable:
+        return None
+    sess, url = mover._qbit_session(session_factory, now)
+    if not sess:
+        return submit.failure(submit.PENDING)
+    try:
+        with instance.scoped_add(JOB, tv_downloads.category()) as scope:
+            outcome = submit.settle(sess, url, h, kind, payload, duplicate=True, sent=False,
+                                    permit=scope.allow_trackers)
+    except requests.RequestException:
+        return submit.failure(submit.PENDING)
+    finally:
+        mover._close(sess)
+    if info.private is True and outcome != submit.CONFIRMED:
+        return submit.failure(submit.PENDING if outcome == submit.SKIP else outcome)
+    return submit.failure(outcome)
+
+
 def _send(item, series_id, season, episode_ids, origin, now, session_factory, kind, payload, h, reopen):
-    from app import library_mover as mover
+    from app import library_mover as mover, torrent_submit as submit
+    from app.qbit_connector import text_of, ok_status, add_ok, add_pending
     name = tv_downloads.category()
     sess, url = mover._qbit_session(session_factory, now)
     if not sess:
@@ -354,19 +386,43 @@ def _send(item, series_id, season, episode_ids, origin, now, session_factory, ki
                 _job_failed(h, item, series_id, why, now)
             mover._close(sess)
             return {'ok': False, 'error': why, **({'blocked': True} if why == OFF else {})}
-    except Exception as e:                                   # noqa: BLE001 - fail cleanly, never crash
+    except Exception:                                        # noqa: BLE001 - fail cleanly, never crash
         logger.exception('TV grab: category check failed')
         mover._close(sess)
         _job_failed(h, item, series_id, CATEGORY_FAILED.format(name), now)
         return {'ok': False, 'error': CATEGORY_FAILED.format(name)}
+    refused = None
+    outcome = submit.SKIP
     try:
-        with instance.scoped_add(JOB, name):
-            if kind == 'torrent':
-                r = sess.post(f'{url}/api/v2/torrents/add', data=_fields(name), timeout=30, allow_redirects=False,
-                              files={'torrents': ('release.torrent', payload, 'application/x-bittorrent')})
-            else:
-                r = sess.post(f'{url}/api/v2/torrents/add', data={'urls': payload, **_fields(name)}, timeout=30,
-                              allow_redirects=False)
+        pre = submit.precheck(sess, url, h, kind, payload)
+        if pre != submit.SKIP:
+            outcome = pre
+        else:
+            with instance.scoped_add(JOB, name) as scope:
+                if kind == 'torrent':
+                    r = sess.post(f'{url}/api/v2/torrents/add', data=_fields(name), timeout=30,
+                                  allow_redirects=False,
+                                  files={'torrents': ('release.torrent', payload, 'application/x-bittorrent')})
+                else:
+                    r = sess.post(f'{url}/api/v2/torrents/add', data={'urls': payload, **_fields(name)},
+                                  timeout=30, allow_redirects=False)
+                if add_pending(r):
+                    outcome = submit.PENDING
+                elif reopen and ok_status(r.status_code) and text_of(r).strip() == 'Fails.':
+                    outcome = submit.settle(sess, url, h, kind, payload, duplicate=True, sent=True,
+                                            permit=scope.allow_trackers)
+                elif not add_ok(r):
+                    info = submit.inspect(kind, payload)
+                    if info.private is True or info.has_usable:
+                        outcome = submit.settle(sess, url, h, kind, payload, duplicate=True, sent=True,
+                                                permit=scope.allow_trackers)
+                        if outcome == submit.SKIP:
+                            refused = r
+                    else:
+                        refused = r
+                else:
+                    outcome = submit.settle(sess, url, h, kind, payload, duplicate=False, sent=True,
+                                            permit=scope.allow_trackers)
     except instance.WritesBlocked:
         return {'ok': False, 'error': OFF, 'blocked': True}
     except requests.RequestException as e:
@@ -375,14 +431,17 @@ def _send(item, series_id, season, episode_ids, origin, now, session_factory, ki
         return {'ok': False, 'error': NO_CLIENT, 'client': True}
     finally:
         mover._close(sess)
-    from app.qbit_connector import text_of, ok_status, add_ok
-    if reopen and ok_status(r.status_code) and text_of(r).strip() == 'Fails.':
-        pass                                                 # still in the client: the watcher imports it again
-    elif not add_ok(r):
-        err = (f'qBittorrent returned HTTP {r.status_code}' if not ok_status(r.status_code)
+    if submit.inspect(kind, payload).private is True and outcome != submit.CONFIRMED:
+        outcome = submit.PENDING if outcome == submit.SKIP else outcome
+    bad = submit.failure(outcome)
+    if bad:
+        _job_failed(h, item, series_id, bad['error'], now)
+        return bad
+    if refused is not None:
+        err = (f'qBittorrent returned HTTP {refused.status_code}' if not ok_status(refused.status_code)
                else 'qBittorrent refused the torrent')
         _job_failed(h, item, series_id, err, now)
-        if ok_status(r.status_code):                         # a real qBittorrent refusal: it reached the client
+        if ok_status(refused.status_code):                  # a real qBittorrent refusal: it reached the client
             for e in episode_ids:
                 tv_store.set_meta(f'{CLAIM_KEY}{int(e)}', json.dumps({'hash': h, 'at': now, 'reason': 'refused'}))
         return {'ok': False, 'error': err}

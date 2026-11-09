@@ -300,11 +300,12 @@ def write_kind(method: str, url: str) -> Optional[str]:
     return None
 
 
-# A scoped exemption (v158b TV grabs): inside scoped_add(job, name) on this thread, two kinds of
-# qBittorrent write may pass even with 'qbit' off, only while *job* itself is allowed:
+# A scoped exemption (v158b TV grabs): inside scoped_add(job, name) on this thread, qBittorrent
+# writes may pass even with 'qbit' off, only while *job* itself is allowed:
 # torrents/add whose category and tags are exactly *name* (no save path), and (v158c) creating
-# that one category, torrents/createCategory with category *name* and no save path. Every other
-# write stays blocked.
+# that one category, torrents/createCategory with category *name* and no save path. addTrackers
+# is allowed only after allow_trackers(hashes), for those hashes, fields exactly hash and urls.
+# Every other write stays blocked.
 _scope = threading.local()
 
 
@@ -314,12 +315,19 @@ class scoped_add:
 
     def __enter__(self):
         self.prev = getattr(_scope, 'v', None)
+        self.prev_th = getattr(_scope, 'th', None)
         _scope.v = (self.job, self.name)
+        _scope.th = None
         return self
 
     def __exit__(self, *exc):
         _scope.v = self.prev
+        _scope.th = self.prev_th
         return False
+
+    def allow_trackers(self, hashes) -> None:
+        """Permit torrents/addTrackers for these hashes until this scope exits. No other write."""
+        _scope.th = frozenset(str(h).strip().lower() for h in hashes if str(h).strip())
 
 
 class scoped_delete:
@@ -429,6 +437,35 @@ def _scoped_ok(request) -> bool:
     return exact.get('autoTMM') == 'false'
 
 
+def _scoped_trackers_ok(request) -> bool:
+    """torrents/addTrackers for a hash just named by scoped_add.allow_trackers.
+
+    Fields are exactly hash and urls, each once, no query string. urls must be non-empty.
+    removeTrackers, editTracker, and any other hash stay blocked.
+    """
+    v = getattr(_scope, 'v', None)
+    allowed = getattr(_scope, 'th', None)
+    if not v or not allowed or not writes_allowed(v[0]):
+        return False
+    if (request.method or '').upper() != 'POST':
+        return False
+    u = urlsplit(request.url or '')
+    m = _QBIT.search(u.path or '')
+    if not m or m.group(1) != 'addTrackers' or u.query or u.fragment:
+        return False
+    fields = _fields(request)
+    if fields is None:
+        return False
+    names = [k for k, _ in fields]
+    if names != ['hash', 'urls'] and sorted(names) != ['hash', 'urls']:
+        return False
+    if len(names) != 2 or any(val is None for _, val in fields):
+        return False
+    exact = dict(fields)
+    h = str(exact.get('hash') or '').strip().lower()
+    return bool(h) and h in allowed and bool(str(exact.get('urls') or '').strip())
+
+
 _installed = {'on': False}
 _ilock = threading.Lock()
 
@@ -445,7 +482,8 @@ def install_write_guard() -> bool:
         def send(self, request, **kw):
             kind = write_kind(request.method, request.url)
             if kind and not writes_allowed(kind) and not (kind == 'qbit' and (_scoped_ok(request)
-                                                                             or _scoped_delete_ok(request))):
+                                                                             or _scoped_delete_ok(request)
+                                                                             or _scoped_trackers_ok(request))):
                 logger.warning('Instance test: blocked %s %s (%s write)', request.method, urlsplit(request.url).path, kind)
                 raise WritesBlocked(f'{kind} writes are off on the test instance')
             return orig(self, request, **kw)

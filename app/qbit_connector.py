@@ -190,23 +190,49 @@ def _text_of(r) -> str:
 text_of = _text_of
 
 
+def _add_counts(r) -> Optional[dict]:
+    body = _text_of(r).strip()
+    if not body.startswith('{'):
+        return None
+    import json
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def add_pending(r) -> bool:
+    """True when torrents/add has not confirmed a torrent yet.
+
+    qBittorrent 5.x (WebAPI 2.11.4+) answers HTTP 202 with pending_count > 0 when a URL add has no
+    infohash yet (Async). failure_count == 0 in that body is not a confirmed torrent and not a refusal."""
+    if not ok_status(getattr(r, 'status_code', None)):
+        return False
+    data = _add_counts(r)
+    if data is None:
+        return False
+    count = data.get('pending_count')
+    return isinstance(count, int) and not isinstance(count, bool) and count > 0
+
+
 def add_ok(r) -> bool:
     """True when a torrents/add reply means the torrent was taken: HTTP 2xx and a body of 'Ok.', empty, or
-    (qBittorrent 5.2.0+, WebAPI 2.14.0) JSON with failure_count == 0. Anything else ('Fails.', failure_count > 0) is a refusal."""
+    (qBittorrent 5.2.0+, WebAPI 2.14.0) JSON with failure_count == 0 and no pending_count > 0.
+    Anything else ('Fails.', failure_count > 0) is a refusal. pending_count > 0 is not acceptance
+    (see add_pending): the torrent is not in the session yet."""
+    if add_pending(r):
+        return False
     if not ok_status(getattr(r, 'status_code', None)):
         return False
     body = _text_of(r).strip()
     if body in ('Ok.', ''):
         return True
-    if body.startswith('{'):
-        import json
-        try:
-            data = json.loads(body)
-        except ValueError:
-            return False
-        fc = data.get('failure_count') if isinstance(data, dict) else None
-        return isinstance(fc, int) and not isinstance(fc, bool) and fc == 0
-    return False
+    data = _add_counts(r)
+    if data is None:
+        return False
+    fc = data.get('failure_count')
+    return isinstance(fc, int) and not isinstance(fc, bool) and fc == 0
 
 
 def ok_status(code) -> bool:

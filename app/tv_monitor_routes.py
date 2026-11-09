@@ -500,5 +500,8 @@ def popup_grab():
         return _out({'ok': True, 'series_id': sid, 'existing': bool(g.get('existing'))})
     if g.get('link') and g.get('status') == 400:      # v169 (Tester): a refused target (internal or metadata IP,
         return _out({'ok': False, 'error': g.get('error'), 'fallback': False}, 400)   # file:, another site): no fallback
-    return _out({'ok': False, 'error': g.get('error'), 'blocked': bool(g.get('blocked')),
-                 'fallback': bool(g.get('link') or g.get('client'))})
+    out = {'ok': False, 'error': g.get('error'), 'blocked': bool(g.get('blocked')),
+           'fallback': bool(g.get('link') or g.get('client'))}
+    if g.get('pending'):
+        out['pending'] = True
+    return _out(out)
