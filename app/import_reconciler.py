@@ -371,9 +371,10 @@ def grab_hashes(now: float) -> Set[str]:
 def readd(g: Dict[str, Any], kind: str, payload: Any, session_factory: Callable = requests.Session,
           now: Optional[float] = None) -> Optional[str]:
     """Send the cached .torrent/magnet to qBittorrent again in the grab's own category (and tag).
-    None when qBit took it, else why not."""
-    from app import library_mover as mover, tv_grab
-    from app.qbit_connector import add_ok
+    None when qBit took it (and a private payload's trackers are in the session), else why not.
+    A duplicate that is already present gets any missing supplied trackers; it is not deleted."""
+    from app import library_mover as mover, torrent_submit as submit, tv_grab
+    from app.qbit_connector import add_ok, add_pending
     if g['kind'] == 'tv':
         name, job = tv_downloads_category(), tv_grab.JOB
     else:
@@ -386,14 +387,40 @@ def readd(g: Dict[str, Any], kind: str, payload: Any, session_factory: Callable 
         why = tv_grab.ensure_category(sess, url, name, job=job)
         if why:
             return why
-        with instance.scoped_add(job, name):
+        h = str(g.get('hash') or '').strip().lower()
+        got = tv_grab.info_hash(kind, payload)
+        if got and h and got != h:
+            return submit.NOT_CONFIRMED
+        pre = submit.precheck(sess, url, h, kind, payload)
+        if pre == submit.CONFIRMED:
+            return None
+        if pre != submit.SKIP:
+            return submit.failure(pre)['error']
+        with instance.scoped_add(job, name) as scope:
             if kind == 'torrent':
-                r = sess.post(f'{url}/api/v2/torrents/add', data=tv_grab._fields(name), timeout=30, allow_redirects=False,
+                r = sess.post(f'{url}/api/v2/torrents/add', data=tv_grab._fields(name), timeout=30,
+                              allow_redirects=False,
                               files={'torrents': ('release.torrent', payload, 'application/x-bittorrent')})
             else:
                 r = sess.post(f'{url}/api/v2/torrents/add', data={'urls': payload, **tv_grab._fields(name)},
                               timeout=30, allow_redirects=False)
-        return None if add_ok(r) else f'qBittorrent refused it (HTTP {r.status_code})'
+            if add_pending(r):
+                return submit.NOT_CONFIRMED
+            if add_ok(r):
+                outcome = submit.settle(sess, url, h, kind, payload, duplicate=False, sent=True,
+                                        permit=scope.allow_trackers)
+            else:
+                info = submit.inspect(kind, payload)
+                if info.private is not True and not info.has_usable:
+                    return f'qBittorrent refused it (HTTP {r.status_code})'
+                outcome = submit.settle(sess, url, h, kind, payload, duplicate=True, sent=True,
+                                        permit=scope.allow_trackers)
+                if outcome == submit.SKIP:
+                    return f'qBittorrent refused it (HTTP {r.status_code})'
+        if submit.inspect(kind, payload).private is True and outcome != submit.CONFIRMED:
+            outcome = submit.PENDING if outcome == submit.SKIP else outcome
+        bad = submit.failure(outcome)
+        return None if bad is None else bad['error']
     except instance.WritesBlocked:
         return 'writes off'
     except requests.RequestException as e:

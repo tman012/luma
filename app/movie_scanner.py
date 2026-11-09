@@ -317,6 +317,29 @@ def next_retry(m: Dict[str, Any], now: float) -> float:
     return now + (FAST_S if at is not None and now - at < FAST_WINDOW_S else SLOW_S)
 
 
+def _existing_trackers(session_factory, kind, payload, h, now):
+    """Repair trackers on a hash already recorded. None keeps the 'Already grabbed' result."""
+    import requests
+    from app import library_mover as mover, torrent_submit as submit
+    info = submit.inspect(kind, payload)
+    if info.private is not True and not info.has_usable:
+        return None
+    sess, url = mover._qbit_session(session_factory or requests.Session, now)
+    if not sess:
+        return submit.failure(submit.PENDING)
+    try:
+        with instance.scoped_add(JOB, category()) as scope:
+            outcome = submit.settle(sess, url, h, kind, payload, duplicate=True, sent=False,
+                                    permit=scope.allow_trackers)
+    except requests.RequestException:
+        return submit.failure(submit.PENDING)
+    finally:
+        mover._close(sess)
+    if info.private is True and outcome != submit.CONFIRMED:
+        return submit.failure(submit.PENDING if outcome == submit.SKIP else outcome)
+    return submit.failure(outcome)
+
+
 # ------------------------------------------------------------------ grab
 
 def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] = None, session_factory=None,
@@ -357,24 +380,50 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
             return {'ok': False, 'error': 'Blocklisted'}
     prior = movie_grabs.by_hash(h)
     if prior and prior['state'] != 'failed':   # Ops: a failed/lost grab of the same hash is sent again (row revived)
+        bad = _existing_trackers(session_factory or requests.Session, kind, payload, h, now)
+        if bad:
+            return bad
         return {'ok': False, 'error': 'Already grabbed', 'existing': True}
     from app import grab_cache                 # import_reconciler re-adds a grab qBittorrent lost (Reviewer:
     grab_cache.save(h, kind, payload, now)     # only after the blocklist and dedupe checks let it through)
+    from app import torrent_submit as submit
+    from app.qbit_connector import ok_status, add_ok, add_pending
     name = category()
     sess, url = mover._qbit_session(session_factory or requests.Session, now)
     if not sess:
         return {'ok': False, 'error': tv_grab.NO_CLIENT, 'client': True}
+    refused = None
+    outcome = submit.SKIP
     try:
         why = tv_grab.ensure_category(sess, url, name, job=JOB)
         if why:
             return {'ok': False, 'error': OFF if why == tv_grab.OFF else why}
-        with instance.scoped_add(JOB, name):
-            if kind == 'torrent':
-                r = sess.post(f'{url}/api/v2/torrents/add', data=tv_grab._fields(name), timeout=30, allow_redirects=False,
-                              files={'torrents': ('release.torrent', payload, 'application/x-bittorrent')})
-            else:
-                r = sess.post(f'{url}/api/v2/torrents/add', data={'urls': payload, **tv_grab._fields(name)}, timeout=30,
-                              allow_redirects=False)
+        pre = submit.precheck(sess, url, h, kind, payload)
+        if pre != submit.SKIP:
+            outcome = pre
+        else:
+            with instance.scoped_add(JOB, name) as scope:
+                if kind == 'torrent':
+                    r = sess.post(f'{url}/api/v2/torrents/add', data=tv_grab._fields(name), timeout=30,
+                                  allow_redirects=False,
+                                  files={'torrents': ('release.torrent', payload, 'application/x-bittorrent')})
+                else:
+                    r = sess.post(f'{url}/api/v2/torrents/add', data={'urls': payload, **tv_grab._fields(name)},
+                                  timeout=30, allow_redirects=False)
+                if add_pending(r):
+                    outcome = submit.PENDING
+                elif not add_ok(r):
+                    info = submit.inspect(kind, payload)
+                    if info.private is True or info.has_usable:
+                        outcome = submit.settle(sess, url, h, kind, payload, duplicate=True, sent=True,
+                                                permit=scope.allow_trackers)
+                        if outcome == submit.SKIP:
+                            refused = r
+                    else:
+                        refused = r
+                else:
+                    outcome = submit.settle(sess, url, h, kind, payload, duplicate=False, sent=True,
+                                            permit=scope.allow_trackers)
     except instance.WritesBlocked:
         return {'ok': False, 'error': OFF, 'blocked': True}
     except requests.RequestException as e:
@@ -382,10 +431,14 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
         return {'ok': False, 'error': tv_grab.NO_CLIENT, 'client': True}
     finally:
         mover._close(sess)
-    from app.qbit_connector import ok_status, add_ok
-    if not add_ok(r):
-        return {'ok': False, 'error': f'qBittorrent returned HTTP {r.status_code}' if not ok_status(r.status_code)
-                else 'qBittorrent refused the torrent'}
+    if submit.inspect(kind, payload).private is True and outcome != submit.CONFIRMED:
+        outcome = submit.PENDING if outcome == submit.SKIP else outcome
+    bad = submit.failure(outcome)
+    if bad:
+        return bad
+    if refused is not None:
+        return {'ok': False, 'error': f'qBittorrent returned HTTP {refused.status_code}'
+                if not ok_status(refused.status_code) else 'qBittorrent refused the torrent'}
     with ms.connect() as conn:
         _set(conn, tmdb_id, next_search_at=None, last_search_at=now)
     movie_grabs.record(tmdb_id, str(item.get('title') or ''), h, now)

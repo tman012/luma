@@ -71,6 +71,9 @@ class R:
     (200, '{"failure_count":"0"}', False),
     (200, '{broken', False), (200, 'Fails.', False), (200, '[]', False),
     (409, 'Ok.', False), (500, '', False), (415, 'Fails.', False),
+    (200, '{"failure_count":0,"pending_count":0}', True),
+    (200, '{"failure_count":0,"pending_count":1}', False),
+    (202, '{"failure_count":0,"pending_count":1,"added_torrent_ids":[]}', False),
 ])
 def test_add_ok(code, body, ok):
     assert add_ok(R(code, body)) is ok

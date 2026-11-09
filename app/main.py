@@ -17433,7 +17433,10 @@ def _downloads_add_tv(data):
         return jsonify({'error': g.get('error') or tv_grab.OFF}), 403
     status = g.get('status')
     if isinstance(status, int) and status >= 400:
-        return jsonify({'error': g.get('error') or "Couldn't add download"}), status
+        body = {'error': g.get('error') or "Couldn't add download"}
+        if g.get('pending'):
+            body['pending'] = True
+        return jsonify(body), status
     return jsonify({'error': g.get('error') or "Couldn't add download"}), 502
 
 
@@ -17624,16 +17627,25 @@ def add_torrent_to_qbittorrent():
         # we couldn't compute the expected hash up front (e.g. hashless magnet).
         before_hashes = {t.get('hash', '').lower() for t in _qbit_category_torrents()}
 
-        # If this exact torrent is already present, treat it as success (dedup)
-        # and track the existing hash rather than erroring out.
-        if expected_hash and expected_hash in before_hashes:
-            logger.info(f"Torrent already in qBittorrent (hash {expected_hash}) — reusing")
+        from app import torrent_submit as _submit
+        from app.qbit_connector import add_ok as _add_ok, add_pending as _add_pending
+        submit_kind = 'torrent' if torrent_bytes is not None else 'magnet'
+        submit_payload = torrent_bytes if torrent_bytes is not None else add_url
+
+        def _tracker_unconfirmed(result):
+            body = {'error': _submit.NOT_CONFIRMED if result == _submit.PENDING else _submit.NO_USABLE}
+            if result == _submit.PENDING:
+                body['pending'] = True
+            return jsonify(body), 409
+
+        def _already(info_hash):
+            logger.info(f"Torrent already in qBittorrent (hash {info_hash}) — reusing")
             if tmdb_data:
                 try:
-                    _track_grab(expected_hash, tmdb_data, torrent_name)
+                    _track_grab(info_hash, tmdb_data, torrent_name)
                 except Exception as e:
                     logger.error(f"Failed to track existing download: {e}")
-            return jsonify({'success': True, 'message': 'Already downloading', 'hash': expected_hash})
+            return jsonify({'success': True, 'message': 'Already downloading', 'hash': info_hash})
 
         # Add to qBit — upload the validated bytes when we have them, otherwise
         # hand over the magnet URI (qBit resolves magnets via DHT itself).
@@ -17647,8 +17659,31 @@ def add_torrent_to_qbittorrent():
             add_fields['tags'] = tag_name()
         import contextlib as _ctx
         scope = _instance.scoped_add(MOVIE_GRAB_JOB, test_tag) if test_tag else _ctx.nullcontext()
+
+        # Already in this category: do not upload again. A payload that carries
+        # trackers the session is missing gets those URLs added; a private
+        # payload with none, and an unreadable tracker list, are not success.
+        if expected_hash and expected_hash in before_hashes:
+            with scope as scope_obj:
+                outcome = _submit.settle(
+                    session, qbit_url, expected_hash, submit_kind, submit_payload,
+                    duplicate=True, sent=False, permit=getattr(scope_obj, 'allow_trackers', None))
+            private_payload = _submit.inspect(submit_kind, submit_payload).private is True
+            if private_payload and outcome != _submit.CONFIRMED:
+                return _tracker_unconfirmed(_submit.PENDING if outcome == _submit.SKIP else outcome)
+            if outcome in (_submit.PENDING, _submit.UNUSABLE):
+                return _tracker_unconfirmed(outcome)
+            return _already(expected_hash)
+
+        pre = _submit.precheck(session, qbit_url, expected_hash, submit_kind, submit_payload)
+        if pre == _submit.CONFIRMED:
+            return _already(expected_hash)
+        if pre in (_submit.PENDING, _submit.UNUSABLE):
+            return _tracker_unconfirmed(pre)
+
+        tracker_result = _submit.SKIP
         try:
-            with scope:
+            with scope as scope_obj:
                 if torrent_bytes is not None:
                     add_response = session.post(
                         f"{qbit_url}/api/v2/torrents/add",
@@ -17662,6 +17697,21 @@ def add_torrent_to_qbittorrent():
                         data={'urls': add_url, **add_fields},
                         timeout=30,
                     )
+                permit = getattr(scope_obj, 'allow_trackers', None)
+                if _add_pending(add_response):
+                    tracker_result = _submit.PENDING
+                elif not _qbit_ok(add_response):
+                    tracker_result = 'http'
+                elif _add_ok(add_response):
+                    tracker_result = _submit.settle(
+                        session, qbit_url, expected_hash, submit_kind, submit_payload,
+                        duplicate=False, sent=True, permit=permit)
+                else:
+                    info = _submit.inspect(submit_kind, submit_payload)
+                    if info.private is True or info.has_usable:
+                        tracker_result = _submit.settle(
+                            session, qbit_url, expected_hash, submit_kind, submit_payload,
+                            duplicate=True, sent=True, permit=permit)
         except _instance.WritesBlocked:
             logger.info('Instance test: movie add refused by the write guard')
             return jsonify({'error': MOVIE_GRAB_OFF}), 403
@@ -17670,8 +17720,13 @@ def add_torrent_to_qbittorrent():
             return _download_client_unavailable()
 
         logger.info(f"qBittorrent add response: status={add_response.status_code}, text='{_qbit_body(add_response)[:80]}'")
-        if not _qbit_ok(add_response):
+        private_add = _submit.inspect(submit_kind, submit_payload).private is True
+        if private_add and tracker_result not in (_submit.CONFIRMED, 'http'):
+            tracker_result = _submit.PENDING if tracker_result == _submit.SKIP else tracker_result
+        if tracker_result == 'http':
             return jsonify({'error': f'qBittorrent returned HTTP {add_response.status_code}'}), 502
+        if tracker_result in (_submit.PENDING, _submit.UNUSABLE):
+            return _tracker_unconfirmed(tracker_result)
 
         # Verify the torrent ACTUALLY landed. qBit's 'Ok.' proves nothing about
         # the URL resolving — poll for the concrete torrent before claiming success.
@@ -17684,8 +17739,9 @@ def add_torrent_to_qbittorrent():
                     if t.get('hash', '').lower() == expected_hash:
                         confirmed_hash = t['hash']
                         break
-            if not confirmed_hash:
-                # New hash since our snapshot == the torrent we just added.
+            if not confirmed_hash and not private_add:
+                # Public adds only: a new hash since the snapshot is the torrent we just added.
+                # A private payload is confirmed only as the hash that was requested.
                 new = [t for t in current if t.get('hash', '').lower() not in before_hashes]
                 if new:
                     new.sort(key=lambda x: x.get('added_on', 0), reverse=True)
@@ -17693,6 +17749,8 @@ def add_torrent_to_qbittorrent():
             if confirmed_hash:
                 break
 
+        if not confirmed_hash and tracker_result == _submit.CONFIRMED and expected_hash:
+            confirmed_hash = expected_hash
         if not confirmed_hash:
             logger.error("Torrent was accepted by qBit but never appeared — treating as FAILED (no track).")
             return jsonify({
