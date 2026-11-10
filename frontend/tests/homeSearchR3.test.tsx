@@ -326,7 +326,7 @@ describe('v358 nav bar on Home: Search opens the search modal, nothing drops dow
     expect(searchBtn().dataset.current).toBe('true');          // the pill is on Search while its modal is open
     // centered over the whole page, above the bar (z 56) and under the person view and the sheets
     expect(r3Css).toContain('.r3-modal{position:fixed;inset:0;z-index:58;display:flex;align-items:center;justify-content:center;padding:48px;');
-    expect(r3Css).toContain('.r3-backdrop{position:absolute;inset:0;background:rgba(21,16,42,.72);');
+    expect(r3Css).toContain('.r3-backdrop{position:absolute;inset:0;background:rgba(21,16,42,.84)}');   // Phase 2: a solid scrim, no blur
     expect(r3Css).toContain(`.r3-panel{position:relative;width:min(${R3_MODAL_W}px, 100%);height:${R3_MODAL_REST}px;max-height:100%;`);
     expect(r3Css).toContain(`.r3-panel[data-searching="true"]{height:min(${R3_MODAL_OPEN}px, 100%)}`);
     expect(r3Css).toContain('@media (prefers-reduced-motion: reduce){[data-r3-search]{--a1-dur:0ms}}');
@@ -544,7 +544,7 @@ describe('v244: uniform 2:3 tiles, no overlap, 2-line titles, a placeholder for 
 describe('v245/v358: one reveal for the search modal', () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
   it('the modal fades on one duration and easing, with no delay on open; reduced motion makes it instant', () => {
-    expect(r3Css).toContain('[data-r3-search]{--a1-dur:200ms;--a1-ease:cubic-bezier(.2,0,0,1)}');
+    expect(r3Css).toContain('[data-r3-search]{--a1-dur:var(--m-dur-standard);--a1-ease:var(--m-ease-standard)}');
     expect(r3Css).toContain('transition:opacity var(--a1-dur) var(--a1-ease),visibility 0s linear var(--a1-dur)}');
     expect(r3Css).toContain('.r3-modal[data-open="true"]{opacity:1;visibility:visible;transition-delay:0s}');
     expect(r3Css).toContain('transition:height var(--a1-dur) var(--a1-ease),transform var(--a1-dur) var(--a1-ease)}');

@@ -2409,6 +2409,23 @@ class SettingsManager:
 
     MIGRATION_BACKUPS = 5
 
+    def _prune_backups(self, keep: Path) -> None:
+        """Keep the newest MIGRATION_BACKUPS settings.json.bak-* files by age (mtime, name as the tie-break), never
+        by name: settings.json.bak-pre-* names sort after the dated ones, so a name sort pruned the backup just
+        written. ``keep`` (the backup just created) is always one of them."""
+        def age(p: Path) -> Tuple[int, str]:
+            try:
+                return (p.stat().st_mtime_ns, p.name)
+            except OSError:
+                return (0, p.name)
+        others = sorted((p for p in self._path.parent.glob(f'{self._path.name}.bak-*') if p != keep), key=age)
+        room = max(self.MIGRATION_BACKUPS - 1, 0)
+        for old in others[:max(len(others) - room, 0)]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
     def _backup_before_migration(self) -> Optional[Path]:
         """v174 (Tester FF-8e): copy settings.json as it was on disk to settings.json.bak-<UTC time>
         (0600, newest MIGRATION_BACKUPS kept) before a migration rewrites it, so a rollback can
@@ -2423,12 +2440,7 @@ class SettingsManager:
                 out.write(src.read())
                 out.flush()
                 os.fsync(out.fileno())
-            olds = sorted(self._path.parent.glob(f'{self._path.name}.bak-*'))
-            for old in olds[:-self.MIGRATION_BACKUPS]:
-                try:
-                    old.unlink()
-                except OSError:
-                    pass
+            self._prune_backups(keep=dst)
             _log_migration('settings.json backed up to %s before a migration', dst.name)
             return dst
         except Exception as e:                       # noqa: BLE001 - a backup never blocks the upgrade

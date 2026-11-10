@@ -4,7 +4,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ContentReveal } from '@/components/motion/ContentReveal';
-import { MOTION } from '@/theme/motion';
+import { MOTION, SURFACE_FADE } from '@/theme/motion';
 import { ModalHostContext } from '@/contexts/ModalHostContext';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
@@ -405,7 +405,7 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
           {air}
         </span>
       )}
-      <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: 'opacity 150ms', display: 'flex', gap: 8 }}>
+      <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: SURFACE_FADE, display: 'flex', gap: 8 }}>
         <div className="tvc-text" style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
           <span data-testid="tv-card-show" title={e.show} style={{ ...one, textAlign: 'center', fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
           <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, textAlign: 'center', fontSize: 12, color: W70 }}>{epLine(e)}</span>
@@ -488,7 +488,7 @@ export const tvCalendarCss = `
 :root{--tv-state-downloaded:#22c55e;--tv-state-missing:#ef4444;--tv-state-unaired:#3b82f6}
 .tvc-row:hover{background:rgba(255,255,255,.04)!important}
 .tvc-glass:hover{background:rgba(255,255,255,.10)!important}
-.tvc-card .tvc-bm{opacity:0;transition:opacity 120ms}
+.tvc-card .tvc-bm{opacity:0;transition:opacity var(--m-dur-fast) var(--m-ease-standard)}
 .tvc-card:hover .tvc-bm,.tvc-card:focus-within .tvc-bm,.tvc-bm:focus-visible{opacity:1}
 .tvc-bm:hover{background:rgba(59,130,246,.35)!important}
 @media (hover:none){.tvc-card .tvc-bm{opacity:1}}
@@ -645,8 +645,8 @@ const glassCss = `
 @keyframes tvgRise{from{opacity:0;transform:translateY(var(--m-rise,6px))}to{opacity:1;transform:none}}
 @keyframes tvgFade{from{opacity:0}to{opacity:1}}
 @keyframes tvgPulse{0%,100%{opacity:1}50%{opacity:.5}}
-.tvg-rise{animation:tvgRise var(--motion-fade-dur,240ms) var(--motion-fade-ease,cubic-bezier(0.2,0,0,1)) both}
-.tvg-fade{animation:tvgFade 150ms linear both}
+.tvg-rise{animation:tvgRise var(--m-dur-standard) var(--m-ease-standard) both}
+.tvg-fade{animation:tvgFade var(--m-dur-fast) var(--m-ease-standard) both}
 .tvg-pulse{animation:tvgPulse 1.6s ease-in-out infinite}
 @media (prefers-reduced-motion: reduce){.tvg-rise,.tvg-fade,.tvg-pulse{animation:none!important}.tvg-art{transition:none!important}}
 `;
@@ -691,7 +691,7 @@ function GlassCard({ eps, today, index, rise }: { eps: CalEpisode[]; today: Day;
   const t = etParts(e.airstamp);
   const art = glassArt(e);
   const label = `${GLASS_WORD[st]}: ${e.show} ${eps.map(x => code(x.season, x.episode)).join(', ')}`;
-  const delay = `min(calc(${index} * var(--motion-stagger, 30ms)), var(--motion-stagger-max, 240ms))`;
+  const delay = `min(calc(${index} * var(--m-stagger,30ms)), var(--m-stagger-max,240ms))`;
   const onClick = (ev: React.MouseEvent<HTMLAnchorElement>) => {
     if (!href || !plainClick(ev) || !openShow) return;
     ev.preventDefault();

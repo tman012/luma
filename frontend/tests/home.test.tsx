@@ -107,8 +107,8 @@ describe('Home', () => {
     // The popup opens on the tap itself (the sheet reveals its content as it is ready); the tapped card
     // shows a pressed state until the sheet starts moving.
     fireEvent.click(screen.getByTestId('card-21'));
-    expect(modals.openMovie).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('card-21').getAttribute('data-pressed')).toBe('true');
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 21, origin: 'continue_watching' }), { timeout: 1500 });
     // v325 motion P1: a tap is held while its sheet is up (double-tap guard); closing the sheet frees it.
     const sheetUpDown = async () => {

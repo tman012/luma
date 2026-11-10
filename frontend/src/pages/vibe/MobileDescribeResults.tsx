@@ -9,6 +9,7 @@ import { cn } from '@/utils/cn';
 import { categoryColor } from './DescribeMode';
 import type { Recommendation } from './DescribeMode';
 import type { VibeItem } from '@/types/vibe';
+import { staggerMs } from '@/theme/motion';
 
 interface Props {
   recommendations: Recommendation[];
@@ -21,7 +22,7 @@ export function MobileDescribeResults({ recommendations, onClose: _onClose, onOp
   return (
     <div
       className="flex flex-1 flex-col bg-kiosk-black"
-      style={{ animation: 'mobilePageEnter 0.25s ease-out' }}
+      style={{ animation: 'mobilePageEnter var(--m-dur-standard) var(--m-ease-decel)' }}
     >
       {/* Result count */}
       <div className="shrink-0 px-4 pt-3 pb-1">
@@ -44,11 +45,11 @@ export function MobileDescribeResults({ recommendations, onClose: _onClose, onOp
               onClick={() => onOpenDetail(rec.vibeItem)}
               className={cn(
                 'mb-3 flex w-full gap-3.5 rounded-xl border border-white/6 bg-white/4 p-3 text-left',
-                'transition-all duration-200 active:scale-[0.98] active:bg-white/8',
+                'transition-all duration-(--m-dur-standard) ease-(--m-ease-standard) active:scale-(--m-press-scale) active:bg-white/8',
               )}
               style={{
                 opacity: 0,
-                animation: `mobileCardEnter 0.5s cubic-bezier(0.22, 1, 0.36, 1) ${80 + idx * 60}ms forwards`,
+                animation: `mobileCardEnter var(--m-dur-emphasized) var(--m-ease-decel) ${staggerMs(idx)}ms both`,
               }}
             >
               {/* Poster */}
@@ -96,7 +97,7 @@ export function MobileDescribeResults({ recommendations, onClose: _onClose, onOp
                       className={cn(
                         'rounded-full border px-2 py-0.5 text-[12px] font-medium',
                         colors.bg, colors.text, colors.border,
-                        onCategorySearch && 'active:scale-95 transition-transform cursor-pointer',
+                        onCategorySearch && 'active:scale-(--m-press-scale) transition-transform duration-(--m-dur-fast) ease-(--m-ease-standard) cursor-pointer',
                       )}
                     >
                       {rec.aiCategory}

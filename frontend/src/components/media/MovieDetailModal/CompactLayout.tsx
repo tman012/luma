@@ -1,3 +1,4 @@
+import { StagedBox, StagedProvider } from '@/components/motion/useStagedMount';
 import { sheetBase } from '@/utils/posterColors';
 import { ACTION_CIRCLE_SLOT, ACTION_LABEL_LINE, META_ROW, ratingsExpectedAtTap, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
@@ -114,6 +115,9 @@ function ActionButton({
 // ---------------------------------------------------------------------------
 // CompactLayout — full-screen with UltraBlur color gradients (phone)
 // ---------------------------------------------------------------------------
+
+/** The cast rail's box before its photos mount: photo 90 + 8, name and character lines, the rail's 10 px padding (StagedBox). */
+const CAST_RAIL_RESERVE = 170;
 
 export function CompactLayout(props: MovieModalViewProps) {
   const {
@@ -452,6 +456,7 @@ export function CompactLayout(props: MovieModalViewProps) {
       <SheetCard background={APP_BG} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>
         {/* No sheet spinner past the deadline (Taylor 2026-11-02): the pre-reveal surface stays as is. */}
         {/* Scrollable content */}
+        <StagedProvider total={1} enabled={detailsIn && reveal.revealed} resetKey={props.openKey}>
         <div
           ref={scrollRef}
           onClick={() => { if (showSources) setShowSources(false); }}
@@ -923,7 +928,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                     >
                       Cast &amp; crew
                     </h2>
-                    <div
+                    <StagedBox at={1} reserve={CAST_RAIL_RESERVE}
                       style={{
                         display: 'flex',
                         gap: '20px',
@@ -993,7 +998,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                           </div>
                         );
                       })}
-                    </div>
+                    </StagedBox>
                   </div>
                 )}
 
@@ -1058,6 +1063,7 @@ export function CompactLayout(props: MovieModalViewProps) {
             </>
           )}
         </div>
+        </StagedProvider>
 
         {/* Top strip — fades in as the content scrolls so text never sits visibly under ✕ / ⓘ.
             It's a text-free replica of the sheet behind it: base color, the same backdrop art

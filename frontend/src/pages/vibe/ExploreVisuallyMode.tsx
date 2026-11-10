@@ -204,14 +204,14 @@ export function ExploreVisuallyMode({ library, onOpenModal }: Props) {
             <div
               key={p.item.ratingKey}
               data-poster
-              className="absolute left-0 top-0 transition-shadow duration-300 hover:shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+              className="absolute left-0 top-0 transition-shadow duration-(--m-dur-emphasized) ease-(--m-ease-standard) hover:shadow-[0_0_30px_rgba(255,255,255,0.2)]"
               style={{
                 width: POSTER_W,
                 height: POSTER_H,
                 transform: isTapped ? `translate(${tx}px, ${ty}px) scale(${p.scale * 1.5})` : transform,
                 zIndex: isTapped ? 100 : p.zIndex,
                 opacity: isTapped ? 1 : p.opacity,
-                transition: isTapped ? 'transform 0.4s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s' : 'none',
+                transition: isTapped ? 'transform var(--m-dur-emphasized) var(--m-ease-decel), opacity var(--m-dur-standard) var(--m-ease-standard)' : 'none',
                 willChange: 'transform',
                 ['--poster-transform' as string]: transform,
               }}
@@ -231,7 +231,7 @@ export function ExploreVisuallyMode({ library, onOpenModal }: Props) {
               </button>
 
               {/* Title tooltip on hover */}
-              <div className="pointer-events-none absolute -bottom-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-black/80 px-3 py-1 text-[12px] text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+              <div className="pointer-events-none absolute -bottom-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-black/80 px-3 py-1 text-[12px] text-white opacity-0 backdrop-blur-sm transition-opacity duration-(--m-dur-fast) ease-(--m-ease-standard) group-hover:opacity-100">
                 {p.item.title}
               </div>
             </div>

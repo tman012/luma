@@ -1,3 +1,4 @@
+import { yieldToMain } from '@/utils/scheduling';
 import { act, render, renderHook } from '@testing-library/react';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -20,11 +21,14 @@ describe('phone popup opens only when composed', () => {
   beforeEach(() => { _resetModalPrefetch(); _resetModalColors(); vi.useFakeTimers(); vi.stubGlobal('fetch', vi.fn(never)); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-  it('opens in the tap\'s own task (never waits for a timer or the network), pressed from the tap; the press lifts when the sheet moves', async () => {
+  it('opens one task hop after the tap (never waits for a timer or the network), pressed from the tap; the press lifts when the sheet moves', async () => {
     const card = document.createElement('button');
     card.appendChild(document.createElement('img'));
     const open = vi.fn();
     void openWhenReady('movie', 21, undefined, card, open);
+    // The tap's own task ends here (Phase 2: the press and the warm-up are one task, the sheet's mount the next).
+    expect(card.getAttribute('data-pressed')).toBe('true');
+    await yieldToMain();
     expect(open).toHaveBeenCalledTimes(1);
     expect(card.getAttribute('data-pressed')).toBe('true');
     await act(async () => { await vi.advanceTimersByTimeAsync(20); });
@@ -37,8 +41,8 @@ describe('phone popup opens only when composed', () => {
   it('a tap while a sheet is up is ignored; a sheet that is closing does not swallow the next tap; the same title is one open', async () => {
     const first = vi.fn();
     void openWhenReady('movie', 1, undefined, null, first);
-    expect(first).toHaveBeenCalledTimes(1);
     void openWhenReady('movie', 1, undefined, null, first);   // a double tap before the sheet mounted
+    await yieldToMain();
     expect(first).toHaveBeenCalledTimes(1);
     const sheet = document.createElement('div');
     sheet.setAttribute('data-modal', 'MovieDetailModal');
@@ -49,6 +53,7 @@ describe('phone popup opens only when composed', () => {
     expect(third).not.toHaveBeenCalled();
     sheet.setAttribute('data-phase', 'exiting');
     void openWhenReady('movie', 3, undefined, null, third);
+    await yieldToMain();
     expect(third).toHaveBeenCalledTimes(1);
     sheet.remove();
   });

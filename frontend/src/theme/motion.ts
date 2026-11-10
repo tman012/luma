@@ -25,7 +25,7 @@ export const REVEAL_MOTION = { ms: 320, ease: 'cubic-bezier(0.22,0.61,0.36,1)' }
 export const STATE_MOTION = { pressMs: 100, hoverMs: 160, selectedMs: 160, pressScale: 0.98 } as const;
 const SHEET_ENTER = SHEET_MOTION.enterMs, SHEET_EXIT = SHEET_MOTION.exitMs, MODAL_EXIT_DESK = 300;
 export const MOTION = {
-  dur: { instant: 0, fast: 120, standard: 240, emphasized: 360, sheetEnter: SHEET_ENTER, sheetExit: SHEET_EXIT, sheetDragMin: SHEET_MOTION.dragMinMs,
+  dur: { instant: 0, spin: 800, fast: 120, standard: 240, emphasized: 360, sheetEnter: SHEET_ENTER, sheetExit: SHEET_EXIT, sheetDragMin: SHEET_MOTION.dragMinMs,
     sheetScrimEnter: SHEET_MOTION.scrimEnterMs, sheetScrimExit: SHEET_MOTION.scrimExitMs,
     press: STATE_MOTION.pressMs, image: 240, crossfade: 200,
     hover: STATE_MOTION.hoverMs, selected: STATE_MOTION.selectedMs,
@@ -56,6 +56,8 @@ export const MOTION = {
   },
   spring: { stiffness: 380, damping: 36, mass: 1 },
   rise: 6, routeShift: 8, stagger: 30, staggerMax: 240, pressScale: STATE_MOTION.pressScale, scrim: 0.6,
+  /** The lighter scrim of the Home sheets (Storage, Activity, TV Calendar, Rooms): their own alpha, animated on opacity only. */
+  scrimLight: 0.4,
   z: { page: 0, nav: 100, overlay: 9000, sheet: 10000, sheetNested: 10050, toast: 10080, system: 10100 },
 } as const;
 
@@ -109,3 +111,6 @@ if (typeof document !== 'undefined' && !document.getElementById('luma-sheet-moti
   const el = document.createElement('style'); el.id = 'luma-sheet-motion'; el.textContent = motionCss();
   document.head.appendChild(el);
 }
+
+/** Delay (ms) of the item at `index` in a staggered entrance: MOTION.stagger steps, never more than MOTION.staggerMax. */
+export const staggerMs = (index: number): number => Math.min(Math.max(index, 0) * MOTION.stagger, MOTION.staggerMax);

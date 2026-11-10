@@ -1,3 +1,4 @@
+import { staggerMs } from '@/theme/motion';
 import { Children, cloneElement, isValidElement, type ReactNode, type ReactElement } from 'react';
 
 interface MobileRailProps {
@@ -11,7 +12,7 @@ export function MobileRail({ title, children, index = 0 }: MobileRailProps) {
   // Inject margin on first/last children since padding on overflow-x containers is unreliable
   const items = Children.toArray(children).filter(isValidElement);
   const GAP = 12; // matches gap-3
-  const railBaseDelay = index * 100;
+  const railBaseDelay = staggerMs(index);
 
   return (
     <section className="mb-6">
@@ -21,7 +22,7 @@ export function MobileRail({ title, children, index = 0 }: MobileRailProps) {
         style={{
           paddingLeft: GAP,
           opacity: 0,
-          animation: `mobilePageEnter 0.4s ease-out ${railBaseDelay}ms forwards`,
+          animation: `mobilePageEnter var(--m-dur-emphasized) var(--m-ease-decel) ${railBaseDelay}ms forwards`,
         }}
       >
         {title}
@@ -34,10 +35,10 @@ export function MobileRail({ title, children, index = 0 }: MobileRailProps) {
           const style: Record<string, unknown> = {};
           if (i === 0) style.marginLeft = GAP;
           if (i === items.length - 1) style.marginRight = GAP;
-          // Per-card stagger: rail delay + card index * 40ms (cap at 8 cards)
-          const cardDelay = railBaseDelay + Math.min(i, 8) * 40;
+          // Per-card stagger: the rail's delay plus the shared stagger step per card
+          const cardDelay = railBaseDelay + staggerMs(i);
           style.opacity = 0;
-          style.animation = `mobileCardEnter 0.5s cubic-bezier(0.22, 1, 0.36, 1) ${cardDelay}ms forwards`;
+          style.animation = `mobileCardEnter var(--m-dur-emphasized) var(--m-ease-decel) ${cardDelay}ms forwards`;
           return cloneElement(child as ReactElement<{ style?: Record<string, unknown>; className?: string }>, {
             style: { ...(child as ReactElement<{ style?: Record<string, unknown> }>).props.style, ...style },
             className: `mobile-card-enter ${(child as ReactElement<{ className?: string }>).props.className ?? ''}`,

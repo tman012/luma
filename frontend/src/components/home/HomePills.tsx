@@ -39,7 +39,6 @@ export const HOME_PILLS: PillDef[] = [
 /** after: under a rail. Prod's rails end in a 28 px margin and the row keeps 20 px under it; test's rails
  * open with 28 px instead, so the row adds 28 above and gives 8 back below. */
 export function HomePills({ after = false }: { after?: boolean }) {
-  const [pressed, setPressed] = useState<string | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -60,14 +59,8 @@ export function HomePills({ after = false }: { after?: boolean }) {
             type="button"
             data-testid={`pill-${pill.id}`}
             onClick={() => open(pill.id)}
-            onTouchStart={() => setPressed(pill.id)}
-            onTouchEnd={() => setPressed(null)}
-            onTouchCancel={() => setPressed(null)}
-            style={{
-              ...pillStyle,
-              transform: pressed === pill.id ? 'scale(0.95)' : 'scale(1)',
-              transition: pressed === pill.id ? 'transform 0.1s ease-out' : 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
-            }}
+            className="m-interactive"
+            style={pillStyle}
           >
             {pill.icon}
             {pill.label}
@@ -92,5 +85,4 @@ const pillStyle: React.CSSProperties = {
   color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: 500,
   cursor: 'pointer', flexShrink: 0, fontFamily: 'inherit',
   touchAction: 'manipulation',
-  outline: 'none',
 };

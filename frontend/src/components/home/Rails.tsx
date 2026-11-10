@@ -119,7 +119,7 @@ function CardShell({ card, onOpen, onLongPress, style, children, own }: { card: 
       onTouchStart={(e) => { warm(); lp?.onTouchStart(e); }}
       onTouchMove={lp?.onTouchMove} onTouchEnd={lp?.onTouchEnd} onTouchCancel={lp?.onTouchCancel}
       onContextMenu={lp?.onContextMenu}
-      data-testid={`card-${card.key}`} data-owned={own ? String(own.owned) : undefined} className={lp ? 'luma-pressable longpress-poster' : 'luma-pressable'}
+      data-testid={`card-${card.key}`} data-owned={own ? String(own.owned) : undefined} className={lp ? 'luma-pressable m-interactive longpress-poster' : 'luma-pressable m-interactive'}
       style={{ ...cardButton, ...style, ...(lp ? LONG_PRESS_STYLE : null) }}>
       {children}
     </button>

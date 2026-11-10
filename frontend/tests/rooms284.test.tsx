@@ -12,19 +12,18 @@ describe('v284 Rooms sheet mirrors Activity chrome', () => {
     expect(activity).toContain("height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)'");
   });
 
-  it('shares Activity enter/exit timing and spring', () => {
-    expect(rooms).toContain('const ENTER_DURATION = 600');
-    expect(rooms).toContain('const EXIT_DURATION = 400');
-    expect(rooms).toContain("const SPRING = 'cubic-bezier(0.16, 1, 0.3, 1)'");
-    expect(rooms).toContain("useState<'entering' | 'visible' | 'exiting' | 'gone'>('gone')");
-    expect(activity).toContain('const ENTER_DURATION = 600');
+  it('shares Activity enter/exit motion: both sit on the shared SimpleSheet shell, with no timing literal of their own', () => {
+    for (const src of [rooms, activity]) {
+      expect(src).toContain('<SimpleSheet');
+      expect(src).not.toMatch(/ENTER_DURATION|EXIT_DURATION|const SPRING|cubic-bezier/);
+    }
   });
 
   it('keeps Rooms title chrome matching Activity (h2 18px) and data-sheet', () => {
-    expect(rooms).toContain('data-sheet="RoomsSheet"');
+    expect(rooms).toContain('name="RoomsSheet"');   // SimpleSheet renders data-sheet from it
     expect(rooms).toContain('>Rooms</h2>');
     expect(rooms).toContain('text-[18px] font-bold text-white');
-    expect(activity).toContain('data-sheet="ActivitySheet"');
+    expect(activity).toContain('name="ActivitySheet"');
     expect(activity).toContain('>Activity</h2>');
   });
 

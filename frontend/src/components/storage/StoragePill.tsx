@@ -6,7 +6,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { SimpleSheet } from '@/components/layout/SimpleSheet';
+import { MOTION } from '@/theme/motion';
 import { useLocation, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotificationsContext } from '@/contexts/NotificationsContext';
@@ -18,16 +19,11 @@ import {
   type CleanupResult,
 } from '@/services/storageApi';
 
-const ENTER_DURATION = 500;
-const EXIT_DURATION = 320;
-const SPRING = 'cubic-bezier(0.16, 1, 0.3, 1)';
-
 /** Repoll cadence while the page is visible and nothing is downloading. */
 const USAGE_POLL_IDLE_MS = 60_000;
 /** Faster cadence while torrents are writing into the downloads folder. */
 const USAGE_POLL_ACTIVE_MS = 15_000;
 
-type SheetPhase = 'entering' | 'visible' | 'exiting' | 'gone';
 type Step = 'idle' | 'confirm' | 'running' | 'done' | 'error' | 'signin';
 /** Label of the sign-in prompt for the cleanup (sentence case, no helper text). */
 export const SIGN_IN_TO_FREE = 'Sign in to free up space';
@@ -39,7 +35,6 @@ export const SIGN_IN_TO_FREE = 'Sign in to free up space';
 export function StoragePill() {
   const [usage, setUsage] = useState<StorageUsage | null>(null);
   const [open, setOpen] = useState(false);
-  const [pressed, setPressed] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -98,9 +93,7 @@ export function StoragePill() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        onTouchStart={() => setPressed(true)}
-        onTouchEnd={() => setPressed(false)}
-        onTouchCancel={() => setPressed(false)}
+        className="m-interactive"
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
           padding: '10px 18px', borderRadius: 999,
@@ -108,9 +101,6 @@ export function StoragePill() {
           color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: 500,
           cursor: 'pointer', flexShrink: 0, fontFamily: 'inherit',
           touchAction: 'manipulation',
-          transform: pressed ? 'scale(0.95)' : 'scale(1)',
-          transition: pressed ? 'transform 0.1s ease-out' : 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
-          outline: 'none',
         }}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -141,7 +131,6 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
   onClose: () => void;
   onUsageChange: (u: StorageUsage) => void;
 }) {
-  const [phase, setPhase] = useState<SheetPhase>('gone');
   const [step, setStep] = useState<Step>('idle');
   const [result, setResult] = useState<CleanupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -156,27 +145,15 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
 
   useEffect(() => {
     if (!open) return;
-    setPhase('entering');
     setStep('idle');
     setResult(null);
     setError(null);
     // Re-read on open so the sheet never shows a stale figure.
     fetchDownloadsStorage().then(onUsageChange).catch(() => {});
-    requestAnimationFrame(() => requestAnimationFrame(() => setPhase('visible')));
   }, [open, onUsageChange]);
 
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
-  }, [open]);
-
-  const dismiss = useCallback(() => {
-    if (step === 'running') return;   // don't close mid-delete
-    setPhase('exiting');
-    setTimeout(() => { setPhase('gone'); onClose(); }, EXIT_DURATION);
-  }, [onClose, step]);
+  // Never close mid-delete: a dismiss (scrim, drag, Escape) is taken while the cleanup runs.
+  const busy = useCallback(() => step === 'running', [step]);
 
   const runCleanup = useCallback(async () => {
     setStep('running');
@@ -199,37 +176,26 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
     }
   }, [onUsageChange, usage?.cleanupTargetBytes]);
 
-  if (phase === 'gone' && !open) return null;
+  if (!open) return null;
 
   const targetLabel = formatBytes(usage?.cleanupTargetBytes ?? 100 * 1024 ** 3);
   const usedPct = usage?.available && usage.totalBytes > 0
     ? Math.min(100, (usage.usedBytes / usage.totalBytes) * 100)
     : 0;
 
-  return createPortal(
-    <div className="luma-fullscreen luma-bleed"
-      style={{
-        position: 'fixed', inset: 0, zIndex: 10001,
-        display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-        backgroundColor: phase === 'visible' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0)',
-        transition: `background-color ${phase === 'exiting' ? EXIT_DURATION : ENTER_DURATION}ms ease`,
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) dismiss(); }}
-    >
+  return (
+    <SimpleSheet name="StorageSheet" onClosed={onClose} guard={busy}
+      rootClassName="luma-fullscreen luma-bleed" panelClassName="luma-bleed-panel"
+      panelStyle={{
+        background: 'var(--color-kiosk-black)',
+        borderRadius: '20px 20px 0 0',
+        borderTop: '1px solid rgba(255,255,255,0.08)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
+      }}>
+      {({ requestClose }) => (<>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      <div className="luma-bleed-panel"
-        style={{
-          background: 'var(--color-kiosk-black)',
-          borderRadius: '20px 20px 0 0',
-          borderTop: '1px solid rgba(255,255,255,0.08)',
-          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
-          transform: phase === 'visible' ? 'translate3d(0,0,0)' : 'translate3d(0,100%,0)',
-          transition: `transform ${phase === 'exiting' ? EXIT_DURATION : ENTER_DURATION}ms ${SPRING}`,
-          willChange: 'transform',
-        }}
-      >
         {/* Grab handle */}
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 8px' }}>
+        <div data-sheet-handle style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 8px', cursor: 'grab' }}>
           <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.3)' }} />
         </div>
 
@@ -245,9 +211,10 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
               <div style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
                 <div
                   style={{
-                    height: '100%', width: `${usedPct}%`, borderRadius: 4,
-                    background: usedPct > 90 ? '#f87171' : usedPct > 75 ? '#fbbf24' : '#4ade80',
-                    transition: 'width 600ms cubic-bezier(0.16, 1, 0.3, 1), background 400ms ease',
+                    height: '100%', width: '100%', borderRadius: 4,
+                    transformOrigin: 'left center', transform: `scaleX(${usedPct / 100})`,
+                    backgroundColor: usedPct > 90 ? '#f87171' : usedPct > 75 ? '#fbbf24' : '#4ade80',
+                    transition: `transform ${MOTION.dur.standard}ms ${MOTION.ease.standard}, background-color ${MOTION.dur.standard}ms ${MOTION.ease.standard}`,
                   }}
                 />
               </div>
@@ -311,7 +278,7 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
                   style={{
                     width: 16, height: 16, borderRadius: '50%',
                     border: '2px solid rgba(255,255,255,0.2)', borderTopColor: '#fff',
-                    animation: 'spin 0.8s linear infinite',
+                    animation: `spin ${MOTION.dur.spin}ms linear infinite`,
                   }}
                 />
                 <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.75)' }}>Freeing space…</span>
@@ -325,7 +292,7 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
                   {result.deletedCount === 1 ? 'item' : 'items'} deleted.
                   {result.failed.length > 0 && ` ${result.failed.length} could not be deleted.`}
                 </p>
-                <SheetButton onClick={dismiss} label="Done" />
+                <SheetButton onClick={requestClose} label="Done" />
               </>
             )}
 
@@ -339,9 +306,8 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
             )}
           </div>
         </div>
-      </div>
-    </div>,
-    document.body,
+      </>)}
+    </SimpleSheet>
   );
 }
 

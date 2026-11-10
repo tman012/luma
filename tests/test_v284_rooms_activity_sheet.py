@@ -20,6 +20,6 @@ def test_rooms_sheet_mirrors_activity_height():
     assert height in rooms
     assert height in activity
     assert 'maxHeight' not in rooms
-    assert 'ENTER_DURATION = 600' in rooms
-    assert 'data-sheet="RoomsSheet"' in rooms
+    assert 'name="RoomsSheet"' in rooms and 'SimpleSheet' in rooms     # the shared shell owns data-sheet and the enter duration
+    assert 'ENTER_DURATION' not in rooms
     assert '>Rooms</h2>' in rooms

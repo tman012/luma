@@ -134,8 +134,8 @@ describe('v322 TOKENS-C states, motion and ellipsis', () => {
     const { unmount } = render(<PhoneDay day={DAY} today={DAY} eps={eps} motion="rise" />);
     const cards = screen.getAllByTestId('tv-agenda-row');
     expect(cards[0]!.className).toContain('tvg-rise');
-    expect(cards[3]!.style.animationDelay).toContain('3 * var(--motion-stagger, 30ms)');
-    expect(cards[3]!.style.animationDelay).toContain('var(--motion-stagger-max, 240ms)');
+    expect(cards[3]!.style.animationDelay).toContain('3 * var(--m-stagger,30ms)');
+    expect(cards[3]!.style.animationDelay).toContain('var(--m-stagger-max,240ms)');
     unmount();
     render(<PhoneDay day={DAY} today={DAY} eps={eps} motion="fade" />);
     expect(screen.getByTestId('tv-cal-phone').className).toBe('tvg-fade');

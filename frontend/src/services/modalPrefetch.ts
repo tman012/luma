@@ -10,6 +10,7 @@ import { SHEET_OPEN_BOUND_MS } from '@/loading/sheetOpenGate';
 import { apiFetch } from '@/apiClient';
 import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import { colorsFromImage } from '@/utils/posterColors';
+import { yieldToMain } from '@/utils/scheduling';
 import { finalBackdropUrl, plexSheetArt } from '@/utils/image';
 import { localBackdropFor, localLogoFor } from '@/services/localArt';
 import { parsePlexResponse, parsePlexTvResponse } from '@/utils/modalParsers';
@@ -431,15 +432,28 @@ function tapOwned(card: HTMLElement | null, ratingKey: number | undefined): bool
   return o === 'true' ? true : o === 'false' ? false : null;
 }
 let shell: TapShell | null = null;
+/** The first non-empty text node of a card (no layout flush, unlike innerText). */
+function firstTextLine(card: HTMLElement): string {
+  const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = (n.nodeValue ?? '').trim();
+    if (t) return t;
+  }
+  return '';
+}
 function tapTitle(card: HTMLElement): string {
-  const t = card.getAttribute('aria-label') || card.querySelector('[data-testid="row-title"]')?.textContent
-    || (card.innerText || card.textContent || '').split('\n')[0];
+  const t = card.getAttribute('aria-label') || card.querySelector('[data-testid="row-title"]')?.textContent || firstTextLine(card);
   return (t || '').trim();
 }
 /** The year the tapped card/row shows (a line that is just the year), for the seed's meta row. */
 function tapYear(card: HTMLElement): string | null {
-  const lines = (card.innerText || card.textContent || '').split('\n').map(l => l.trim());
-  return lines.find(l => /^(18|19|20)\d{2}$/.test(l)) ?? null;
+  // Text nodes, not innerText: innerText flushes style and layout inside the tap's task.
+  const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = (n.nodeValue ?? '').trim();
+    if (/^(18|19|20)\d{2}$/.test(t)) return t;
+  }
+  return null;
 }
 /** The seed shell of the tap that is opening a sheet now (none after 5 s). */
 export function tapShell(): TapShell | null {
@@ -546,9 +560,11 @@ export async function openWhenReady(
   if (card) { if (pressed && pressed !== card) release(); pressed = card; card.setAttribute('data-pressed', 'true'); holdFor(card, SHEET_OPEN_BOUND_MS); }
   // The art first (v341l): its request is queued before this open's detail calls, so a slow TMDb holding the
   // other connections never leaves it waiting for a socket (Tester I1440: art at +3.7 s behind TMDb calls).
-  // The sheet then opens in this same task: nothing here waits on the network or on a timer.
+  // The sheet then opens one task hop later (a MessageChannel yield: no timer, no network), so the press and warm-up
+  // and the sheet's first render never share a task (at 4x CPU that single task was over 100 ms).
   for (const u of (art ?? [])) if (u) void preloadImage(u, 'high');
   void warmDetail(kind, ratingKey, tmdbId, { open: true, art, logo }).catch(() => {});
+  await yieldToMain();
   if (mine !== openGen) return;
   // The tapped row left the page (back, unmount) during the art tick: do not open it later.
   if (card && cardWasConnected && !card.isConnected) {

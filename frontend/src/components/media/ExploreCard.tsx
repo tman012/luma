@@ -14,7 +14,7 @@ export function ExploreCard({ movie, className, onClick }: ExploreCardProps) {
       type="button"
       onClick={onClick}
       className={cn(
-        'group glass-panel cursor-pointer overflow-hidden rounded-2xl text-left transition-transform duration-300 hover:scale-[1.02]',
+        'group glass-panel cursor-pointer overflow-hidden rounded-2xl text-left transition-transform duration-(--m-dur-emphasized) ease-(--m-ease-standard) hover:scale-(--m-hover-scale)',
         className,
       )}
     >
@@ -25,7 +25,7 @@ export function ExploreCard({ movie, className, onClick }: ExploreCardProps) {
             src={movie.posterUrl}
             alt={movie.title}
             loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+            className="h-full w-full object-cover transition-transform duration-(--m-dur-emphasized) ease-(--m-ease-standard) group-hover:scale-(--m-hover-scale)"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-glass-10 text-text-muted text-sm">

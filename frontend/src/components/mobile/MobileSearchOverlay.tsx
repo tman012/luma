@@ -501,7 +501,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                       <button
                         type="button"
                         onClick={() => setFindMoreExpanded(true)}
-                        className="flex w-full items-center justify-center gap-2 py-4 text-[16px] font-medium text-white/70 active:text-white transition-colors"
+                        className="flex w-full items-center justify-center gap-2 py-4 text-[16px] font-medium text-white/70 active:text-white transition-colors duration-(--m-dur-fast)"
                       >
                         Find More
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
@@ -511,7 +511,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                         <button
                           type="button"
                           onClick={() => setFindMoreExpanded(false)}
-                          className="mb-3 flex w-full items-center justify-center gap-2 text-[16px] font-semibold text-white/60 active:text-white transition-colors"
+                          className="mb-3 flex w-full items-center justify-center gap-2 text-[16px] font-semibold text-white/60 active:text-white transition-colors duration-(--m-dur-fast)"
                         >
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
                           Find More

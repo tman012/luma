@@ -53,7 +53,11 @@ describe('Rooms sheet reopen', () => {
   it('reopened mid-load: no stale content, a fresh bounded reveal with its fade', async () => {
     vi.useFakeTimers();
     const fades: unknown[] = [];
-    (Element.prototype as unknown as { animate: unknown }).animate = function (...a: unknown[]) { fades.push(a); return { onfinish: null, cancel() {} } as unknown as Animation; };
+    // Only the content reveal counts here; the sheet's own slide and scrim also animate (SimpleSheet).
+    (Element.prototype as unknown as { animate: unknown }).animate = function (this: Element, ...a: unknown[]) {
+      if (this.hasAttribute('data-reveal')) fades.push(a);
+      return { onfinish: null, finished: new Promise(() => {}), cancel() {} } as unknown as Animation;
+    };
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));        // everything hangs
     const r = render(<Sheet open />);
     await act(async () => { await vi.advanceTimersByTimeAsync(ROOMS_WAIT_MS + 100); }); // first open waits out

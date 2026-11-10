@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import { SimpleSheet } from '@/components/layout/SimpleSheet';
+import { MOTION } from '@/theme/motion';
 import type { Room } from '@/hooks/useNotifications';
 import { useInterpolatedProgress } from '@/hooks/useInterpolatedProgress';
 import { cn } from '@/utils/cn';
@@ -30,7 +31,6 @@ type Command =
 // Constants
 // ---------------------------------------------------------------------------
 
-const DISMISS_THRESHOLD = 120;
 
 // ---------------------------------------------------------------------------
 // Send command helper
@@ -209,7 +209,7 @@ function PremiumButton({
       onPointerDown={() => setPressed(true)}
       onPointerUp={() => setPressed(false)}
       onPointerLeave={() => setPressed(false)}
-      className={`flex items-center justify-center rounded-full transition-transform duration-100 active:scale-[0.97] ${className}`}
+      className={`flex items-center justify-center rounded-full m-interactive ${className}`}
       style={style}
       aria-label={label}
     >
@@ -241,7 +241,7 @@ function DpadSection({ onCommand }: { onCommand: (cmd: Command) => void }) {
     return (
       <button
         type="button"
-        className={`absolute ${positionClass} ${sizeClass} flex items-center justify-center transition-colors duration-75`}
+        className={`absolute ${positionClass} ${sizeClass} flex items-center justify-center transition-colors duration-(--m-dur-press)`}
         style={{
           background: isActive ? 'rgba(255,255,255,0.06)' : 'transparent',
           borderRadius: '16px',
@@ -317,7 +317,7 @@ function DpadSection({ onCommand }: { onCommand: (cmd: Command) => void }) {
         onPointerDown={() => setOkPressed(true)}
         onPointerUp={() => setOkPressed(false)}
         onPointerLeave={() => setOkPressed(false)}
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center transition-transform duration-100 active:scale-[0.96]"
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center m-interactive"
         style={{
           width: 64,
           height: 64,
@@ -367,7 +367,7 @@ function RockerButton({
   return (
     <button
       type="button"
-      className={`flex w-[56px] h-[78px] items-center justify-center transition-transform duration-100 active:scale-[0.97] ${radiusClass}`}
+      className={`flex w-[56px] h-[78px] items-center justify-center m-interactive ${radiusClass}`}
       style={pressed ? rockerActive : baseStyle}
       aria-label={label}
       onPointerDown={(e) => {
@@ -479,10 +479,10 @@ function NowPlayingBackdrop({ room }: { room: Room }) {
           <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/10">
             <div
               className={cn(
-                'h-full rounded-full transition-[width] duration-500',
+                'h-full w-full origin-left rounded-full transition-transform duration-(--m-dur-emphasized) ease-(--m-ease-standard)',
                 isPlaying ? 'bg-green-500' : 'bg-amber-500',
               )}
-              style={{ width: `${pct}%` }}
+              style={{ transform: `scaleX(${pct / 100})` }}
             />
           </div>
           <p className="mt-1 text-center text-[10px] text-white/30">
@@ -499,15 +499,7 @@ function NowPlayingBackdrop({ room }: { room: Room }) {
 // ---------------------------------------------------------------------------
 
 export function FullScreenRemote({ room, deviceId, onClose, harmonyHubIp }: FullScreenRemoteProps) {
-  // Sheet animation state
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef({ active: false, startY: 0, currentY: 0 });
-  const [dragOffset, setDragOffset] = useState(0);
-  const [dismissing, setDismissing] = useState(false);
-  const [entered, setEntered] = useState(false);
-
   useEffect(() => {
-    requestAnimationFrame(() => setEntered(true));
     const prev = document.documentElement.style.background;
     document.documentElement.style.background = '#000';
     return () => { document.documentElement.style.background = prev; };
@@ -520,91 +512,24 @@ export function FullScreenRemote({ room, deviceId, onClose, harmonyHubIp }: Full
     apiFetch(`/api/room/${room.roomId}/harmony/ensure`, { method: 'POST' }).catch(() => {});
   }, [room.roomId, harmonyHubIp]);
 
-  // ESC to close
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        handleDismiss();
-      }
-    }
-    window.addEventListener('keydown', handleKey, true);
-    return () => window.removeEventListener('keydown', handleKey, true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onClose]);
-
   const send = useCallback(
     (cmd: Command) => sendCommand(room.roomId, cmd, deviceId),
     [room.roomId, deviceId],
   );
 
-  const handleDismiss = useCallback(() => {
-    setDismissing(true);
-    setTimeout(onClose, 250);
-  }, [onClose]);
-
-  // Drag-to-dismiss (touch) — same pattern as MobileSourcesPanel
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    const target = e.target as HTMLElement;
-    const isHandle = target.closest('[data-sheet-handle]');
-    if (isHandle && e.touches.length > 0) {
-      dragRef.current = { active: true, startY: e.touches[0]!.clientY, currentY: e.touches[0]!.clientY };
-    }
-  }, []);
-
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!dragRef.current.active || !e.touches.length) return;
-    dragRef.current.currentY = e.touches[0]!.clientY;
-    const dy = Math.max(0, dragRef.current.currentY - dragRef.current.startY);
-    setDragOffset(dy);
-  }, []);
-
-  const onTouchEnd = useCallback(() => {
-    const dy = dragRef.current.currentY - dragRef.current.startY;
-    dragRef.current.active = false;
-    if (dy > DISMISS_THRESHOLD) {
-      handleDismiss();
-    } else {
-      setDragOffset(0);
-    }
-  }, [handleDismiss]);
-
-  const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
-
-  return createPortal(
-    <div className="luma-fullscreen luma-bleed"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 10002,
+  // The sheet shell (slide, scrim on opacity, drag, Escape) is the shared SimpleSheet; this one sits above the Rooms sheet.
+  return (
+    <SimpleSheet name="FullScreenRemote" onClosed={onClose}
+      rootClassName="luma-fullscreen luma-bleed" rootStyle={{ zIndex: MOTION.z.sheet + 2 }} panelClassName="luma-bleed-panel"
+      panelStyle={{
+        height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
+        maxHeight: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'flex-end',
-        background: entered && !dismissing ? 'rgba(0,0,0,0.4)' : 'transparent',
-        transition: 'background 0.25s ease',
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) handleDismiss();
-      }}
-    >
-      <div className="luma-bleed-panel"
-        ref={sheetRef}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        style={{
-          height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
-          maxHeight: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'var(--color-kiosk-black)',
-          borderRadius: '20px 20px 0 0',
-          overflow: 'hidden',
-          transform: `translateY(${sheetTranslate})`,
-          transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
-          willChange: 'transform',
-        }}
-      >
+        background: 'var(--color-kiosk-black)',
+        borderRadius: '20px 20px 0 0',
+        overflow: 'hidden',
+      }}>
         {/* Grab handle */}
         <div
           data-sheet-handle
@@ -719,8 +644,6 @@ export function FullScreenRemote({ room, deviceId, onClose, harmonyHubIp }: Full
 
         {/* Flex spacer — pushes content up; safe area at bottom */}
         <div style={{ flex: '1 0 auto', minHeight: 'calc(env(safe-area-inset-bottom, 12px) + 16px)' }} />
-      </div>
-    </div>,
-    document.body,
+    </SimpleSheet>
   );
 }

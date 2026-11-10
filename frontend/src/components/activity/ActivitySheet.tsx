@@ -1,16 +1,12 @@
 /**
  * ActivitySheet — bottom sheet showing the Activity feed (last 30 downloads).
  * Mirrors the DownloadsSheet/LatestSheet shell: slide-up, grab-handle
- * drag-to-dismiss, tap-outside to close.
+ * drag-to-dismiss, tap-outside to close. The shell is the shared SimpleSheet (shared motion tokens).
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect } from 'react';
+import { SimpleSheet } from '@/components/layout/SimpleSheet';
+import { MOTION } from '@/theme/motion';
 import { ActivityFeed } from './ActivityFeed';
-
-const DISMISS_THRESHOLD = 120;
-const ENTER_DURATION = 600;
-const EXIT_DURATION = 400;
-const SPRING = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
 interface ActivitySheetProps {
   open: boolean;
@@ -18,55 +14,12 @@ interface ActivitySheetProps {
 }
 
 export function ActivitySheet({ open, onClose }: ActivitySheetProps) {
-  const dragRef = useRef({ active: false, startY: 0, currentY: 0 });
-  const [dragOffset, setDragOffset] = useState(0);
-  const [phase, setPhase] = useState<'entering' | 'visible' | 'exiting' | 'gone'>('gone');
+  if (!open) return null;
+  return <ActivitySheetBody onClose={onClose} />;
+}
+
+function ActivitySheetBody({ onClose }: { onClose: () => void }) {
   const [behindModal, setBehindModal] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setPhase('entering');
-      setDragOffset(0);
-      setBehindModal(false);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setPhase('visible'));
-      });
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prevOverflow; };
-  }, [open]);
-
-  const handleDismiss = useCallback(() => {
-    setDragOffset(0);
-    requestAnimationFrame(() => {
-      setPhase('exiting');
-      setTimeout(() => { setPhase('gone'); onClose(); }, EXIT_DURATION);
-    });
-  }, [onClose]);
-
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('[data-sheet-handle]') && e.touches.length > 0) {
-      dragRef.current = { active: true, startY: e.touches[0]!.clientY, currentY: e.touches[0]!.clientY };
-    }
-  }, []);
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!dragRef.current.active || !e.touches.length) return;
-    dragRef.current.currentY = e.touches[0]!.clientY;
-    setDragOffset(Math.max(0, dragRef.current.currentY - dragRef.current.startY));
-  }, []);
-  const onTouchEnd = useCallback(() => {
-    if (!dragRef.current.active) return;
-    const dy = dragRef.current.currentY - dragRef.current.startY;
-    dragRef.current.active = false;
-    if (dy > DISMISS_THRESHOLD) handleDismiss();
-    else setDragOffset(0);
-  }, [handleDismiss]);
 
   // When a detail modal opens from a feed item, drop behind it; restore on close.
   useEffect(() => {
@@ -76,71 +29,37 @@ export function ActivitySheet({ open, onClose }: ActivitySheetProps) {
     return () => window.removeEventListener('modal-closed', restore);
   }, [behindModal]);
 
-  if (phase === 'gone' && !open) return null;
-
-  const sheetTransform =
-    dragOffset > 0 ? `translate3d(0, ${dragOffset}px, 0)`
-      : phase === 'visible' ? 'translate3d(0, 0, 0)'
-        : 'translate3d(0, 100%, 0)';
-
-  const sheetTransition =
-    dragOffset > 0 ? 'none'
-      : phase === 'exiting' ? `transform ${EXIT_DURATION}ms cubic-bezier(0.4, 0, 1, 1)`
-        : `transform ${ENTER_DURATION}ms ${SPRING}`;
-
-  return createPortal(
-    <div className="luma-fullscreen luma-bleed"
-      data-sheet="ActivitySheet"
-      style={{
-        position: 'fixed', inset: 0,
-        zIndex: behindModal ? 9999 : 10001,
-        display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-        backgroundColor: behindModal ? 'rgba(0,0,0,0)' : phase === 'visible' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0)',
-        transition: phase === 'exiting'
-          ? `background-color ${EXIT_DURATION}ms ease`
-          : `background-color ${ENTER_DURATION}ms ease`,
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
-    >
-      <div className="luma-bleed-panel"
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        style={{
-          height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
-          display: 'flex', flexDirection: 'column',
-          background: 'var(--color-kiosk-black)',
-          borderRadius: '20px 20px 0 0',
-          overflow: 'hidden',
-          transform: sheetTransform,
-          transition: sheetTransition,
-          willChange: 'transform',
-          backfaceVisibility: 'hidden',
-        }}
+  return (
+    <SimpleSheet name="ActivitySheet" onClosed={onClose} behind={behindModal}
+      rootClassName="luma-fullscreen luma-bleed" panelClassName="luma-bleed-panel"
+      panelStyle={{
+        height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
+        display: 'flex', flexDirection: 'column',
+        background: 'var(--color-kiosk-black)',
+        borderRadius: '20px 20px 0 0',
+        overflow: 'hidden',
+      }}>
+      {/* Grab handle */}
+      <div data-sheet-handle
+        style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '12px 0 8px', cursor: 'grab' }}
       >
-        {/* Grab handle */}
-        <div data-sheet-handle
-          style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '12px 0 8px', cursor: 'grab' }}
-        >
-          <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.3)' }} />
-        </div>
-
-        {/* Title */}
-        <div className="shrink-0 px-4 pb-3">
-          <h2 className="text-[18px] font-bold text-white">Activity</h2>
-        </div>
-
-        {/* Scrollable content */}
-        <div
-          data-scroll-container
-          className="luma-scroll-y flex-1 px-3 pb-2"
-          style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
-        >
-          <ActivityFeed embedded onOpen={() => setBehindModal(true)} reveal={{ id: 'activity-sheet', landMs: ENTER_DURATION }} />
-          <div className="shrink-0" style={{ height: 'env(safe-area-inset-bottom, 12px)' }} />
-        </div>
+        <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.3)' }} />
       </div>
-    </div>,
-    document.body,
+
+      {/* Title */}
+      <div className="shrink-0 px-4 pb-3">
+        <h2 className="text-[18px] font-bold text-white">Activity</h2>
+      </div>
+
+      {/* Scrollable content */}
+      <div
+        data-scroll-container
+        className="luma-scroll-y flex-1 px-3 pb-2"
+        style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
+      >
+        <ActivityFeed embedded onOpen={() => setBehindModal(true)} reveal={{ id: 'activity-sheet', landMs: MOTION.dur.sheetEnter }} />
+        <div className="shrink-0" style={{ height: 'env(safe-area-inset-bottom, 12px)' }} />
+      </div>
+    </SimpleSheet>
   );
 }

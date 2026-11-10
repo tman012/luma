@@ -11,6 +11,7 @@ import { DescribeResultsCarousel } from './DescribeResultsCarousel';
 import { MobileDescribeResults } from './MobileDescribeResults';
 import { cn } from '@/utils/cn';
 import type { VibeItem } from '@/types/vibe';
+import { staggerMs } from '@/theme/motion';
 
 interface Props {
   library: VibeItem[];
@@ -337,16 +338,16 @@ export function DescribeMode({ library: _library, onOpenModal, isMobile, backHan
     <div className="relative z-10 flex h-full flex-col overflow-y-auto bg-kiosk-black">
       <style>{`
         @keyframes descFadeIn {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
+          from { opacity: 0; transform: translateY(var(--m-rise)); }
+          to { opacity: 1; transform: none; }
         }
         @keyframes descPulse {
           0%, 100% { opacity: 0.5; }
           50% { opacity: 1; }
         }
         @keyframes descCardReveal {
-          from { opacity: 0; transform: translateY(16px); }
-          to { opacity: 1; transform: translateY(0); }
+          from { opacity: 0; transform: translateY(var(--m-rise)); }
+          to { opacity: 1; transform: none; }
         }
         @keyframes spinnerRotate { to { transform: rotate(360deg); } }
         @keyframes orbitSpin { to { transform: rotate(360deg); } }
@@ -356,8 +357,8 @@ export function DescribeMode({ library: _library, onOpenModal, isMobile, backHan
           50% { transform: scale(1.1); opacity: 1; }
         }
         @keyframes statusFadeIn {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
+          from { opacity: 0; transform: translateY(var(--m-rise)); }
+          to { opacity: 1; transform: none; }
         }
         @keyframes dotAppear {
           from { transform: scale(0); opacity: 0; }
@@ -369,7 +370,7 @@ export function DescribeMode({ library: _library, onOpenModal, isMobile, backHan
       {phase === 'input' && (
         <div
           className="flex flex-1 flex-col items-center justify-center px-5 sm:px-8"
-          style={{ animation: 'descFadeIn 0.5s ease-out both' }}
+          style={{ animation: 'descFadeIn var(--m-dur-emphasized) var(--m-ease-decel) both' }}
         >
           <h2 className="mb-2 text-center text-[24px] font-bold text-white sm:text-[clamp(36px,4vw,56px)]">
             Describe what you want
@@ -390,7 +391,7 @@ export function DescribeMode({ library: _library, onOpenModal, isMobile, backHan
               className={cn(
                 'w-full resize-none rounded-2xl border bg-white/5 px-5 py-4',
                 'text-[16px] text-white placeholder:text-white/25',
-                'outline-none backdrop-blur-md transition-all duration-200',
+                'outline-none backdrop-blur-md transition-all duration-(--m-dur-standard) ease-(--m-ease-standard)',
                 'focus:border-white/25 focus:bg-white/8 focus:ring-1 focus:ring-white/15',
                 error ? 'border-red-500/50' : 'border-white/10',
               )}
@@ -412,9 +413,9 @@ export function DescribeMode({ library: _library, onOpenModal, isMobile, backHan
                 onClick={() => setQuery(prompt)}
                 className={cn(
                   'rounded-full border border-white/8 bg-white/5 px-3.5 py-1.5',
-                  'text-[12px] text-white/40 transition-all duration-200 sm:text-[13px]',
+                  'text-[12px] text-white/40 transition-all duration-(--m-dur-standard) ease-(--m-ease-standard) sm:text-[13px]',
                   'hover:border-white/20 hover:bg-white/10 hover:text-white/60',
-                  'active:scale-95',
+                  'active:scale-(--m-press-scale)',
                 )}
               >
                 {prompt}
@@ -429,7 +430,7 @@ export function DescribeMode({ library: _library, onOpenModal, isMobile, backHan
             disabled={!query.trim()}
             className={cn(
               'mt-8 rounded-full px-10 py-4 text-[17px] font-bold text-white sm:text-[20px]',
-              'transition-all duration-300 active:scale-95',
+              'transition-all duration-(--m-dur-emphasized) ease-(--m-ease-standard) active:scale-(--m-press-scale)',
               query.trim()
                 ? 'bg-white/15 border border-white/20 hover:bg-white/22 shadow-[0_0_30px_rgba(255,255,255,0.06)]'
                 : 'bg-white/6 text-white/30 cursor-not-allowed border border-white/8',
@@ -444,12 +445,12 @@ export function DescribeMode({ library: _library, onOpenModal, isMobile, backHan
       {phase === 'searching' && (
         <div
           className="flex flex-1 flex-col items-center justify-center gap-6"
-          style={{ animation: 'descFadeIn 0.5s ease-out both' }}
+          style={{ animation: 'descFadeIn var(--m-dur-emphasized) var(--m-ease-decel) both' }}
         >
           {/* Luma title */}
           <h2
             className="text-[clamp(28px,4vw,44px)] font-bold tracking-wide text-white/80"
-            style={{ animation: 'descFadeIn 0.6s ease-out both' }}
+            style={{ animation: 'descFadeIn var(--m-dur-emphasized) var(--m-ease-decel) both' }}
           >
             Luma
           </h2>
@@ -496,7 +497,7 @@ export function DescribeMode({ library: _library, onOpenModal, isMobile, backHan
           <p
             key={statusIndex}
             className="text-[clamp(16px,2.2vw,24px)] font-medium text-white/60"
-            style={{ animation: 'statusFadeIn 0.4s ease-out both' }}
+            style={{ animation: 'statusFadeIn var(--m-dur-emphasized) var(--m-ease-decel) both' }}
           >
             {STATUS_MESSAGES[statusIndex % STATUS_MESSAGES.length]}
           </p>
@@ -513,7 +514,7 @@ export function DescribeMode({ library: _library, onOpenModal, isMobile, backHan
                 <div
                   key={i}
                   className="h-[6px] w-[6px] rounded-full bg-white/40"
-                  style={{ animation: `dotAppear 0.3s ease-out ${i * 0.05}s both` }}
+                  style={{ animation: `dotAppear var(--m-dur-standard) ${staggerMs(i)}ms var(--m-ease-decel) both` }}
                 />
               ))}
             </div>
@@ -525,14 +526,14 @@ export function DescribeMode({ library: _library, onOpenModal, isMobile, backHan
       {phase === 'results' && recommendations.length === 0 && (
         <div
           className="flex flex-1 flex-col items-center justify-center"
-          style={{ animation: 'descFadeIn 0.4s ease-out both' }}
+          style={{ animation: 'descFadeIn var(--m-dur-emphasized) var(--m-ease-decel) both' }}
         >
           <p className="text-[24px] font-medium text-white/50 sm:text-[32px]">No matches found</p>
           <p className="mt-2 text-[14px] text-white/30 sm:text-[16px]">Try describing something different</p>
           <button
             type="button"
             onClick={handleSearchAgain}
-            className="mt-6 rounded-full bg-white/10 px-8 py-3 text-[16px] font-medium text-white/70 transition-all hover:bg-white/15 active:scale-95"
+            className="mt-6 rounded-full bg-white/10 px-8 py-3 text-[16px] font-medium text-white/70 transition-all duration-(--m-dur-fast) ease-(--m-ease-standard) hover:bg-white/15 active:scale-(--m-press-scale)"
           >
             Try Again
           </button>
