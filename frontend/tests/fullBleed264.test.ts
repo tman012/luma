@@ -18,6 +18,7 @@ const ALLOW: Record<string, string> = {
   'pages/VibeEnginePage.tsx': 'z-0 decorative layer under a page with its own background',
   // LibrariesPage phone Settings is in-flow like Home (no fixed root) — v276
   'components/calendar/TvCalendarSheet.tsx': 'uses className luma-fullscreen (style top/left/right)',
+  'components/layout/SimpleSheet.tsx': 'the root takes luma-fullscreen / luma-bleed from its owner (rootClassName)',
   'components/start/StartUI.tsx': 'uses className luma-fullscreen (style top/left/right)',
 };
 
@@ -102,7 +103,7 @@ describe('v266 full-bleed phone surfaces (Home match)', () => {
   });
   it('TV calendar, search shelf and account menu use luma-fullscreen', () => {
     const cal = readFileSync(join(SRC, 'components/calendar/TvCalendarSheet.tsx'), 'utf8');
-    expect(cal).toMatch(/className="luma-fullscreen"/);
+    expect(cal).toMatch(/rootClassName="luma-fullscreen"/);   // the shell is SimpleSheet (its root fixed, inset 0)
     expect(cal).not.toMatch(/bottom: 'calc\(-1 \* var\(--luma-bleed\)\)'/);
     expect(cal).toMatch(/calc\(var\(--luma-end-pad\) \+ 12px\)/);
     const s = readFileSync(join(SRC, 'components/search/SearchShelf.tsx'), 'utf8');

@@ -21,6 +21,7 @@ import type { UltraBlurColors } from '@/utils/modalParsers';
 import type { VibeItem } from '@/types/vibe';
 
 import type { Recommendation } from './DescribeMode';
+import { exitMs } from '@/theme/motion';
 
 interface Props {
   recommendations: Recommendation[];
@@ -81,7 +82,7 @@ export function DescribeResultsCarousel({
     setTimeout(() => {
       setPhase('gone');
       onClose();
-    }, 300);
+    }, exitMs('modal'));
   }, [onClose]);
 
   // Body scroll lock
@@ -137,7 +138,7 @@ export function DescribeResultsCarousel({
         justifyContent: 'center',
         background: 'transparent',
         opacity: overlayOpacity,
-        transition: 'opacity 0.3s ease',
+        transition: phase === 'exiting' ? 'opacity var(--m-dur-modal-exit) var(--m-ease-modal-exit)' : 'opacity var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
         padding: isMobile ? 0 : '20px',
       }}
     >
@@ -155,8 +156,8 @@ export function DescribeResultsCarousel({
           opacity: cardOpacity,
           transition:
             phase === 'exiting'
-              ? 'transform 0.3s ease, opacity 0.3s ease'
-              : 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
+              ? 'transform var(--m-dur-modal-exit) var(--m-ease-modal-exit), opacity var(--m-dur-modal-exit) var(--m-ease-modal-exit)'
+              : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter), opacity var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -177,7 +178,7 @@ export function DescribeResultsCarousel({
             cursor: 'pointer',
             lineHeight: 1,
             opacity: 0.85,
-            transition: 'opacity 0.2s ease',
+            transition: 'opacity var(--m-dur-standard) var(--m-ease-standard)',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
           onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; }}
@@ -252,7 +253,7 @@ export function DescribeResultsCarousel({
                     padding: 0,
                     cursor: 'pointer',
                     backgroundColor: i === activeIndex ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.25)',
-                    transition: 'all 300ms ease',
+                    transition: 'background-color var(--m-dur-standard) var(--m-ease-standard)',
                   }}
                 />
               ))}
@@ -415,7 +416,7 @@ function SlideLayout({
         position: 'relative',
         overflow: 'hidden',
         opacity: isActive ? 1 : 0.3,
-        transition: 'opacity 300ms',
+        transition: 'opacity var(--m-dur-standard)',
         backgroundColor: SLIDE_BG,
       }}
     >
@@ -447,7 +448,7 @@ function SlideLayout({
               objectFit: 'cover',
               objectPosition: 'center 20%',
               opacity: backdropLoaded ? 1 : 0,
-              transition: 'opacity 0.6s ease',
+              transition: 'opacity var(--m-dur-emphasized) var(--m-ease-standard)',
               filter: 'contrast(1.08) saturate(1.12)',
             }}
             onLoad={() => setBackdropLoaded(true)}
@@ -493,7 +494,7 @@ function SlideLayout({
             color: 'rgba(255,255,255,0.85)',
             textAlign: 'center',
             cursor: onCategorySearch ? 'pointer' : undefined,
-            transition: 'opacity 0.2s ease',
+            transition: 'opacity var(--m-dur-standard) var(--m-ease-standard)',
           }}
           onMouseEnter={onCategorySearch ? (e) => { e.currentTarget.style.opacity = '1'; } : undefined}
           onMouseLeave={onCategorySearch ? (e) => { e.currentTarget.style.opacity = '0.85'; } : undefined}
@@ -527,10 +528,8 @@ function SlideLayout({
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            transition: 'transform 0.2s ease',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+          className="m-interactive"
         >
           {clearLogoUrl && !logoFailed ? (
             <img

@@ -14,6 +14,7 @@ import {
 import { sizedPlexImg } from '@/utils/image';
 import { SearchIcon } from './MinimalSearchHost';
 import { wordMatchRatio, MIN_MATCH_RATIO } from './KioskSearch';
+import { MOTION } from '@/theme/motion';
 
 export type Chip = 'all' | 'movies' | 'tv' | 'people';
 const CHIPS: { id: Chip; label: string }[] = [
@@ -22,7 +23,7 @@ const CHIPS: { id: Chip; label: string }[] = [
 export const MIN_QUERY = 2;
 export const DEBOUNCE_MS = 300;
 export const SKELETON_DELAY_MS = 150;
-export const CLOSE_MS = 140;
+export const CLOSE_MS = MOTION.dur.fast;
 const reducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 export type Row =
@@ -324,11 +325,11 @@ const PAL_TOP = 'min(clamp(184px, 31vh, 372px), calc(100vh - 24px - 420px))';
 export const paletteCss = `
 .lsp-root{position:fixed;inset:0;z-index:200;color:rgba(255,255,255,.95);line-height:normal}
 .lsp-root[data-handoff="true"]{z-index:90}
-.lsp-scrim{position:absolute;inset:0;background:rgba(21,16,42,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:lsp-fade 180ms ease-out}
+.lsp-scrim{position:absolute;inset:0;background:rgba(21,16,42,.84);animation:lsp-fade var(--m-dur-standard) var(--m-ease-standard) both}
 .lsp-panel{position:absolute;left:50%;top:max(24px, ${PAL_TOP});transform:translateX(-50%);width:min(720px, calc(100vw - 96px));
   max-height:calc(100vh - max(24px, ${PAL_TOP}) - 24px);display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;
-  background:rgba(21,16,42,.92);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:1px solid var(--color-glass-8);
-  border-radius:14px;box-shadow:0 24px 60px rgba(21,16,42,.6);animation:lsp-in 200ms cubic-bezier(.2,.8,.2,1)}
+  background:rgba(21,16,42,.98);border:1px solid var(--color-glass-8);
+  border-radius:14px;box-shadow:0 24px 60px rgba(21,16,42,.6);animation:lsp-in var(--m-dur-standard) var(--m-ease-decel) both}
 .lsp-input-row{flex:none;display:flex;align-items:center;gap:14px;height:64px;padding:0 22px;border-bottom:1px solid var(--color-glass-8)}
 .lsp-icon{display:inline-flex;color:var(--color-accent-hover)}
 .lsp-input{flex:1;min-width:0;background:none;border:0;outline:none;color:rgba(255,255,255,.95);font:inherit;font-size:20px;caret-color:var(--color-accent-hover)}
@@ -354,9 +355,9 @@ export const paletteCss = `
 .lsp-sk2{background:var(--color-glass-10)}
 .lsp-sk-h{height:12px;width:110px;border-radius:6px;margin:12px}
 .lsp-th.lsp-sk2{border-color:transparent;background:transparent}
-.lsp-fm{display:flex;width:100%;align-items:center;justify-content:center;gap:8px;padding:12px 0;background:none;border:0;font:inherit;font-size:18px;font-weight:500;color:rgba(255,255,255,.80);cursor:pointer;transition:color 150ms;outline:none;border-radius:10px}
+.lsp-fm{display:flex;width:100%;align-items:center;justify-content:center;gap:8px;padding:12px 0;background:none;border:0;font:inherit;font-size:18px;font-weight:500;color:rgba(255,255,255,.80);cursor:pointer;transition:color var(--m-dur-fast) var(--m-ease-standard);outline:none;border-radius:10px}
 .lsp-fm:hover{color:#fff}
-.lsp-fm-back{display:flex;width:100%;align-items:center;justify-content:center;gap:8px;margin:6px 0 12px;padding:0;background:none;border:0;font:inherit;font-size:18px;font-weight:600;color:var(--color-text-secondary, rgba(255,255,255,.70));cursor:pointer;transition:color 150ms;outline:none;border-radius:10px}
+.lsp-fm-back{display:flex;width:100%;align-items:center;justify-content:center;gap:8px;margin:6px 0 12px;padding:0;background:none;border:0;font:inherit;font-size:18px;font-weight:600;color:var(--color-text-secondary, rgba(255,255,255,.70));cursor:pointer;transition:color var(--m-dur-fast) var(--m-ease-standard);outline:none;border-radius:10px}
 .lsp-fm-back:hover{color:var(--color-text-primary, rgba(255,255,255,.95))}
 .lsp-fm:focus-visible,.lsp-fm-back:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,.28)}
 .lsp-empty{padding:44px 0 52px;text-align:center;font-size:15px;color:rgba(255,255,255,.70)}
@@ -364,15 +365,12 @@ export const paletteCss = `
 .lsp-error-t{font-size:15px;color:rgba(255,255,255,.95)}
 .lsp-retry{display:inline-flex;align-items:center;height:44px;margin-top:16px;padding:0 22px;border-radius:999px;border:1px solid transparent;
   background:var(--color-accent);color:#fff;font:inherit;font-size:14px;font-weight:500;cursor:pointer;outline:none}
-.lsp-root[data-closing="true"] .lsp-scrim{animation:lsp-fade-out 140ms ease-in forwards}
-.lsp-root[data-closing="true"] .lsp-panel{animation:lsp-out 140ms ease-in forwards}
-html[data-luma-modal] .lsp-scrim,html[data-luma-modal] .lsp-panel{backdrop-filter:none;-webkit-backdrop-filter:none}
-html[data-luma-modal] .lsp-scrim{background:rgba(21,16,42,.84)}
+.lsp-root[data-closing="true"] .lsp-scrim{animation:lsp-fade-out var(--m-dur-fast) var(--m-ease-accel) forwards}
+.lsp-root[data-closing="true"] .lsp-panel{animation:lsp-out var(--m-dur-fast) var(--m-ease-accel) forwards}
 @keyframes lsp-fade-out{from{opacity:1}to{opacity:0}}
-@keyframes lsp-out{from{opacity:1;transform:translateX(-50%)}to{opacity:0;transform:translateX(-50%) translateY(-4px) scale(.98)}}
+@keyframes lsp-out{from{opacity:1;transform:translateX(-50%)}to{opacity:0;transform:translateX(-50%) translateY(calc(var(--m-rise) * -1))}}
 @keyframes lsp-fade{from{opacity:0}to{opacity:1}}
-@keyframes lsp-in{from{opacity:0;transform:translateX(-50%) translateY(-4px) scale(.98)}to{opacity:1;transform:translateX(-50%)}}
-@keyframes lsp-in-rm{from{opacity:0}to{opacity:1}}
+@keyframes lsp-in{from{opacity:0;transform:translateX(-50%) translateY(calc(var(--m-rise) * -1))}to{opacity:1;transform:translateX(-50%)}}
 @media (prefers-reduced-motion: reduce){
   .lsp-scrim,.lsp-panel{animation:none}
   .lsp-root[data-closing="true"] .lsp-scrim,.lsp-root[data-closing="true"] .lsp-panel{animation:none}

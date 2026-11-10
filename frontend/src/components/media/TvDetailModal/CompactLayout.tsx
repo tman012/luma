@@ -1,3 +1,4 @@
+import { StagedBox, StagedProvider } from '@/components/motion/useStagedMount';
 import { sheetBase } from '@/utils/posterColors';
 import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows, ratingsExpectedAtTap } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
@@ -156,6 +157,9 @@ function ActionButton({
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
+
+/** The cast rail's box before its photos mount: photo 90 + 8, name and character lines, the rail's 10 px padding (StagedBox). */
+const CAST_RAIL_RESERVE = 170;
 
 export function CompactLayout(props: TvModalViewProps) {
   const { user } = useAuth();
@@ -524,6 +528,7 @@ export function CompactLayout(props: TvModalViewProps) {
       <SheetCard background={APP_BG} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>
         {/* No sheet spinner past the deadline (Taylor 2026-11-02): the pre-reveal surface stays as is. */}
         {/* Scrollable content */}
+        <StagedProvider total={1} enabled={detailsIn && reveal.revealed} resetKey={props.openKey}>
         <div
           ref={scrollRef}
           data-scroll-container
@@ -1031,7 +1036,7 @@ export function CompactLayout(props: TvModalViewProps) {
                     >
                       Cast &amp; crew
                     </h2>
-                    <div
+                    <StagedBox at={1} reserve={CAST_RAIL_RESERVE}
                       style={{
                         display: 'flex',
                         gap: '20px',
@@ -1101,7 +1106,7 @@ export function CompactLayout(props: TvModalViewProps) {
                           </div>
                         );
                       })}
-                    </div>
+                    </StagedBox>
                   </div>
                 )}
 
@@ -1117,6 +1122,7 @@ export function CompactLayout(props: TvModalViewProps) {
             </>
           )}
         </div>
+        </StagedProvider>
 
         {/* Close button — bare white X, fixed top-left */}
         <button

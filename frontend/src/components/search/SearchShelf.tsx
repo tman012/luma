@@ -302,7 +302,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
 
         {loading && query.length >= 2 && (
           <div style={{ display: 'flex', justifyContent: 'center', padding: '32px 0' }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: 'rgba(255,255,255,0.5)', animation: 'sp 0.7s linear infinite' }} />
+            <div style={{ width: 28, height: 28, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: 'rgba(255,255,255,0.5)', animation: `sp ${MOTION.dur.spin}ms linear infinite` }} />
           </div>
         )}
         {!loading && resultCount === 0 && query.length >= 2 && (

@@ -121,8 +121,10 @@ def test_v205_prod_capitalization_and_guard_exemption():
 def test_v211_tv_calendar_sheet_runs_to_the_bottom_edge():
     """Designer: like v210's Settings sheet, the backdrop fills the screen and the inset is
     only inside the scroll content (no band below the sheet). v266: .luma-fullscreen / --luma-screen-h."""
-    assert 'className="luma-fullscreen"' in SHEET
+    shell = (ROOT / 'frontend/src/components/layout/SimpleSheet.tsx').read_text()
+    assert 'rootClassName="luma-fullscreen"' in SHEET
     assert "bottom: 'calc(-1 * var(--luma-bleed))'" not in SHEET
-    assert "position: 'fixed', top: 0, left: 0, right: 0," in SHEET
+    assert "rootStyle={{ inset: 'auto', top: 0, left: 0, right: 0 }}" in SHEET
+    assert "position: 'fixed', inset: 0" in shell
     i = SHEET.index('data-scroll-container')
     assert SHEET.index("var(--luma-end-pad) + 12px", i) > i

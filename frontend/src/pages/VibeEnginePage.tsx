@@ -20,6 +20,7 @@ import type { VibeSettings } from '@/services/vibeApi';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { cn } from '@/utils/cn';
 import type { VibeItem, VibeMode } from '@/types/vibe';
+import { staggerMs } from '@/theme/motion';
 
 const ExploreVisuallyMode = lazy(() =>
   import('@/pages/vibe/ExploreVisuallyMode').then((m) => ({ default: m.ExploreVisuallyMode })),
@@ -309,16 +310,16 @@ export function VibeEnginePage({ isModal = false, onClose }: VibeEnginePageProps
   const vibeAnimations = (
     <style>{`
       @keyframes vibeEnter {
-        0% { opacity: 0; transform: scale(0.96) translateY(20px); }
-        100% { opacity: 1; transform: scale(1) translateY(0); }
+        0% { opacity: 0; transform: translateY(var(--m-rise)); }
+        100% { opacity: 1; transform: none; }
       }
       @keyframes backdropPulse {
         0%, 100% { opacity: 0.35; }
         50% { opacity: 0.45; }
       }
       @keyframes fadeSlideUp {
-        0% { opacity: 0; transform: translateY(40px); }
-        100% { opacity: 1; transform: translateY(0); }
+        0% { opacity: 0; transform: translateY(var(--m-rise)); }
+        100% { opacity: 1; transform: none; }
       }
       @keyframes cardHover {
         0%, 100% { transform: translateY(0); }
@@ -345,7 +346,7 @@ export function VibeEnginePage({ isModal = false, onClose }: VibeEnginePageProps
       {mode === 'home' && (
         <div
           className="relative z-10 flex h-full flex-col items-center justify-center px-5 sm:px-8"
-          style={{ animation: 'vibeEnter 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' }}
+          style={{ animation: 'vibeEnter var(--m-dur-emphasized) var(--m-ease-decel) both' }}
         >
           {/* Title */}
           <div className="mb-8 text-center sm:mb-12">
@@ -369,16 +370,16 @@ export function VibeEnginePage({ isModal = false, onClose }: VibeEnginePageProps
                 className={cn(
                   'group relative flex items-center gap-5 sm:flex-col sm:items-center sm:justify-center sm:gap-4',
                   'h-[88px] sm:h-[320px] w-full sm:w-[280px] rounded-2xl sm:rounded-3xl border backdrop-blur-md',
-                  'bg-gradient-to-br transition-all duration-300 px-5 sm:px-0',
-                  'hover:scale-[1.02] sm:hover:scale-[1.04] hover:shadow-2xl active:scale-[0.98]',
+                  'bg-gradient-to-br transition-all duration-(--m-dur-emphasized) ease-(--m-ease-standard) px-5 sm:px-0',
+                  'hover:scale-(--m-hover-scale) sm:hover:scale-(--m-hover-scale) hover:shadow-2xl active:scale-(--m-press-scale)',
                   card.gradient,
                   card.border,
                 )}
                 style={{
-                  animation: `fadeSlideUp 0.5s ${0.1 + idx * 0.12}s cubic-bezier(0.34, 1.56, 0.64, 1) both`,
+                  animation: `fadeSlideUp var(--m-dur-emphasized) ${staggerMs(idx)}ms var(--m-ease-decel) both`,
                 }}
               >
-                <span className="text-[40px] sm:text-[64px] transition-transform duration-300 group-hover:scale-110">
+                <span className="text-[40px] sm:text-[64px] transition-transform duration-(--m-dur-emphasized) ease-(--m-ease-standard) group-hover:scale-(--m-hover-scale)">
                   {card.emoji}
                 </span>
                 <div className="flex flex-col items-start sm:items-center">
@@ -491,11 +492,11 @@ export function VibeEnginePage({ isModal = false, onClose }: VibeEnginePageProps
             key={backdropUrl}
             src={backdropUrl}
             alt=""
-            className="h-full w-full object-cover transition-opacity duration-[2000ms]"
+            className="h-full w-full object-cover transition-opacity duration-(--m-dur-reveal)"
             style={{ animation: 'backdropPulse 8s ease-in-out infinite' }}
           />
-          {/* Dark overlay + blur */}
-          <div className="absolute inset-0 bg-kiosk-black/75 backdrop-blur-xl" />
+          {/* Dark overlay */}
+          <div className="absolute inset-0 bg-kiosk-black/85" />
           {/* Bottom gradient */}
           <div className="absolute inset-0 bg-gradient-to-t from-kiosk-black via-kiosk-black/40 to-transparent" />
         </div>
@@ -513,7 +514,7 @@ export function VibeEnginePage({ isModal = false, onClose }: VibeEnginePageProps
           }
         }}
         className={cn(
-          'left-4 top-4 z-50 flex h-11 w-11 items-center justify-center rounded-full border-none bg-black/50 text-white backdrop-blur-md transition-transform active:scale-90 sm:left-6 sm:top-6 sm:h-14 sm:w-14',
+          'left-4 top-4 z-50 flex h-11 w-11 items-center justify-center rounded-full border-none bg-black/50 text-white backdrop-blur-md transition-transform duration-(--m-dur-fast) ease-(--m-ease-standard) active:scale-(--m-press-scale) sm:left-6 sm:top-6 sm:h-14 sm:w-14',
           isModal ? 'absolute' : 'fixed',
         )}
         aria-label="Back"

@@ -282,6 +282,7 @@ const roomsCss = `
 .room-pick:focus-visible,.room-tile-open:focus-visible{outline:2px solid #60a5fa;outline-offset:2px}
 @keyframes room-pulse{0%{transform:scale(.9);opacity:.8}100%{transform:scale(1.35);opacity:0}}
 @keyframes room-dot{0%,80%,100%{opacity:.25}40%{opacity:1}}
+@media (prefers-reduced-motion: reduce){.room-loop{animation:none!important}}
 `;
 
 const addTile: CSSProperties = {
@@ -326,7 +327,7 @@ function WizardCard({ step, onBack, onClose, title, children }: { step: number; 
   }, [onClose]);
   return createPortal(
     <div className="luma-fullscreen luma-bleed" data-testid="room-flow-scrim" onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(10,8,24,.62)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(10,8,24,.8)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: FONT }}>
       <style>{tvEditCss}{roomsCss}</style>
       <div role="dialog" aria-modal="true" aria-label={title} data-testid="room-flow" data-step={step + 1}
@@ -342,7 +343,7 @@ function WizardCard({ step, onBack, onClose, title, children }: { step: number; 
           <span aria-hidden="true" data-testid="wiz-dots" style={{ display: 'flex', gap: 8 }}>
             {[0, 1, 2, 3, 4].map(i => (
               <i key={i} data-on={i === step ? 'true' : undefined}
-                style={{ width: i === step ? 24 : 8, height: 8, borderRadius: 4, background: i === step ? ACCENT : i < step ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.18)', transition: 'width .2s' }} />
+                style={{ width: i === step ? 24 : 8, height: 8, borderRadius: 4, background: i === step ? ACCENT : i < step ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.18)', transition: 'width var(--m-dur-standard) var(--m-ease-standard)' }} />
             ))}
           </span>
           <button type="button" aria-label="Close" data-testid="room-flow-close" onClick={onClose} style={circleBtn}>
@@ -426,7 +427,7 @@ function Empty({ onAdd }: { onAdd: () => void }) {
 function ConfirmRemove({ name, onCancel, onRemove }: { name: string; onCancel: () => void; onRemove: () => void }) {
   return (
     <div className="luma-fullscreen luma-bleed" data-testid="room-remove-scrim" onPointerDown={e => { if (e.target === e.currentTarget) onCancel(); }}
-      style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(10,8,24,.6)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: FONT }}>
+      style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(10,8,24,.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: FONT }}>
       <div role="alertdialog" aria-label={`Remove ${name}?`} data-testid="room-remove" style={{ width: 360, maxWidth: '100%', boxSizing: 'border-box', padding: 20, borderRadius: 20, background: 'rgba(21,16,42,0.96)', border: '1px solid rgba(255,255,255,0.08)', textAlign: 'center' }}>
         <h2 style={{ margin: '0 0 18px', fontSize: 17, fontWeight: 600, color: W95 }}>Remove {name}?</h2>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -497,7 +498,7 @@ function TvArt({ state }: { state: 'idle' | 'wait' | 'ok' }) {
   return (
     <div aria-hidden="true" style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
       {state === 'wait' && [0, 1].map(i => (
-        <span key={i} style={{ position: 'absolute', inset: -24, borderRadius: 24, border: '2px solid rgba(173,199,255,.25)', animation: `room-pulse 1.8s ${i * 0.9}s infinite ease-out` }} />
+        <span key={i} className="room-loop" style={{ position: 'absolute', inset: -24, borderRadius: 24, border: '2px solid rgba(173,199,255,.25)', animation: `room-pulse 1.8s ${i * 0.9}s infinite ease-out` }} />
       ))}
       <div style={{ width: 156, height: 92, borderRadius: 12, border: '2px solid rgba(255,255,255,0.22)', background: state === 'wait'
         ? 'radial-gradient(circle at 50% 50%, rgba(59,130,246,.45), rgba(20,16,44,1) 75%)' : 'linear-gradient(180deg, #0f0c24, #14112c)',
@@ -509,7 +510,7 @@ function TvArt({ state }: { state: 'idle' | 'wait' | 'ok' }) {
         )}
         {state === 'wait' && (
           <span style={{ display: 'flex', gap: 6 }}>
-            {[0, 1, 2].map(i => <span key={i} style={{ width: 8, height: 8, borderRadius: 4, background: '#fff', animation: `room-dot 1.2s ${i * 0.2}s infinite` }} />)}
+            {[0, 1, 2].map(i => <span key={i} className="room-loop" style={{ width: 8, height: 8, borderRadius: 4, background: '#fff', animation: `room-dot 1.2s ${i * 0.2}s infinite` }} />)}
           </span>
         )}
       </div>
@@ -846,9 +847,9 @@ function Switch({ id, on, onChange, label: l }: { id: string; on: boolean; onCha
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={l} data-testid={`${id}-toggle`} onClick={() => onChange(!on)} className="lp-focus"
       style={{ width: 51, height: 31, padding: 0, border: 'none', borderRadius: 16, position: 'relative', cursor: 'pointer', flex: 'none',
-        background: on ? ACCENT : 'rgba(255,255,255,0.18)', transition: 'background .2s' }}>
-      <span aria-hidden="true" style={{ position: 'absolute', top: 2, left: on ? 22 : 2, width: 27, height: 27, borderRadius: 14, background: '#fff',
-        transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.3)' }} />
+        backgroundColor: on ? ACCENT : 'rgba(255,255,255,0.18)', transition: 'background-color var(--m-dur-standard) var(--m-ease-standard)' }}>
+      <span aria-hidden="true" style={{ position: 'absolute', top: 2, left: 2, transform: on ? 'translateX(20px)' : 'none', width: 27, height: 27, borderRadius: 14, background: '#fff',
+        transition: 'transform var(--m-dur-standard) var(--m-ease-standard)', boxShadow: '0 1px 3px rgba(0,0,0,.3)' }} />
     </button>
   );
 }
@@ -1017,7 +1018,7 @@ function EditRoom({ room: r, error, wide, onSave, onRemove, onChangePlayer, onSa
               style={{ width: '100%', minHeight: 56, padding: '0 20px', display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer',
                 fontSize: 16, fontFamily: FONT, color: '#adc7ff', textAlign: 'left' }}>
               <span style={{ flex: 1 }}>Advanced</span>
-              <span aria-hidden="true" style={{ color: W50, transition: 'transform .15s', transform: advanced ? 'rotate(90deg)' : 'none' }}>›</span>
+              <span aria-hidden="true" style={{ color: W50, transition: 'transform var(--m-dur-fast) var(--m-ease-standard)', transform: advanced ? 'rotate(90deg)' : 'none' }}>›</span>
             </button>
             {advanced && (
               <>

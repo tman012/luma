@@ -1,4 +1,5 @@
 import { useRef, useCallback, useEffect, type RefObject } from 'react';
+import { MOTION } from '@/theme/motion';
 
 interface SwipeCarouselOptions {
   /** Ref to the carousel track container */
@@ -16,6 +17,8 @@ interface SwipeCarouselOptions {
  * Touch-only — no mouse/desktop drag support.
  * All mid-drag transforms are applied directly to DOM for 60fps.
  */
+const SNAP = `transform ${MOTION.dur.emphasized}ms ${MOTION.ease.standard}`;
+
 export function useSwipeCarousel({
   containerRef,
   totalSlides,
@@ -118,7 +121,7 @@ export function useSwipeCarousel({
           const overlay = track.closest('[data-carousel-overlay]') as HTMLElement | null;
           if (overlay) {
             const progress = Math.min(dampened / (window.innerHeight * 0.3), 1);
-            overlay.style.backgroundColor = `rgba(0,0,0,${0.85 * (1 - progress * 0.7)})`;
+            overlay.style.opacity = String(1 - progress * 0.7);
           }
           track.style.transform = `translate3d(${-(activeIndex * getSlideWidth())}px, ${dampened}px, 0)`;
         });
@@ -154,7 +157,7 @@ export function useSwipeCarousel({
         else if (dx > 0 && activeIndex > 0) newIndex = activeIndex - 1;
       }
 
-      track.style.transition = 'transform 350ms cubic-bezier(0.32, 0.72, 0, 1)';
+      track.style.transition = SNAP;
       track.style.transform = `translate3d(${-(newIndex * width)}px, 0, 0)`;
 
       if (newIndex !== activeIndex) {
@@ -165,28 +168,28 @@ export function useSwipeCarousel({
       const dampened = dy * 0.6;
 
       if (velocity > 0.5 || dampened > window.innerHeight * 0.3) {
-        track.style.transition = 'transform 350ms cubic-bezier(0.32, 0.72, 0, 1)';
+        track.style.transition = SNAP;
         track.style.transform = `translate3d(${-(activeIndex * width)}px, ${window.innerHeight}px, 0)`;
 
         const overlay = track.closest('[data-carousel-overlay]') as HTMLElement | null;
         if (overlay) {
-          overlay.style.transition = 'background-color 300ms ease-out';
-          overlay.style.backgroundColor = 'rgba(0,0,0,0)';
+          overlay.style.transition = `opacity ${MOTION.dur.modalExit}ms ${MOTION.ease.modalExit}`;
+          overlay.style.opacity = '0';
         }
 
-        dismissTimerRef.current = setTimeout(() => onDismiss(), 280);
+        dismissTimerRef.current = setTimeout(() => onDismiss(), MOTION.dur.modalExit);
       } else {
-        track.style.transition = 'transform 350ms cubic-bezier(0.32, 0.72, 0, 1)';
+        track.style.transition = SNAP;
         track.style.transform = `translate3d(${-(activeIndex * width)}px, 0, 0)`;
 
         const overlay = track.closest('[data-carousel-overlay]') as HTMLElement | null;
         if (overlay) {
-          overlay.style.transition = 'background-color 300ms ease-out';
-          overlay.style.backgroundColor = 'rgba(0,0,0,0.85)';
+          overlay.style.transition = `opacity ${MOTION.dur.modalEnter}ms ${MOTION.ease.modalEnter}`;
+          overlay.style.opacity = '1';
         }
       }
     } else {
-      track.style.transition = 'transform 350ms cubic-bezier(0.32, 0.72, 0, 1)';
+      track.style.transition = SNAP;
       track.style.transform = `translate3d(${-(activeIndex * width)}px, 0, 0)`;
     }
 
@@ -223,7 +226,7 @@ export function useSwipeCarousel({
   useEffect(() => {
     const track = containerRef.current;
     if (!track) return;
-    track.style.transition = 'transform 350ms cubic-bezier(0.32, 0.72, 0, 1)';
+    track.style.transition = SNAP;
     track.style.transform = `translate3d(${-(activeIndex * getSlideWidth())}px, 0, 0)`;
   }, [activeIndex, containerRef, getSlideWidth]);
 

@@ -1,3 +1,4 @@
+import { REVEAL_TRANSITION } from '@/theme/motion';
 import { useState, useRef, useCallback } from 'react';
 
 interface MobilePosterCardProps {
@@ -126,9 +127,7 @@ export function MobilePosterCard({
             className="h-full w-full object-cover"
             style={{
               opacity: imgLoaded ? 1 : 0,
-              filter: imgLoaded ? 'blur(0)' : 'blur(10px)',
-              transform: imgLoaded ? 'scale(1)' : 'scale(1.04)',
-              transition: 'opacity 0.4s ease-out, filter 0.4s ease-out, transform 0.4s ease-out',
+              transition: REVEAL_TRANSITION,
               pointerEvents: suppressNative ? 'none' : undefined,
               WebkitTouchCallout: 'none',
               WebkitUserSelect: 'none',

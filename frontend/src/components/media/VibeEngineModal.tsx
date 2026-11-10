@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { VibeEnginePage } from '@/pages/VibeEnginePage';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
+import { exitMs } from '@/theme/motion';
 
 interface Props {
   onClose: () => void;
@@ -40,7 +41,7 @@ export function VibeEngineModal({ onClose }: Props) {
     setTimeout(() => {
       setPhase('gone');
       onClose();
-    }, 300);
+    }, exitMs('modal'));
   }, [onClose]);
 
   // Escape key
@@ -83,7 +84,7 @@ export function VibeEngineModal({ onClose }: Props) {
         justifyContent: 'center',
         background: 'rgba(0,0,0,0.7)',
         opacity: overlayOpacity,
-        transition: 'opacity 0.3s ease',
+        transition: phase === 'exiting' ? 'opacity var(--m-dur-modal-exit) var(--m-ease-modal-exit)' : 'opacity var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
         padding: '20px',
       }}
     >
@@ -102,8 +103,8 @@ export function VibeEngineModal({ onClose }: Props) {
           opacity: cardOpacity,
           transition:
             phase === 'exiting'
-              ? 'transform 0.3s ease, opacity 0.3s ease'
-              : 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
+              ? 'transform var(--m-dur-modal-exit) var(--m-ease-modal-exit), opacity var(--m-dur-modal-exit) var(--m-ease-modal-exit)'
+              : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter), opacity var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           display: 'flex',
           flexDirection: 'column',
         }}

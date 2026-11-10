@@ -59,7 +59,7 @@ export function IconPicker({ name, value, onCancel, onDone }: {
   }, [onCancel]);
   return createPortal(
     <div className="luma-fullscreen luma-bleed" data-testid="icon-picker-scrim" onPointerDown={e => { if (e.target === e.currentTarget) onCancel(); }}
-      style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(10,8,24,.6)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+      style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(10,8,24,.8)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: FONT }}>
       <div role="dialog" aria-modal="true" aria-label={name} data-testid="icon-picker"
         style={{ width: 540, maxWidth: '100%', boxSizing: 'border-box', padding: '36px 40px 30px', borderRadius: 28, textAlign: 'center',

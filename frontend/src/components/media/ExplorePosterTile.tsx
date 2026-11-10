@@ -49,7 +49,7 @@ export const ExplorePosterTile = memo(function ExplorePosterTile({
             loading="lazy"
             draggable={false}
             className={cn(
-              'h-full w-full object-cover transition-opacity duration-300',
+              'h-full w-full object-cover transition-opacity duration-(--m-dur-emphasized) ease-(--m-ease-standard)',
               imgLoaded ? 'opacity-100' : 'opacity-0',
             )}
             onLoad={() => setImgLoaded(true)}
@@ -62,7 +62,7 @@ export const ExplorePosterTile = memo(function ExplorePosterTile({
         )}
 
         {/* Hover gradient */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 transition-opacity duration-(--m-dur-fast) ease-(--m-ease-standard) group-hover:opacity-100" />
 
         {/* Status orb (top-left) — hidden until ownership is resolved */}
         {orb && (

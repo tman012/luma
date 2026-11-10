@@ -10,6 +10,7 @@ import { getVibeShelves, VIBE_DEFINITIONS } from '@/services/vibeEngine';
 import { cn } from '@/utils/cn';
 import { rtCriticIcon } from '@/utils/ratingIcons';
 import type { VibeItem, VibeShelf, VibeId } from '@/types/vibe';
+import { staggerMs } from '@/theme/motion';
 
 interface Props {
   library: VibeItem[];
@@ -57,8 +58,8 @@ export function FeelSomethingMode({ library, onOpenModal, initialVibe }: Props) 
     <div className="relative z-10 flex h-full flex-col">
       <style>{`
         @keyframes vibeCardIn {
-          0% { opacity: 0; transform: scale(0.85) translateY(30px); }
-          100% { opacity: 1; transform: scale(1) translateY(0); }
+          0% { opacity: 0; transform: translateY(var(--m-rise)); }
+          100% { opacity: 1; transform: none; }
         }
         @keyframes shelfSlide {
           0% { opacity: 0; transform: translateY(40px); }
@@ -75,7 +76,7 @@ export function FeelSomethingMode({ library, onOpenModal, initialVibe }: Props) 
           <button
             type="button"
             onClick={() => setActiveVibe(null)}
-            className="mt-2 rounded-full bg-white/10 px-5 py-1.5 text-[14px] text-white/70 backdrop-blur-sm transition-colors hover:bg-white/20 sm:mt-3 sm:px-6 sm:py-2 sm:text-[16px]"
+            className="mt-2 rounded-full bg-white/10 px-5 py-1.5 text-[14px] text-white/70 backdrop-blur-sm transition-colors duration-(--m-dur-fast) ease-(--m-ease-standard) hover:bg-white/20 sm:mt-3 sm:px-6 sm:py-2 sm:text-[16px]"
           >
             All Vibes
           </button>
@@ -98,13 +99,13 @@ export function FeelSomethingMode({ library, onOpenModal, initialVibe }: Props) 
                   className={cn(
                     'group relative flex flex-col items-center justify-center gap-2 sm:gap-3',
                     'h-[130px] sm:h-[200px] rounded-xl sm:rounded-2xl border backdrop-blur-md',
-                    'transition-all duration-300',
+                    'transition-all duration-(--m-dur-emphasized) ease-(--m-ease-standard)',
                     count > 0
-                      ? 'hover:scale-[1.05] hover:shadow-xl active:scale-[0.97] cursor-pointer border-white/15 bg-white/5'
+                      ? 'hover:scale-(--m-hover-scale) hover:shadow-xl active:scale-(--m-press-scale) cursor-pointer border-white/15 bg-white/5'
                       : 'opacity-30 cursor-not-allowed border-white/5 bg-white/[0.02]',
                   )}
                   style={{
-                    animation: `vibeCardIn 0.4s ${idx * 0.06}s cubic-bezier(0.34, 1.56, 0.64, 1) both`,
+                    animation: `vibeCardIn var(--m-dur-emphasized) ${staggerMs(idx)}ms var(--m-ease-decel) both`,
                   }}
                 >
                   {/* Color accent line */}
@@ -112,7 +113,7 @@ export function FeelSomethingMode({ library, onOpenModal, initialVibe }: Props) 
                     className="absolute inset-x-4 top-0 h-[2px] rounded-full opacity-60 sm:inset-x-6 sm:h-[3px]"
                     style={{ backgroundColor: vibe.color }}
                   />
-                  <span className="text-[32px] sm:text-[48px] transition-transform duration-300 group-hover:scale-110">
+                  <span className="text-[32px] sm:text-[48px] transition-transform duration-(--m-dur-emphasized) ease-(--m-ease-standard) group-hover:scale-(--m-hover-scale)">
                     {vibe.emoji}
                   </span>
                   <span className="text-[15px] sm:text-[20px] font-semibold text-white">
@@ -132,7 +133,7 @@ export function FeelSomethingMode({ library, onOpenModal, initialVibe }: Props) 
       {activeVibe && activeShelf && (
         <div
           className="flex-1 overflow-hidden"
-          style={{ animation: 'shelfSlide 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}
+          style={{ animation: 'shelfSlide var(--m-dur-emphasized) var(--m-ease-decel) both' }}
         >
           <div
             ref={scrollRef}
@@ -151,7 +152,7 @@ export function FeelSomethingMode({ library, onOpenModal, initialVibe }: Props) 
                   if (!dragState.current.moved) onOpenModal(item);
                   dragState.current.moved = false;
                 }}
-                className="group relative shrink-0 text-left outline-none transition-transform duration-300 hover:scale-105 focus-visible:scale-105"
+                className="group relative shrink-0 text-left outline-none transition-transform duration-(--m-dur-emphasized) ease-(--m-ease-standard) hover:scale-(--m-hover-scale) focus-visible:scale-(--m-hover-scale)"
               >
                 <div className="relative w-[160px] overflow-hidden rounded-lg sm:w-[220px] sm:rounded-xl">
                   <div className="aspect-[2/3]">
@@ -170,7 +171,7 @@ export function FeelSomethingMode({ library, onOpenModal, initialVibe }: Props) 
                   </div>
 
                   {/* Hover overlay with info */}
-                  <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 p-3 sm:p-4">
+                  <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 transition-opacity duration-(--m-dur-emphasized) ease-(--m-ease-standard) group-hover:opacity-100 p-3 sm:p-4">
                     <p className="text-[12px] text-white/70 sm:text-[13px]">
                       {item.year ?? ''}{item.runtimeMinutes > 0 ? ` \u{00B7} ${item.runtimeMinutes}m` : ''}
                     </p>

@@ -13,6 +13,7 @@ import { rtCriticIcon, rtAudienceIcon } from '@/utils/ratingIcons';
 import type { VibeItem } from '@/types/vibe';
 import type { VibeSettings } from '@/services/vibeApi';
 import { apiFetch } from '../../apiClient';
+import { staggerMs } from '@/theme/motion';
 
 const PICK_COUNT = 5;
 const STEP_COUNT = 4;
@@ -249,10 +250,10 @@ function MobileResults({ picks, noResults, loadError, onOpenModal, onStartOver, 
       onClick={() => onOpenModal(item)}
       className={cn(
         'group relative w-full text-left outline-none',
-        'transition-transform duration-300 active:scale-[0.95]',
+        'transition-transform duration-(--m-dur-emphasized) ease-(--m-ease-standard) active:scale-(--m-press-scale)',
       )}
       style={{
-        animation: `mobileCardReveal 0.5s ${idx * 0.08}s ease-out both`,
+        animation: `mobileCardReveal var(--m-dur-emphasized) ${staggerMs(idx)}ms var(--m-ease-decel) both`,
       }}
     >
       {/* Poster */}
@@ -265,7 +266,7 @@ function MobileResults({ picks, noResults, loadError, onOpenModal, onStartOver, 
             <img
               src={item.posterUrl}
               alt={item.title}
-              className="h-full w-full object-cover opacity-0 transition-opacity duration-300"
+              className="h-full w-full object-cover opacity-0 transition-opacity duration-(--m-dur-emphasized) ease-(--m-ease-standard)"
               onLoad={(e: SyntheticEvent<HTMLImageElement>) => {
                 e.currentTarget.classList.remove('opacity-0');
               }}
@@ -352,8 +353,8 @@ function MobileResults({ picks, noResults, loadError, onOpenModal, onStartOver, 
             onClick={onStartOver}
             className={cn(
               'flex-1 rounded-2xl bg-white/10 py-4 text-[17px] font-semibold',
-              'text-white/70 backdrop-blur-sm transition-all',
-              'active:scale-[0.97]',
+              'text-white/70 backdrop-blur-sm transition-all duration-(--m-dur-fast) ease-(--m-ease-standard)',
+              'active:scale-(--m-press-scale)',
             )}
           >
             Start Over
@@ -365,7 +366,7 @@ function MobileResults({ picks, noResults, loadError, onOpenModal, onStartOver, 
               'flex-1 rounded-2xl py-4 text-[17px] font-bold text-white',
               'bg-gradient-to-r from-amber-500 to-red-500',
               'shadow-[0_0_30px_rgba(245,158,11,0.3)]',
-              'transition-all active:scale-[0.97]',
+              'transition-all duration-(--m-dur-fast) ease-(--m-ease-standard) active:scale-(--m-press-scale)',
             )}
           >
             Spin Again
@@ -389,7 +390,7 @@ function DesktopResults({ picks, noResults, loadError, onOpenModal, onStartOver,
             const centerIdx = Math.floor(picks.length / 2);
             const isCenter = idx === centerIdx;
             const distFromCenter = Math.abs(idx - centerIdx);
-            const delay = `${idx * 0.12}s`;
+            const delay = `${staggerMs(idx)}ms`;
 
             const cardWidth = isCenter
               ? Math.min(360, window.innerWidth * 0.28)
@@ -404,11 +405,11 @@ function DesktopResults({ picks, noResults, loadError, onOpenModal, onStartOver,
                 onClick={() => onOpenModal(item)}
                 className={cn(
                   'group relative shrink-0 text-left outline-none',
-                  'transition-transform duration-300 hover:scale-[1.06] active:scale-[0.97]',
+                  'transition-transform duration-(--m-dur-emphasized) ease-(--m-ease-standard) hover:scale-(--m-hover-scale) active:scale-(--m-press-scale)',
                 )}
                 style={{
                   width: cardWidth,
-                  animation: `cardReveal 0.6s ${delay} cubic-bezier(0.34, 1.56, 0.64, 1) both`,
+                  animation: `cardReveal var(--m-dur-emphasized) ${delay} var(--m-ease-decel) both`,
                   perspective: '800px',
                 }}
               >
@@ -420,7 +421,7 @@ function DesktopResults({ picks, noResults, loadError, onOpenModal, onStartOver,
                         <img
                           src={item.posterUrl}
                           alt={item.title}
-                          className="h-full w-full object-cover opacity-0 transition-opacity duration-300"
+                          className="h-full w-full object-cover opacity-0 transition-opacity duration-(--m-dur-emphasized) ease-(--m-ease-standard)"
                           onLoad={(e: SyntheticEvent<HTMLImageElement>) => {
                             e.currentTarget.classList.remove('opacity-0');
                           }}
@@ -509,8 +510,8 @@ function DesktopResults({ picks, noResults, loadError, onOpenModal, onStartOver,
           onClick={onStartOver}
           className={cn(
             'rounded-full bg-white/10 px-10 py-4 text-[clamp(18px,1.8vw,24px)] font-medium',
-            'text-white/70 backdrop-blur-sm transition-all',
-            'hover:bg-white/15 hover:text-white active:scale-95',
+            'text-white/70 backdrop-blur-sm transition-all duration-(--m-dur-fast) ease-(--m-ease-standard)',
+            'hover:bg-white/15 hover:text-white active:scale-(--m-press-scale)',
           )}
         >
           Start Over
@@ -522,8 +523,8 @@ function DesktopResults({ picks, noResults, loadError, onOpenModal, onStartOver,
             'rounded-full px-12 py-4 text-[clamp(18px,1.8vw,24px)] font-bold text-white',
             'bg-gradient-to-r from-amber-500 to-red-500',
             'shadow-[0_0_40px_rgba(245,158,11,0.3)]',
-            'transition-all duration-300 hover:shadow-[0_0_60px_rgba(245,158,11,0.5)]',
-            'active:scale-95',
+            'transition-all duration-(--m-dur-emphasized) ease-(--m-ease-standard) hover:shadow-[0_0_60px_rgba(245,158,11,0.5)]',
+            'active:scale-(--m-press-scale)',
           )}
         >
           Spin Again
@@ -778,11 +779,11 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
     <div className="relative z-10 flex h-full flex-col items-center overflow-y-auto">
       <style>{`
         @keyframes slideInRight {
-          from { opacity: 0; transform: translateX(60px); }
+          from { opacity: 0; transform: translateX(calc(var(--m-route-shift) * 3)); }
           to { opacity: 1; transform: translateX(0); }
         }
         @keyframes slideInLeft {
-          from { opacity: 0; transform: translateX(-60px); }
+          from { opacity: 0; transform: translateX(calc(var(--m-route-shift) * -3)); }
           to { opacity: 1; transform: translateX(0); }
         }
         @keyframes spinPulse {
@@ -791,13 +792,12 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
           100% { transform: scale(1); }
         }
         @keyframes cardReveal {
-          0% { opacity: 0; transform: scale(0.7) rotateY(90deg); }
-          60% { opacity: 1; transform: scale(1.05) rotateY(-5deg); }
-          100% { opacity: 1; transform: scale(1) rotateY(0); }
+          0% { opacity: 0; transform: translateY(var(--m-rise)); }
+          100% { opacity: 1; transform: none; }
         }
         @keyframes mobileCardReveal {
-          0% { opacity: 0; transform: scale(0.92) translateY(16px); }
-          100% { opacity: 1; transform: scale(1) translateY(0); }
+          0% { opacity: 0; transform: translateY(var(--m-rise)); }
+          100% { opacity: 1; transform: none; }
         }
         @keyframes spinnerRotate { to { transform: rotate(360deg); } }
       `}</style>
@@ -811,7 +811,7 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
             key={`step-${step}-${animKey.current}`}
             className="flex flex-col items-center"
             style={{
-              animation: `${direction === 'forward' ? 'slideInRight' : 'slideInLeft'} 0.35s ease-out both`,
+              animation: `${direction === 'forward' ? 'slideInRight' : 'slideInLeft'} var(--m-dur-emphasized) var(--m-ease-decel) both`,
             }}
           >
             {/* Progress row: back button + dots */}
@@ -822,7 +822,7 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                 onClick={goBack}
                 className={cn(
                   'rounded-full bg-white/10 p-2.5 text-white/60 backdrop-blur-sm',
-                  'transition-all hover:bg-white/20 hover:text-white active:scale-90',
+                  'transition-all duration-(--m-dur-fast) ease-(--m-ease-standard) hover:bg-white/20 hover:text-white active:scale-(--m-press-scale)',
                   step === 0 && 'pointer-events-none opacity-0',
                 )}
                 aria-hidden={step === 0}
@@ -838,7 +838,7 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                 <div
                   key={i}
                   className={cn(
-                    'h-2.5 rounded-full transition-all duration-300',
+                    'h-2.5 rounded-full transition-all duration-(--m-dur-emphasized) ease-(--m-ease-standard)',
                     i === step
                       ? 'w-8 bg-amber-400'
                       : i < step
@@ -872,7 +872,7 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                         'group flex items-center gap-4 rounded-2xl border px-5 py-4',
                         'sm:flex-col sm:items-center sm:justify-center sm:rounded-3xl sm:px-0 sm:py-0',
                         'w-full sm:w-[clamp(170px,20vw,260px)] sm:h-[clamp(170px,20vw,260px)]',
-                        'backdrop-blur-sm transition-all duration-200 active:scale-95',
+                        'backdrop-blur-sm transition-all duration-(--m-dur-standard) ease-(--m-ease-standard) active:scale-(--m-press-scale)',
                         answers.type === opt.value
                           ? 'border-amber-400/50 bg-amber-500/20 shadow-lg shadow-amber-500/10'
                           : 'border-white/10 bg-white/5 hover:border-white/25 hover:bg-white/10',
@@ -915,7 +915,7 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                         'group flex items-center gap-4 rounded-2xl border px-5 py-4',
                         'sm:flex-col sm:items-center sm:justify-center sm:rounded-3xl sm:px-0 sm:py-0',
                         'w-full sm:w-[clamp(180px,22vw,280px)] sm:h-[clamp(170px,20vw,260px)]',
-                        'backdrop-blur-sm transition-all duration-200 active:scale-95',
+                        'backdrop-blur-sm transition-all duration-(--m-dur-standard) ease-(--m-ease-standard) active:scale-(--m-press-scale)',
                         answers.source === opt.value
                           ? 'border-amber-400/50 bg-amber-500/20 shadow-lg shadow-amber-500/10'
                           : 'border-white/10 bg-white/5 hover:border-white/25 hover:bg-white/10',
@@ -964,7 +964,7 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                         }
                         className={cn(
                           'rounded-full px-4 py-2.5 text-[14px] font-medium sm:px-7 sm:py-3.5 sm:text-[clamp(17px,1.7vw,22px)]',
-                          'transition-all duration-200 active:scale-95',
+                          'transition-all duration-(--m-dur-standard) ease-(--m-ease-standard) active:scale-(--m-press-scale)',
                           active
                             ? 'bg-amber-500/30 text-amber-200 shadow-lg ring-1 ring-amber-500/40'
                             : 'bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/60',
@@ -983,8 +983,8 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                     onClick={() => selectAndAdvance({ genres: [] })}
                     className={cn(
                       'rounded-full bg-white/10 px-6 py-3 text-[15px] font-medium sm:px-10 sm:py-4 sm:text-[clamp(18px,1.8vw,24px)]',
-                      'text-white/60 backdrop-blur-sm transition-all',
-                      'hover:bg-white/15 hover:text-white/80 active:scale-95',
+                      'text-white/60 backdrop-blur-sm transition-all duration-(--m-dur-fast) ease-(--m-ease-standard)',
+                      'hover:bg-white/15 hover:text-white/80 active:scale-(--m-press-scale)',
                     )}
                   >
                     Anything Goes
@@ -996,7 +996,7 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                       className={cn(
                         'rounded-full bg-amber-500/20 px-6 py-3 text-[15px] font-medium sm:px-10 sm:py-4 sm:text-[clamp(18px,1.8vw,24px)]',
                         'text-amber-200 ring-1 ring-amber-500/30',
-                        'transition-all hover:bg-amber-500/30 active:scale-95',
+                        'transition-all duration-(--m-dur-fast) ease-(--m-ease-standard) hover:bg-amber-500/30 active:scale-(--m-press-scale)',
                       )}
                     >
                       Next ({answers.genres.length})
@@ -1029,7 +1029,7 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                         'group flex items-center gap-4 rounded-2xl border px-5 py-4',
                         'sm:flex-col sm:items-center sm:justify-center sm:rounded-3xl sm:px-0 sm:py-0',
                         'w-full sm:w-[clamp(170px,20vw,260px)] sm:h-[clamp(170px,20vw,260px)]',
-                        'backdrop-blur-sm transition-all duration-200 active:scale-95',
+                        'backdrop-blur-sm transition-all duration-(--m-dur-standard) ease-(--m-ease-standard) active:scale-(--m-press-scale)',
                         answers.era === opt.value
                           ? 'border-amber-400/50 bg-amber-500/20 shadow-lg shadow-amber-500/10'
                           : 'border-white/10 bg-white/5 hover:border-white/25 hover:bg-white/10',

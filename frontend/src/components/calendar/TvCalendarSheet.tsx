@@ -6,16 +6,12 @@
  * The slide-up shell (grab-handle drag-to-dismiss, tap-outside to close) is unchanged.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { SimpleSheet } from '@/components/layout/SimpleSheet';
+import { MOTION } from '@/theme/motion';
 import { OpenShowContext, TvCalendar } from '@/components/library/TvCalendar';
 import { TvSeriesDetail } from '@/components/library/TvSeriesDetail';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { localDay, weekStart, type Day } from '@/components/library/tvCalendarApi';
-
-const DISMISS_THRESHOLD = 120;
-const ENTER_DURATION = 600;
-const EXIT_DURATION = 400;
-const SPRING = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
 
 interface TvCalendarSheetProps {
@@ -24,78 +20,19 @@ interface TvCalendarSheetProps {
 }
 
 export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
+  if (!open) return null;
+  return <TvCalendarSheetBody onClose={onClose} />;
+}
 
-  // --- Sheet animation (shared shell) ---
-  const dragRef = useRef({ active: false, startY: 0, currentY: 0 });
-  const [dragOffset, setDragOffset] = useState(0);
-  const [phase, setPhase] = useState<'entering' | 'visible' | 'exiting' | 'gone'>('gone');
-  const [behindModal, setBehindModal] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setPhase('entering');
-      setDragOffset(0);
-      setBehindModal(false);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setPhase('visible'));
-      });
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prevOverflow; };
-  }, [open]);
-
-  const handleDismiss = useCallback(() => {
-    setDragOffset(0);
-    requestAnimationFrame(() => {
-      setPhase('exiting');
-      setTimeout(() => { setPhase('gone'); onClose(); }, EXIT_DURATION);
-    });
-  }, [onClose]);
-
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('[data-sheet-handle]') && e.touches.length > 0) {
-      dragRef.current = { active: true, startY: e.touches[0]!.clientY, currentY: e.touches[0]!.clientY };
-    }
-  }, []);
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!dragRef.current.active || !e.touches.length) return;
-    dragRef.current.currentY = e.touches[0]!.clientY;
-    setDragOffset(Math.max(0, dragRef.current.currentY - dragRef.current.startY));
-  }, []);
-  const onTouchEnd = useCallback(() => {
-    if (!dragRef.current.active) return;
-    const dy = dragRef.current.currentY - dragRef.current.startY;
-    dragRef.current.active = false;
-    if (dy > DISMISS_THRESHOLD) handleDismiss();
-    else setDragOffset(0);
-  }, [handleDismiss]);
-
-  useEffect(() => {
-    if (!behindModal) return;
-    const restore = () => setBehindModal(false);
-    window.addEventListener('modal-closed', restore);
-    return () => window.removeEventListener('modal-closed', restore);
-  }, [behindModal]);
-
+function TvCalendarSheetBody({ onClose }: { onClose: () => void }) {
+  // The shell (enter, exit, scrim, drag) is the shared SimpleSheet.
   // --- Day and week (Luma's TV calendar; the day is picked inside TvCalendar's day-nav A) ---
-  const [today, setToday] = useState<Day>(() => localDay());
+  const [today] = useState<Day>(() => localDay());
   const [week, setWeek] = useState<Day>(() => weekStart(localDay()));
   const [seriesId, setSeriesId] = useState<number | null>(null);
   const [toast, setToast] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const savedScroll = useRef(0);
-  useEffect(() => {
-    if (!open) return;
-    const t = localDay();
-    setToday(t); setWeek(weekStart(t)); setSeriesId(null);
-    savedScroll.current = 0;
-  }, [open]);
   // a tap opens the series page inside the sheet; the calendar stays mounted so the day survives Back
   const openSeries = useCallback((id: number) => {
     savedScroll.current = scrollRef.current?.scrollTop ?? 0;
@@ -111,50 +48,18 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
     return () => cancelAnimationFrame(id);
   }, [seriesId]);
 
-  if (phase === 'gone' && !open) return null;
-
-  const sheetTransform =
-    dragOffset > 0 ? `translate3d(0, ${dragOffset}px, 0)`
-      : phase === 'visible' ? 'translate3d(0, 0, 0)'
-        : 'translate3d(0, 100%, 0)';
-
-  const sheetTransition =
-    dragOffset > 0 ? 'none'
-      : phase === 'exiting' ? `transform ${EXIT_DURATION}ms cubic-bezier(0.4, 0, 1, 1)`
-        : `transform ${ENTER_DURATION}ms ${SPRING}`;
-
-  return createPortal(
-    <div
-      data-sheet="TvCalendarSheet"
-      className="luma-fullscreen"
-      style={{
-        // v266: size by --luma-screen-h like Home (negative-bottom / ::after stay clipped on iPhone PWA)
-        position: 'fixed', top: 0, left: 0, right: 0,
-        zIndex: behindModal ? 9999 : 10001,
-        display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-        backgroundColor: behindModal ? 'rgba(0,0,0,0)' : phase === 'visible' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0)',
-        transition: phase === 'exiting'
-          ? `background-color ${EXIT_DURATION}ms ease`
-          : `background-color ${ENTER_DURATION}ms ease`,
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
-    >
-      <div
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        style={{
-          height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
-          display: 'flex', flexDirection: 'column',
-          background: '#111318',                    // v322 option C (TOKENS-C): page and sheet #111318
-          borderRadius: '20px 20px 0 0',
-          overflow: 'hidden',
-          transform: sheetTransform,
-          transition: sheetTransition,
-          willChange: 'transform',
-          backfaceVisibility: 'hidden',
-        }}
-      >
+  return (
+    <SimpleSheet name="TvCalendarSheet" onClosed={onClose}
+      rootClassName="luma-fullscreen"
+      // v266: size by --luma-screen-h like Home (negative-bottom / ::after stay clipped on iPhone PWA)
+      rootStyle={{ inset: 'auto', top: 0, left: 0, right: 0 }}
+      panelStyle={{
+        height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
+        display: 'flex', flexDirection: 'column',
+        background: '#111318',                    // v322 option C (TOKENS-C): page and sheet #111318
+        borderRadius: '20px 20px 0 0',
+        overflow: 'hidden',
+      }}>
         {/* Grab handle */}
         <div data-sheet-handle
           style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '10px 0 14px', cursor: 'grab' }}
@@ -171,7 +76,7 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
           {toast && <NoticeToast key={toast} text={toast} onDone={() => setToast('')} />}
           <div style={{ display: seriesId ? 'none' : undefined }} hidden={seriesId != null}>
             <OpenShowContext.Provider value={openSeries}>
-              <TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone reveal={{ id: 'tv-calendar-sheet', landMs: ENTER_DURATION }} />
+              <TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone reveal={{ id: 'tv-calendar-sheet', landMs: MOTION.dur.sheetEnter }} />
             </OpenShowContext.Provider>
           </div>
           {seriesId != null && (
@@ -182,8 +87,6 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
           )}
           <div data-scroll-content className="shrink-0" style={{ height: 'calc(var(--luma-end-pad) + 12px)' }} />
         </div>
-      </div>
-    </div>,
-    document.body,
+    </SimpleSheet>
   );
 }

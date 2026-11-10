@@ -394,20 +394,19 @@ export const R3_MODAL_REST = 88;
 export const R3_MODAL_OPEN = 760;
 export const r3Css = `
 [data-r3-search]{--r3-pad:clamp(32px, 3.4vw, 48px);--r3-top:clamp(300px, 29vw, 420px);--r3-po:clamp(112px, 9.5vw, 136px);color:rgba(255,255,255,.95);line-height:normal}
-[data-r3-search]{--a1-dur:200ms;--a1-ease:cubic-bezier(.2,0,0,1)}
+[data-r3-search]{--a1-dur:var(--m-dur-standard);--a1-ease:var(--m-ease-standard)}
 /* Over the nav bar (z 56) and under the person view (z 60/70) and the detail sheets. */
 .r3-modal{position:fixed;inset:0;z-index:58;display:flex;align-items:center;justify-content:center;padding:48px;box-sizing:border-box;
   transition:opacity var(--a1-dur) var(--a1-ease),visibility 0s linear var(--a1-dur)}
 .r3-modal[data-open="true"]{opacity:1;visibility:visible;transition-delay:0s}
 .r3-modal[data-open="false"]{opacity:0;visibility:hidden;pointer-events:none}
-.r3-backdrop{position:absolute;inset:0;background:rgba(21,16,42,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.r3-backdrop{position:absolute;inset:0;background:rgba(21,16,42,.84)}
 .r3-panel{position:relative;width:min(${R3_MODAL_W}px, 100%);height:${R3_MODAL_REST}px;max-height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;
   border-radius:28px;background:linear-gradient(180deg,rgba(167,139,250,.14) 0,rgba(167,139,250,0) 120px),rgba(21,16,42,.94);
   box-shadow:inset 0 0 0 1px rgba(196,181,253,.24),0 24px 60px rgba(8,5,24,.6);
   transition:height var(--a1-dur) var(--a1-ease),transform var(--a1-dur) var(--a1-ease)}
 .r3-panel[data-searching="true"]{height:min(${R3_MODAL_OPEN}px, 100%)}
-.r3-modal[data-open="false"] .r3-panel{transform:translateY(-6px) scale(.98)}
-html[data-luma-modal] .r3-backdrop{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(21,16,42,.84)}
+.r3-modal[data-open="false"] .r3-panel{transform:translateY(calc(var(--m-rise) * -1))}
 .r3-head{flex:none;display:flex;align-items:center;gap:12px;height:${R3_MODAL_REST}px;box-sizing:border-box;padding:0 20px}
 .r3-panel .r3-field{flex:1;width:auto;min-width:0}
 .r3-close{flex:none;width:44px;height:44px;padding:0;border:0;border-radius:22px;display:grid;place-items:center;cursor:pointer;outline:none;
@@ -417,7 +416,7 @@ html[data-luma-modal] .r3-backdrop{backdrop-filter:none;-webkit-backdrop-filter:
 @media (prefers-reduced-motion: reduce){[data-r3-search]{--a1-dur:0ms}}
 /* v241 (H2): 480x48 pill, rgba(51,53,58,.85) fill, no border, filled 20px search icon, #c4c6d0 */
 .r3-field{display:flex;align-items:center;gap:12px;width:480px;height:48px;box-sizing:border-box;padding:0 20px;border-radius:24px;
-  background:rgba(51,53,58,.85);border:0;color:#c4c6d0;cursor:text;transition:box-shadow 150ms}
+  background:rgba(51,53,58,.85);border:0;color:#c4c6d0;cursor:text;transition:box-shadow var(--m-dur-fast) var(--m-ease-standard)}
 .r3-field:focus-within{box-shadow:0 0 0 2px var(--color-accent, #3b82f6)}
 .r3-icon{display:inline-flex;color:#c4c6d0}
 .r3-input{flex:1;min-width:0;background:none;border:0;outline:none;color:#e2e2e9;font:inherit;font-size:16px;caret-color:#e2e2e9}

@@ -94,7 +94,7 @@ function SearchResultCard({
       onPointerEnter={warm}
       onPointerDown={warm}
       onFocus={warm}
-      className="group flex flex-col items-center gap-2 rounded-2xl p-2 lg:p-3 transition-colors hover:bg-glass-10"
+      className="group flex flex-col items-center gap-2 rounded-2xl p-2 lg:p-3 transition-colors duration-(--m-dur-fast) hover:bg-glass-10"
     >
       <div className="relative aspect-[2/3] w-full shrink-0 overflow-hidden rounded-xl lg:rounded-2xl bg-glass-5 shadow-lg">
         {poster ? (
@@ -137,7 +137,7 @@ function PersonCard({
     <button
       type="button"
       onClick={(e) => onClick(e.currentTarget)}
-      className="group flex flex-col items-center gap-2 rounded-2xl p-3 transition-colors hover:bg-glass-10"
+      className="group flex flex-col items-center gap-2 rounded-2xl p-3 transition-colors duration-(--m-dur-fast) hover:bg-glass-10"
     >
       <div className={cn(
         'relative shrink-0 overflow-hidden rounded-xl bg-glass-5 shadow-lg',
@@ -798,7 +798,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
         ref={panelRef}
         data-search-panel
         className={cn(
-          'absolute inset-x-0 flex flex-col items-center transition-all duration-300 ease-in-out',
+          'absolute inset-x-0 flex flex-col items-center transition-all duration-(--m-dur-emphasized) ease-(--m-ease-standard)',
           tk.spacing.searchPadX,
           personView || personLoading
             ? 'z-[70] top-0'
@@ -810,7 +810,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
       >
       {/* Search bar — hidden when idle or viewing person filmography */}
       {!personView && !personLoading && isActive && (
-        <div className={cn('flex w-full min-w-0 flex-col rounded-2xl border border-white/15 shadow-lg shadow-black/50', tk.search.barMaxW)} style={{ background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}>
+        <div className={cn('flex w-full min-w-0 flex-col rounded-2xl border border-white/15 shadow-lg shadow-black/50', tk.search.barMaxW)} style={{ background: 'rgba(21,16,42,0.94)' }}>
           <div className="flex items-center gap-4 px-6 py-4">
             {/* Search icon — larger in expanded mode */}
             <svg
@@ -881,7 +881,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                       }
                     }}
                     onPointerDown={() => { if (media) warmResult(media); }}
-                    className="flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors hover:bg-white/[0.07]"
+                    className="flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors duration-(--m-dur-fast) hover:bg-white/[0.07]"
                   >
                     {/* Small poster thumbnail */}
                     <div className="w-[36px] h-[54px] shrink-0 overflow-hidden rounded-lg bg-glass-5">
@@ -935,7 +935,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
           <button
             type="button"
             onClick={clearSearch}
-            className="absolute left-0 top-8 flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+            className="absolute left-0 top-8 flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white transition-colors duration-(--m-dur-fast) hover:bg-white/20"
             aria-label="Back"
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -976,7 +976,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
               : 'min(820px, calc(var(--vvh, 100vh) - 220px))',
             ...(personView || personLoading
               ? {}
-              : { background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }),
+              : { background: 'rgba(21,16,42,0.94)' }),
           }}
         >
           {/* Loading */}
@@ -1024,7 +1024,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                           disabled={disabled}
                           onClick={() => setExpandedFilter(id)}
                           className={cn(
-                            'inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[15px] transition-colors',
+                            'inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[15px] transition-colors duration-(--m-dur-fast)',
                             isActive
                               ? 'border-accent/40 bg-accent/20 text-white font-semibold'
                               : 'border-white/15 bg-white/[0.04] text-text-secondary hover:bg-white/[0.08]',
@@ -1096,7 +1096,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                     <button
                       type="button"
                       onClick={() => setOwnedExpanded(false)}
-                      className="mb-3 flex items-center gap-2 text-[18px] font-semibold text-text-primary hover:text-white transition-colors"
+                      className="mb-3 flex items-center gap-2 text-[18px] font-semibold text-text-primary hover:text-white transition-colors duration-(--m-dur-fast)"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
                       In your library
@@ -1115,7 +1115,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                     <button
                       type="button"
                       onClick={() => setOwnedExpanded(true)}
-                      className={cn('mt-3 text-[16px] font-medium text-accent hover:text-accent-hover transition-colors', d.isTablet && 'min-h-[48px] inline-flex items-center')}
+                      className={cn('mt-3 text-[16px] font-medium text-accent hover:text-accent-hover transition-colors duration-(--m-dur-fast)', d.isTablet && 'min-h-[48px] inline-flex items-center')}
                     >
                       Show More ({filteredOwned.length - 7} more)
                     </button>
@@ -1130,7 +1130,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                     <button
                       type="button"
                       onClick={() => setUnownedExpanded(true)}
-                      className="flex w-full items-center justify-center gap-2 py-3 text-[18px] font-medium text-white/80 transition-colors hover:text-white"
+                      className="flex w-full items-center justify-center gap-2 py-3 text-[18px] font-medium text-white/80 transition-colors duration-(--m-dur-fast) hover:text-white"
                     >
                       Find More
                       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
@@ -1140,7 +1140,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                       <button
                         type="button"
                         onClick={() => setUnownedExpanded(false)}
-                        className="mb-3 flex w-full items-center justify-center gap-2 text-[18px] font-semibold text-text-secondary hover:text-text-primary transition-colors"
+                        className="mb-3 flex w-full items-center justify-center gap-2 text-[18px] font-semibold text-text-secondary hover:text-text-primary transition-colors duration-(--m-dur-fast)"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
                         Find More
@@ -1239,7 +1239,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                         <button
                           type="button"
                           onClick={() => setUnownedExpanded(true)}
-                          className="flex w-full items-center justify-center gap-2 py-3 text-[18px] font-medium text-white/80 transition-colors hover:text-white"
+                          className="flex w-full items-center justify-center gap-2 py-3 text-[18px] font-medium text-white/80 transition-colors duration-(--m-dur-fast) hover:text-white"
                         >
                           Find More
                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
@@ -1249,7 +1249,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                           <button
                             type="button"
                             onClick={() => setUnownedExpanded(false)}
-                            className="mb-3 flex w-full items-center justify-center gap-2 text-[18px] font-semibold text-text-secondary hover:text-text-primary transition-colors"
+                            className="mb-3 flex w-full items-center justify-center gap-2 text-[18px] font-semibold text-text-secondary hover:text-text-primary transition-colors duration-(--m-dur-fast)"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
                             Find More

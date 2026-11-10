@@ -6,7 +6,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import { SimpleSheet } from '@/components/layout/SimpleSheet';
 import { useNavigate } from 'react-router';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
@@ -15,6 +15,7 @@ import { performNaturalSearch, type UnownedItem } from '@/services/naturalSearch
 import { categoryColor } from '@/pages/vibe/DescribeMode';
 import type { Recommendation } from '@/pages/vibe/DescribeMode';
 import { cn } from '@/utils/cn';
+import { staggerMs } from '@/theme/motion';
 import type { VibeItem } from '@/types/vibe';
 
 // ---------------------------------------------------------------------------
@@ -75,11 +76,6 @@ const STATUS_MESSAGES = [
   'Almost there\u2026',
 ];
 
-const DISMISS_THRESHOLD = 120;
-const ENTER_DURATION = 600;
-const EXIT_DURATION = 400;
-const SPRING = 'cubic-bezier(0.16, 1, 0.3, 1)';
-
 type SearchPhase = 'input' | 'searching' | 'results';
 
 // ---------------------------------------------------------------------------
@@ -92,54 +88,12 @@ export function DescribeItPage() {
   const d = useUiDensity();
   const isMobile = d.mode === 'compact';
 
-  // --- Sheet animation ---
-  const dragRef = useRef({ active: false, startY: 0, currentY: 0 });
-  const [dragOffset, setDragOffset] = useState(0);
-  const [sheetPhase, setSheetPhase] = useState<'entering' | 'visible' | 'exiting' | 'gone'>('entering');
-
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => setSheetPhase('visible'));
-    });
-  }, []);
-
   useEffect(() => {
     const prevBg = document.documentElement.style.background;
-    const prevOverflow = document.body.style.overflow;
     document.documentElement.style.background = '#000';
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.documentElement.style.background = prevBg;
-      document.body.style.overflow = prevOverflow;
-    };
+    return () => { document.documentElement.style.background = prevBg; };
   }, []);
 
-  const handleDismiss = useCallback(() => {
-    setDragOffset(0);
-    requestAnimationFrame(() => {
-      setSheetPhase('exiting');
-      setTimeout(() => navigate('/', { replace: true }), EXIT_DURATION);
-    });
-  }, [navigate]);
-
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('[data-sheet-handle]') && e.touches.length > 0) {
-      dragRef.current = { active: true, startY: e.touches[0]!.clientY, currentY: e.touches[0]!.clientY };
-    }
-  }, []);
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!dragRef.current.active || !e.touches.length) return;
-    dragRef.current.currentY = e.touches[0]!.clientY;
-    setDragOffset(Math.max(0, dragRef.current.currentY - dragRef.current.startY));
-  }, []);
-  const onTouchEnd = useCallback(() => {
-    if (!dragRef.current.active) return;
-    const dy = dragRef.current.currentY - dragRef.current.startY;
-    dragRef.current.active = false;
-    if (dy > DISMISS_THRESHOLD) handleDismiss();
-    else setDragOffset(0);
-  }, [handleDismiss]);
 
   // --- Search state ---
   const [phase, setPhase] = useState<SearchPhase>('input');
@@ -236,34 +190,23 @@ export function DescribeItPage() {
     );
   }, [openMovie, openTv, makePersonSearch]);
 
-  // --- Sheet transform ---
-  const sheetTransform =
-    dragOffset > 0 ? `translate3d(0, ${dragOffset}px, 0)`
-      : sheetPhase === 'visible' ? 'translate3d(0, 0, 0)'
-        : 'translate3d(0, 100%, 0)';
-
-  const sheetTransition =
-    dragOffset > 0 ? 'none'
-      : sheetPhase === 'exiting' ? `transform ${EXIT_DURATION}ms cubic-bezier(0.4, 0, 1, 1)`
-        : `transform ${ENTER_DURATION}ms ${SPRING}`;
-
   // --- Content ---
   const describeContent = (
     <>
       <style>{`
-        @keyframes descFadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes descFadeIn { from { opacity: 0; transform: translateY(var(--m-rise)); } to { opacity: 1; transform: none; } }
         @keyframes orbitSpin { to { transform: rotate(360deg); } }
         @keyframes orbitSpinReverse { to { transform: rotate(-360deg); } }
         @keyframes orbGlow { 0%, 100% { transform: scale(0.9); opacity: 0.5; } 50% { transform: scale(1.1); opacity: 1; } }
-        @keyframes statusFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes statusFadeIn { from { opacity: 0; transform: translateY(var(--m-rise)); } to { opacity: 1; transform: none; } }
         @keyframes dotAppear { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-        @keyframes mobilePageEnter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes mobileCardEnter { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes mobilePageEnter { from { opacity: 0; transform: translateY(var(--m-rise)); } to { opacity: 1; transform: none; } }
+        @keyframes mobileCardEnter { from { opacity: 0; transform: translateY(var(--m-rise)); } to { opacity: 1; transform: none; } }
       `}</style>
 
       {/* INPUT */}
       {phase === 'input' && (
-        <div className="flex flex-col items-center px-1 pt-4" style={{ animation: 'descFadeIn 0.5s ease-out both' }}>
+        <div className="flex flex-col items-center px-1 pt-4" style={{ animation: 'descFadeIn var(--m-dur-emphasized) var(--m-ease-decel) both' }}>
           <h2 className="mb-2 text-center text-[22px] font-bold text-white sm:text-[clamp(36px,4vw,56px)]">
             Describe what you want
           </h2>
@@ -273,7 +216,7 @@ export function DescribeItPage() {
           <div className="w-full max-w-[560px]">
             <textarea ref={textareaRef} value={query} onChange={(e) => setQuery(e.target.value.slice(0, 500))} onKeyDown={handleKeyDown}
               placeholder="e.g. A dark 90s thriller like Se7en with a twist ending..." rows={3}
-              className={cn('w-full resize-none rounded-2xl border bg-white/5 px-5 py-4', 'text-[16px] text-white placeholder:text-white/25', 'outline-none backdrop-blur-md transition-all duration-200', 'focus:border-white/25 focus:bg-white/8 focus:ring-1 focus:ring-white/15', error ? 'border-red-500/50' : 'border-white/10')}
+              className={cn('w-full resize-none rounded-2xl border bg-white/5 px-5 py-4', 'text-[16px] text-white placeholder:text-white/25', 'outline-none backdrop-blur-md transition-all duration-(--m-dur-standard) ease-(--m-ease-standard)', 'focus:border-white/25 focus:bg-white/8 focus:ring-1 focus:ring-white/15', error ? 'border-red-500/50' : 'border-white/10')}
             />
             <div className="mt-1.5 flex items-center justify-between px-1">
               <span className="text-[12px] text-white/25">{query.length}/500</span>
@@ -283,13 +226,13 @@ export function DescribeItPage() {
           <div className="mt-5 flex max-w-[560px] flex-wrap justify-center gap-2 sm:mt-6">
             {EXAMPLE_PROMPTS.map((prompt) => (
               <button key={prompt} type="button" onClick={() => setQuery(prompt)}
-                className={cn('rounded-full border border-white/8 bg-white/5 px-3.5 py-1.5', 'text-[12px] text-white/40 transition-all duration-200 sm:text-[13px]', 'hover:border-white/20 hover:bg-white/10 hover:text-white/60', 'active:scale-95')}>
+                className={cn('rounded-full border border-white/8 bg-white/5 px-3.5 py-1.5', 'text-[12px] text-white/40 transition-all duration-(--m-dur-standard) ease-(--m-ease-standard) sm:text-[13px]', 'hover:border-white/20 hover:bg-white/10 hover:text-white/60', 'active:scale-(--m-press-scale)')}>
                 {prompt}
               </button>
             ))}
           </div>
           <button type="button" onClick={handleSearch} disabled={!query.trim()}
-            className={cn('mt-8 rounded-full px-10 py-4 text-[17px] font-bold text-white sm:text-[20px]', 'transition-all duration-300 active:scale-95', query.trim() ? 'bg-white/15 border border-white/20 hover:bg-white/22 shadow-[0_0_30px_rgba(255,255,255,0.06)]' : 'bg-white/6 text-white/30 cursor-not-allowed border border-white/8')}>
+            className={cn('mt-8 rounded-full px-10 py-4 text-[17px] font-bold text-white sm:text-[20px]', 'transition-all duration-(--m-dur-emphasized) ease-(--m-ease-standard) active:scale-(--m-press-scale)', query.trim() ? 'bg-white/15 border border-white/20 hover:bg-white/22 shadow-[0_0_30px_rgba(255,255,255,0.06)]' : 'bg-white/6 text-white/30 cursor-not-allowed border border-white/8')}>
             Find Something
           </button>
         </div>
@@ -297,19 +240,19 @@ export function DescribeItPage() {
 
       {/* SEARCHING */}
       {phase === 'searching' && (
-        <div className="flex flex-col items-center justify-center gap-6" style={{ animation: 'descFadeIn 0.5s ease-out both', minHeight: isMobile ? 400 : 500 }}>
-          <h2 className="text-[clamp(28px,4vw,44px)] font-bold tracking-wide text-white/80" style={{ animation: 'descFadeIn 0.6s ease-out both' }}>Luma</h2>
+        <div className="flex flex-col items-center justify-center gap-6" style={{ animation: 'descFadeIn var(--m-dur-emphasized) var(--m-ease-decel) both', minHeight: isMobile ? 400 : 500 }}>
+          <h2 className="text-[clamp(28px,4vw,44px)] font-bold tracking-wide text-white/80" style={{ animation: 'descFadeIn var(--m-dur-emphasized) var(--m-ease-decel) both' }}>Luma</h2>
           <div className="relative flex items-center justify-center" style={{ width: 'clamp(120px,18vw,180px)', height: 'clamp(120px,18vw,180px)' }}>
             <div className="absolute inset-0 rounded-full border-[2px] border-dashed border-white/10" style={{ animation: 'orbitSpin 20s linear infinite' }} />
             <div className="absolute rounded-full border-[1.5px] border-dotted border-white/20" style={{ inset: '15%', animation: 'orbitSpinReverse 12s linear infinite' }} />
             <div className="absolute rounded-full border-[1px] border-dashed border-white/8" style={{ inset: '30%', animation: 'orbitSpin 8s linear infinite' }} />
             <div className="relative z-10 rounded-full" style={{ width: '28%', height: '28%', background: 'radial-gradient(circle, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0.15) 50%, transparent 70%)', boxShadow: '0 0 40px 10px rgba(255,255,255,0.1)', animation: 'orbGlow 3s ease-in-out infinite' }} />
           </div>
-          <p key={statusIndex} className="text-[clamp(16px,2.2vw,24px)] font-medium text-white/60" style={{ animation: 'statusFadeIn 0.4s ease-out both' }}>{STATUS_MESSAGES[statusIndex % STATUS_MESSAGES.length]}</p>
+          <p key={statusIndex} className="text-[clamp(16px,2.2vw,24px)] font-medium text-white/60" style={{ animation: 'statusFadeIn var(--m-dur-emphasized) var(--m-ease-decel) both' }}>{STATUS_MESSAGES[statusIndex % STATUS_MESSAGES.length]}</p>
           <p className="max-w-[400px] truncate px-4 text-center text-[clamp(13px,1.5vw,16px)] italic text-white/25">&ldquo;{query.length > 80 ? query.slice(0, 80) + '\u2026' : query}&rdquo;</p>
           {dotCount > 0 && (
             <div className="flex items-center gap-1.5">
-              {Array.from({ length: dotCount }, (_, i) => (<div key={i} className="h-[6px] w-[6px] rounded-full bg-white/40" style={{ animation: `dotAppear 0.3s ease-out ${i * 0.05}s both` }} />))}
+              {Array.from({ length: dotCount }, (_, i) => (<div key={i} className="h-[6px] w-[6px] rounded-full bg-white/40" style={{ animation: `dotAppear var(--m-dur-standard) ${staggerMs(i)}ms var(--m-ease-decel) both` }} />))}
             </div>
           )}
         </div>
@@ -332,7 +275,7 @@ export function DescribeItPage() {
           {recommendations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-white/30">
               <p className="text-[14px]">No matches found</p>
-              <button type="button" onClick={handleSearchAgain} className="mt-4 rounded-full bg-white/10 px-6 py-2.5 text-[14px] font-medium text-white/70 active:scale-95">Try again</button>
+              <button type="button" onClick={handleSearchAgain} className="mt-4 rounded-full bg-white/10 px-6 py-2.5 text-[14px] font-medium text-white/70 active:scale-(--m-press-scale)">Try again</button>
             </div>
           ) : (
             <div className="divide-y divide-white/5">
@@ -366,7 +309,7 @@ export function DescribeItPage() {
                           <span
                             role="button"
                             onClick={(e) => { e.stopPropagation(); handleCategorySearch(rec.aiCategory); }}
-                            className={cn('rounded-full border px-2 py-0.5 text-[12px] font-medium active:scale-95 transition-transform cursor-pointer', colors.bg, colors.text, colors.border)}>
+                            className={cn('rounded-full border px-2 py-0.5 text-[12px] font-medium active:scale-(--m-press-scale) transition-transform duration-(--m-dur-fast) ease-(--m-ease-standard) cursor-pointer', colors.bg, colors.text, colors.border)}>
                             {rec.aiCategory}
                           </span>
                         )}
@@ -396,32 +339,16 @@ export function DescribeItPage() {
   // ---------------------------------------------------------------------------
 
   if (isMobile) {
-    return createPortal(
-      <div className="luma-fullscreen luma-bleed"
-        style={{
-          position: 'fixed', inset: 0, zIndex: 10001,
-          display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-          backgroundColor: sheetPhase === 'visible' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0)',
-          transition: sheetPhase === 'exiting' ? `background-color ${EXIT_DURATION}ms ease` : `background-color ${ENTER_DURATION}ms ease`,
-        }}
-        onClick={(e) => { if (e.target === e.currentTarget && phase === 'input') handleDismiss(); }}
-      >
-        <div className="luma-bleed-panel"
-          onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
-          onTouchEnd={onTouchEnd}
-          style={{
-            height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
-            display: 'flex', flexDirection: 'column',
-            background: 'var(--color-kiosk-black)',
-            borderRadius: '20px 20px 0 0',
-            overflow: 'hidden',
-            transform: sheetTransform,
-            transition: sheetTransition,
-            willChange: 'transform',
-            backfaceVisibility: 'hidden',
-          }}
-        >
+    return (
+      <SimpleSheet name="DescribeItPage" onClosed={() => navigate('/', { replace: true })} scrimDismiss={phase === 'input'}
+        rootClassName="luma-fullscreen luma-bleed" panelClassName="luma-bleed-panel"
+        panelStyle={{
+          height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
+          display: 'flex', flexDirection: 'column',
+          background: 'var(--color-kiosk-black)',
+          borderRadius: '20px 20px 0 0',
+          overflow: 'hidden',
+        }}>
           {/* Grab handle */}
           <div data-sheet-handle style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '12px 0 8px', cursor: 'grab' }}>
             <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.3)' }} />
@@ -432,9 +359,7 @@ export function DescribeItPage() {
             {describeContent}
             <div className="shrink-0" style={{ height: 'env(safe-area-inset-bottom, 12px)' }} />
           </div>
-        </div>
-      </div>,
-      document.body,
+      </SimpleSheet>
     );
   }
 
@@ -447,7 +372,7 @@ export function DescribeItPage() {
       <div className="mx-auto max-w-[1600px] pb-16 px-4 pt-16 sm:px-6 sm:pb-20 sm:pt-20 md:px-8">
         <div className="mb-6">
           <button type="button" onClick={() => phase === 'results' ? handleSearchAgain() : navigate('/')}
-            className="mb-4 flex items-center gap-2 text-[14px] text-white/50 hover:text-white/70 transition-colors">
+            className="mb-4 flex items-center gap-2 text-[14px] text-white/50 hover:text-white/70 transition-colors duration-(--m-dur-fast) ease-(--m-ease-standard)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
             {phase === 'results' ? 'New search' : 'Back'}
           </button>

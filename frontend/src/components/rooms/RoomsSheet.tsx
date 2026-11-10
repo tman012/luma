@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { SimpleSheet } from '@/components/layout/SimpleSheet';
+import { MOTION, SURFACE_FADE } from '@/theme/motion';
 import { type Room, type SessionData } from '@/hooks/useNotifications';
 import { useNotificationsContext } from '@/contexts/NotificationsContext';
 import { useInterpolatedProgress } from '@/hooks/useInterpolatedProgress';
@@ -14,10 +15,6 @@ import { ContentReveal, FadeImg } from '@/components/motion/ContentReveal';
 // Constants
 // ---------------------------------------------------------------------------
 
-const DISMISS_THRESHOLD = 120;
-const ENTER_DURATION = 600;
-const EXIT_DURATION = 400;
-const SPRING = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
 // ---------------------------------------------------------------------------
 // Helpers (moved from RoomsPage)
@@ -136,7 +133,7 @@ function RoomCard({
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-4 p-4 text-left transition-colors active:bg-white/5"
+        className="flex w-full items-center gap-4 p-4 text-left transition-colors duration-(--m-dur-fast) active:bg-white/5"
       >
         {(s || poster || liveNoArt) ? (
           <div
@@ -228,11 +225,11 @@ function RoomCard({
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                 <div
                   className={cn(
-                    'h-full rounded-full transition-[width] duration-500',
+                    'h-full w-full origin-left rounded-full transition-transform duration-(--m-dur-emphasized) ease-(--m-ease-standard)',
                     s ? (isPlaying ? 'bg-green-500' : 'bg-amber-500')
                       : (isPlaying ? (appColors?.bar ?? 'bg-green-500') : 'bg-amber-500'),
                   )}
-                  style={{ width: `${pct}%` }}
+                  style={{ transform: `scaleX(${pct / 100})` }}
                 />
               </div>
               {timeTotal > 0 && (
@@ -253,7 +250,7 @@ function RoomCard({
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={cn('shrink-0 text-white/30 transition-transform', expanded && 'rotate-180')}
+          className={cn('shrink-0 text-white/30 transition-transform duration-(--m-dur-fast) ease-(--m-ease-standard)', expanded && 'rotate-180')}
         >
           <polyline points="6 9 12 15 18 9" />
         </svg>
@@ -269,7 +266,7 @@ function RoomCard({
                   key={dev.id}
                   type="button"
                   onClick={() => onOpenRemote(dev.id)}
-                  className="flex w-full items-center justify-center gap-2.5 rounded-xl py-3 text-[14px] font-medium transition-all duration-150 active:scale-[0.98]"
+                  className="flex w-full items-center justify-center gap-2.5 rounded-xl py-3 text-[14px] font-medium m-interactive"
                   style={remoteButtonStyle}
                 >
                   {remoteIcon}
@@ -291,7 +288,7 @@ function RoomCard({
                   onNeedDevice();
                 }
               }}
-              className="flex w-full items-center justify-center gap-2.5 rounded-xl py-3.5 text-[15px] font-medium transition-all duration-150 active:scale-[0.98]"
+              className="flex w-full items-center justify-center gap-2.5 rounded-xl py-3.5 text-[15px] font-medium m-interactive"
               style={remoteButtonStyle}
             >
               {remoteIcon}
@@ -354,7 +351,7 @@ function UnmatchedSessionCard({ session }: { session: SessionData }) {
         <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
           <div
             className={cn('h-full rounded-full', isPlaying ? 'bg-green-500' : 'bg-amber-500')}
-            style={{ width: `${pct}%` }}
+            style={{ transform: `scaleX(${pct / 100})` }}
           />
         </div>
         {session.duration > 0 && (
@@ -413,27 +410,6 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
     return () => window.clearTimeout(t);
   }, [deviceNotice]);
 
-  const dragRef = useRef({ active: false, startY: 0, currentY: 0 });
-  const [dragOffset, setDragOffset] = useState(0);
-  const [phase, setPhase] = useState<'entering' | 'visible' | 'exiting' | 'gone'>('gone');
-
-  useEffect(() => {
-    if (open) {
-      setPhase('entering');
-      setDragOffset(0);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setPhase('visible'));
-      });
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prevOverflow; };
-  }, [open]);
-
   // Fetch device config when sheet opens
   useEffect(() => {
     if (!open) return;
@@ -462,103 +438,28 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
     setRemoteTarget({ roomId: room.roomId, deviceId });
   }, []);
 
-  const handleDismiss = useCallback(() => {
-    // If remote is open, close it first instead of the whole sheet
-    if (remoteTarget) {
-      setRemoteTarget(null);
-      setDragOffset(0);
-      return;
-    }
-    setDragOffset(0);
-    requestAnimationFrame(() => {
-      setPhase('exiting');
-      setTimeout(() => {
-        setPhase('gone');
-        setExpandedRoom(null);
-        setRemoteTarget(null);
-        onClose();
-      }, EXIT_DURATION);
-    });
-  }, [onClose, remoteTarget]);
+  // While the remote sits above, it owns every dismiss (its own scrim, drag and Escape); this sheet takes none.
+  const remoteOpen = remoteTarget != null;
+  const closeRemoteFirst = useCallback(() => remoteOpen, [remoteOpen]);
+  const onSheetClosed = useCallback(() => {
+    setExpandedRoom(null);
+    setRemoteTarget(null);
+    onClose();
+  }, [onClose]);
 
-  // ESC to close (capture phase)
-  useEffect(() => {
-    if (!open) return;
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        handleDismiss();
-      }
-    }
-    window.addEventListener('keydown', handleKey, true);
-    return () => window.removeEventListener('keydown', handleKey, true);
-  }, [open, handleDismiss]);
+  if (!open) return null;
 
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('[data-sheet-handle]') && e.touches.length > 0) {
-      dragRef.current = { active: true, startY: e.touches[0]!.clientY, currentY: e.touches[0]!.clientY };
-    }
-  }, []);
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!dragRef.current.active || !e.touches.length) return;
-    dragRef.current.currentY = e.touches[0]!.clientY;
-    setDragOffset(Math.max(0, dragRef.current.currentY - dragRef.current.startY));
-  }, []);
-  const onTouchEnd = useCallback(() => {
-    if (!dragRef.current.active) return;
-    const dy = dragRef.current.currentY - dragRef.current.startY;
-    dragRef.current.active = false;
-    if (dy > DISMISS_THRESHOLD) handleDismiss();
-    else setDragOffset(0);
-  }, [handleDismiss]);
-
-  if (phase === 'gone' && !open) return null;
-
-  const sheetTransform =
-    dragOffset > 0 ? `translate3d(0, ${dragOffset}px, 0)`
-      : phase === 'visible' ? 'translate3d(0, 0, 0)'
-        : 'translate3d(0, 100%, 0)';
-
-  const sheetTransition =
-    dragOffset > 0 ? 'none'
-      : phase === 'exiting' ? `transform ${EXIT_DURATION}ms cubic-bezier(0.4, 0, 1, 1)`
-        : `transform ${ENTER_DURATION}ms ${SPRING}`;
-
-  return createPortal(
+  return (
     <>
-      <div className="luma-fullscreen luma-bleed"
-        data-sheet="RoomsSheet"
-        style={{
-          position: 'fixed', inset: 0,
-          zIndex: 10001,
-          display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-          backgroundColor: phase === 'visible' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0)',
-          transition: phase === 'exiting'
-            ? `background-color ${EXIT_DURATION}ms ease`
-            : `background-color ${ENTER_DURATION}ms ease`,
-        }}
-        onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
-      >
-        <div className="luma-bleed-panel"
-          onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
-          onTouchEnd={onTouchEnd}
-          style={{
-            height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
-            display: 'flex', flexDirection: 'column',
-            background: 'var(--color-kiosk-black)',
-            borderRadius: '20px 20px 0 0',
-            overflow: 'hidden',
-            transform: sheetTransform,
-            transition: remoteTarget
-              ? `${sheetTransition}, filter 0.3s ease`
-              : sheetTransition,
-            willChange: 'transform',
-            backfaceVisibility: 'hidden',
-            filter: remoteTarget ? 'brightness(0.15)' : 'none',
-          }}
-        >
+      <SimpleSheet name="RoomsSheet" onClosed={onSheetClosed} guard={closeRemoteFirst}
+        rootClassName="luma-fullscreen luma-bleed" panelClassName="luma-bleed-panel"
+        panelStyle={{
+          height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
+          display: 'flex', flexDirection: 'column',
+          background: 'var(--color-kiosk-black)',
+          borderRadius: '20px 20px 0 0',
+          overflow: 'hidden',
+        }}>
           {/* Grab handle */}
           <div data-sheet-handle
             style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '12px 0 8px', cursor: 'grab' }}
@@ -578,7 +479,7 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
             style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
           >
             {/* One reveal once rooms and their devices are ready (no skeletons, no per-list pop-in). */}
-            <ContentReveal key={seq} id="rooms-sheet" landMs={ENTER_DURATION} ready={(!roomsLoading && devicesLoaded) || waitedOut} testId="rooms-reveal">
+            <ContentReveal key={seq} id="rooms-sheet" landMs={MOTION.dur.sheetEnter} ready={(!roomsLoading && devicesLoaded) || waitedOut} testId="rooms-reveal">
             {rooms.length === 0 ? (
               <p className="text-center text-[15px] text-white/40 py-12">
                 No rooms configured
@@ -614,8 +515,13 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
 
             <div className="shrink-0" style={{ height: 'env(safe-area-inset-bottom, 12px)' }} />
           </div>
-        </div>
-      </div>
+          {/* The remote opens above: the sheet dims on opacity (a filter on the panel would repaint it). */}
+          <div aria-hidden="true" data-testid="rooms-dim"
+            style={{
+              position: 'absolute', inset: 0, background: '#000', pointerEvents: 'none',
+              opacity: remoteTarget ? 0.85 : 0, transition: SURFACE_FADE,
+            }} />
+      </SimpleSheet>
 
       {deviceNotice && (
         <div
@@ -640,7 +546,6 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
           />
         ) : null;
       })()}
-    </>,
-    document.body,
+    </>
   );
 }

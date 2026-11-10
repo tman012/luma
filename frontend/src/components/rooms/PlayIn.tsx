@@ -46,7 +46,7 @@ export function PlayInPicker({ rooms, preselect, action = 'Play', onPick, onCanc
   const room = rooms.find(r => r.id === sel);
   return (
     <div className="luma-fullscreen luma-bleed" data-testid="play-in-scrim" onPointerDown={e => { if (e.target === e.currentTarget) onCancel(); }}
-      style={{ position: 'fixed', inset: 0, zIndex: 10010, background: 'rgba(10,8,24,.6)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+      style={{ position: 'fixed', inset: 0, zIndex: 10010, background: 'rgba(10,8,24,.8)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT, padding: 16 }}>
       <div role="dialog" aria-modal="true" aria-label={`${action} in`} data-testid="play-in"
         style={{ width: 360, maxWidth: '100%', boxSizing: 'border-box', padding: 16, borderRadius: 16, background: 'rgba(21,16,42,0.96)',

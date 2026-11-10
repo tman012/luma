@@ -14,6 +14,7 @@ import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { posterUrl } from '@/utils/image';
 import { ContentReveal, FadeImg } from '@/components/motion/ContentReveal';
+import { MOTION } from '@/theme/motion';
 import { apiFetch } from '../../apiClient';
 
 /** A single completed download, badged by its origin. */
@@ -163,20 +164,25 @@ function RowThumb({ posterPath, title, progress }: {
             style={{
               ...base,
               clipPath: developing ? `inset(${100 - pct}% 0 0 0)` : undefined,
-              transition: 'clip-path 600ms cubic-bezier(0.16, 1, 0.3, 1)',
+              transition: `clip-path ${MOTION.dur.emphasized}ms ${MOTION.ease.standard}`,
             }}
           />
-          {/* Bright seam riding the fill line as it climbs */}
+          {/* Bright seam riding the fill line as it climbs (a full-height layer moved on transform, not a bottom offset) */}
           {developing && pct > 1 && (
             <span
               aria-hidden
               style={{
-                position: 'absolute', left: 0, right: 0, bottom: `${pct}%`, height: 1,
+                position: 'absolute', inset: 0, pointerEvents: 'none',
+                transform: `translateY(${100 - pct}%)`,
+                transition: `transform ${MOTION.dur.emphasized}ms ${MOTION.ease.standard}`,
+              }}
+            >
+              <span style={{
+                position: 'absolute', left: 0, right: 0, top: 0, height: 1,
                 background: 'rgba(255,255,255,0.75)',
                 boxShadow: '0 0 6px rgba(255,255,255,0.5)',
-                transition: 'bottom 600ms cubic-bezier(0.16, 1, 0.3, 1)',
-              }}
-            />
+              }} />
+            </span>
           )}
         </>
       ) : (
@@ -451,7 +457,7 @@ export function ActivityFeed({ embedded = false, onOpen, reveal }: { embedded?: 
               key={dl.hash || `${dl.name || dl.title}-${i}`}
               role={clickable ? 'button' : undefined}
               onClick={clickable ? () => openEntry({ tmdbId: dl.tmdbId, mediaType: dl.mediaType }) : undefined}
-              className={clickable ? 'cursor-pointer transition-colors hover:brightness-125' : ''}
+              className={clickable ? 'cursor-pointer m-interactive' : ''}
               style={{
                 position: 'relative',
                 overflow: 'hidden',
@@ -507,14 +513,17 @@ export function ActivityFeed({ embedded = false, onOpen, reveal }: { embedded?: 
                     role="button"
                     onClick={(e) => { e.stopPropagation(); toggleName(nameKey); }}
                     title={dl.name}
-                    className={`mb-2 text-[12px] text-white/30 cursor-pointer hover:text-white/50 ${nameOpen ? 'whitespace-normal break-all' : 'truncate'}`}
+                    className={`mb-2 text-[12px] text-white/30 cursor-pointer transition-colors duration-(--m-dur-fast) hover:text-white/50 ${nameOpen ? 'whitespace-normal break-all' : 'truncate'}`}
                   >
                     {dl.name}
                   </p>
               ) : null}
               <div className="h-[5px] w-full overflow-hidden rounded-full bg-white/10">
-                <div className="h-full rounded-full transition-[width] duration-500"
-                  style={{ width: `${pct}%`, background: barColor }} />
+                <div className="h-full w-full origin-left rounded-full"
+                  style={{
+                    transform: `scaleX(${pct / 100})`, background: barColor,
+                    transition: `transform ${MOTION.dur.emphasized}ms ${MOTION.ease.standard}`,
+                  }} />
               </div>
               <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-white/35">
                 <span className="min-w-0 truncate" style={{ color: copying || importing || stalled ? accent : undefined }}>
@@ -647,7 +656,7 @@ export function ActivityFeed({ embedded = false, onOpen, reveal }: { embedded?: 
               key={`${entry.tmdbId ?? entry.title}-${i}`}
               role="button"
               onClick={() => openEntry(entry)}
-              className="cursor-pointer transition-colors hover:brightness-125"
+              className="cursor-pointer m-interactive"
               style={{
                 position: 'relative',
                 overflow: 'hidden',
@@ -691,7 +700,7 @@ export function ActivityFeed({ embedded = false, onOpen, reveal }: { embedded?: 
                       role="button"
                       onClick={(e) => { e.stopPropagation(); toggleName(nameKey); }}
                       title={entry.fileName ?? undefined}
-                      className={`text-[12px] text-white/30 mt-1.5 cursor-pointer hover:text-white/50 ${open ? 'whitespace-normal break-all' : 'truncate'}`}
+                      className={`text-[12px] text-white/30 mt-1.5 cursor-pointer transition-colors duration-(--m-dur-fast) hover:text-white/50 ${open ? 'whitespace-normal break-all' : 'truncate'}`}
                     >
                       {entry.fileName}
                     </p>

@@ -83,7 +83,7 @@ export const ExploreTile = memo(function ExploreTile({
             loading="lazy"
             draggable={false}
             className={cn(
-              'h-full w-full object-cover transition-opacity duration-300',
+              'h-full w-full object-cover transition-opacity duration-(--m-dur-emphasized) ease-(--m-ease-standard)',
               imgLoaded ? 'opacity-100' : 'opacity-0',
             )}
             onLoad={() => setImgLoaded(true)}
@@ -98,7 +98,7 @@ export const ExploreTile = memo(function ExploreTile({
         )}
 
         {/* Hover lift */}
-        <div className="absolute inset-0 bg-white/5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 rounded-2xl" />
+        <div className="absolute inset-0 bg-white/5 opacity-0 transition-opacity duration-(--m-dur-standard) ease-(--m-ease-standard) group-hover:opacity-100 rounded-2xl" />
 
         {/* Status orb (top-left) — hidden until ownership is resolved */}
         {orb && (
