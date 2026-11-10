@@ -67,7 +67,7 @@ function BackButton({ onClick, large }: { onClick: () => void; large?: boolean }
         background: 'transparent', border: 'none', padding: '8px',
         color: 'white', cursor: 'pointer',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'opacity 0.15s ease',
+        transition: 'opacity var(--m-dur-hover) var(--m-ease-standard)',
       }}
       onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.7'; }}
       onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
@@ -580,7 +580,7 @@ function ExpandedTvSourcesView({
                   padding: '16px 36px', borderRadius: '50px',
                   ...srcCancelBtn,
                   color: '#fff', fontSize: '18px', fontWeight: 600, minHeight: '56px',
-                  cursor: confirmLoading ? 'default' : 'pointer', transition: 'background 0.2s ease, border-color 0.2s ease',
+                  cursor: confirmLoading ? 'default' : 'pointer', transition: 'background var(--m-dur-hover) var(--m-ease-standard), border-color var(--m-dur-hover) var(--m-ease-standard)',
                 }}
               >
                 Cancel
@@ -591,7 +591,7 @@ function ExpandedTvSourcesView({
                   padding: '16px 40px', borderRadius: '50px',
                   ...srcPrimaryBtn,
                   color: '#fff', fontSize: '18px', fontWeight: 600, minHeight: '56px',
-                  cursor: (confirmLoading || disabledReason) ? 'default' : 'pointer', transition: 'background 0.2s ease, border-color 0.2s ease',
+                  cursor: (confirmLoading || disabledReason) ? 'default' : 'pointer', transition: 'background var(--m-dur-hover) var(--m-ease-standard), border-color var(--m-dur-hover) var(--m-ease-standard)',
                   opacity: (confirmLoading || disabledReason) ? 0.5 : 1,
                 }}
               >
@@ -662,8 +662,8 @@ function ReleaseCard({
         cursor: 'pointer',
         border: `1px solid ${recommended ? 'rgba(74, 222, 128, 0.45)' : (expanded ? badge.border : 'rgba(255,255,255,0.06)')}`,
         borderLeft: `3px solid ${recommended ? '#4ade80' : 'rgba(255,255,255,0.18)'}`,
-        transition: 'background 0.15s, border-color 0.15s',
-        animation: `tvSrcCardEnter 250ms ease-out ${staggerDelay}ms both`,
+        transition: 'background var(--m-dur-hover) var(--m-ease-standard), border-color var(--m-dur-hover) var(--m-ease-standard)',
+        animation: `tvSrcCardEnter var(--m-dur-standard) var(--m-ease-standard) ${staggerDelay}ms both`,
       }}
     >
       {/* Row 0: tracker name + rejection badge (name always shown) */}
@@ -745,7 +745,7 @@ function ReleaseCard({
               fontSize: '15px',
               fontWeight: 600,
               cursor: grabbing || grabbed || disabledReason ? 'default' : 'pointer',
-              transition: 'all 0.2s',
+              transition: 'all var(--m-dur-hover) var(--m-ease-standard)',
               border: 'none',
               background: grabbed
                 ? '#166534'
@@ -1184,7 +1184,7 @@ function CompactTvSourcesView({
         flexDirection: 'column',
         justifyContent: 'flex-end',
         background: entered && !dismissing ? 'rgba(0,0,0,0.4)' : 'transparent',
-        transition: 'background 0.25s ease',
+        transition: 'background var(--m-dur-standard) var(--m-ease-standard)',
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) handleDismiss();
@@ -1206,7 +1206,7 @@ function CompactTvSourcesView({
           borderRadius: '20px 20px 0 0',
           overflow: 'hidden',
           transform: `translateY(${sheetTranslate})`,
-          transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: dragOffset > 0 ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           willChange: 'transform',
         }}
       >

@@ -143,7 +143,7 @@ export function EpisodeHeader({
         fontWeight: 600 as const,
         cursor: 'pointer' as const,
         border: 'none' as const,
-        transition: 'background 0.15s ease',
+        transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
       }
     : {
         display: 'inline-flex' as const,
@@ -155,7 +155,7 @@ export function EpisodeHeader({
         fontWeight: 600 as const,
         cursor: 'pointer' as const,
         border: 'none' as const,
-        transition: 'background 0.15s ease',
+        transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
       };
 
   const primaryPill = {

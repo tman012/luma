@@ -2,7 +2,8 @@ import { sheetBase } from '@/utils/posterColors';
 import { ACTION_CIRCLE_SLOT, ACTION_LABEL_LINE, META_ROW, ratingsExpectedAtTap, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, useSeededHero, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
-import { detailSheetReady, useUnopenedClose } from '@/loading/sheetOpenGate';
+import { SURFACE_FADE } from '@/theme/motion';
+import { detailSheetReady } from '@/loading/sheetOpenGate';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput } from '@/hooks/useTitleReveal';
@@ -150,7 +151,6 @@ export function CompactLayout(props: MovieModalViewProps) {
   const posterFill = liveDetail && !liveDetail.backdropUrl && !sheetArt ? liveDetail.posterUrl : null;
   const ownedKnown = !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey);
   const composed = detailSheetReady(loading, !!error, !!liveDetail, liveDetail?.title, sheetHero.state, ownedKnown);
-  useUnopenedClose(props.openKey, composed || phase === 'exiting' || phase === 'gone', onClose);
   const hero = useSeededHero(composed, paletteColors);
   const heroHold = hero.seeded ? false : titleState === 'hold';
   // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
@@ -261,7 +261,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   const { handlers: swipeHandlers } = useSwipeToDismiss({
     scrollRef,
     onDismiss: onClose,
-    enabled: phase === 'visible' && !showSources && !showPlayback && !showUpgrade && !showSimilar && !showCollection && !showFileInfo && !openReview,
+    enabled: phase === 'visible' && props.active !== false && !showSources && !showPlayback && !showUpgrade && !showSimilar && !showCollection && !showFileInfo && !openReview,
   });
 
   // Plex-like backdrop effects: crop/zoom header + UltraBlur color bleed
@@ -269,25 +269,32 @@ export function CompactLayout(props: MovieModalViewProps) {
 
 
 
-  // Parallax scroll handler (backdrop: translate up + fade out)
+  // Parallax scroll handler (backdrop: translate up + fade out). The tint strip's size and offset come from a
+  // ResizeObserver, not from offsetHeight / offsetTop on every frame (those forced a layout after each style write).
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     let rafId = 0;
+    let observed: HTMLElement | null = null;
+    const box = { h: 0, top: 0 };
+    let dirty = true;
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { dirty = true; });
     const handleScroll = () => {
       cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
         const sc = topScrimRef.current;
-        if (sc) sc.style.opacity = String(Math.min(1, Math.max(0, (el.scrollTop - 24) / 96)));
+        const scrollY = el.scrollTop;
+        if (sc) sc.style.opacity = String(Math.min(1, Math.max(0, (scrollY - 24) / 96)));
         // Keep the top tint's color layer aligned with the content's own UltraBlur,
         // so the strip under ✕ / ⓘ shows exactly the movie color that's behind it.
         const tint = topTintRef.current;
         const ca = contentRef.current;
+        if (ca && ca !== observed) { ro?.disconnect(); ro?.observe(ca); observed = ca; dirty = true; }
         if (tint && ca) {
-          tint.style.height = `${ca.offsetHeight}px`;
-          tint.style.transform = `translate3d(0, ${ca.offsetTop - el.scrollTop}px, 0)`;
+          if (dirty || !ro) { box.h = ca.offsetHeight; box.top = ca.offsetTop; dirty = false; }
+          tint.style.height = `${box.h}px`;
+          tint.style.transform = `translate3d(0, ${box.top - scrollY}px, 0)`;
         }
-        const scrollY = el.scrollTop;
         const bdTransform = `translate3d(0, ${-Math.min(scrollY * 0.4, 250)}px, 0)`;
         // Fade out backdrop over the first 300px of scroll
         const bdOpacity = String(Math.max(0, 1 - scrollY / 300));
@@ -302,10 +309,9 @@ export function CompactLayout(props: MovieModalViewProps) {
     return () => {
       el.removeEventListener('scroll', handleScroll);
       cancelAnimationFrame(rafId);
+      ro?.disconnect();
     };
   }, []);
-
-
 
   // -------------------------------------------------------------------------
   // Shelf toggle handlers
@@ -443,7 +449,7 @@ export function CompactLayout(props: MovieModalViewProps) {
 
   return (
     <SheetFrame name="MovieDetailModal" phase={phase} composed={composed} go={go} onScrimClick={onClose}>
-      <SheetCard background={sheetBg}>
+      <SheetCard background={APP_BG} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>
         {/* No sheet spinner past the deadline (Taylor 2026-11-02): the pre-reveal surface stays as is. */}
         {/* Scrollable content */}
         <div
@@ -546,7 +552,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                     ...({
                           opacity: showSources ? 0 : 1,
                           pointerEvents: (showSources ? 'none' : 'auto') as 'none' | 'auto',
-                          transition: 'opacity 0.3s ease',
+                          transition: SURFACE_FADE,
                         }),
                   }}>
                   {/* Meta info line: year • runtime • content_rating • genres */}
@@ -1133,6 +1139,7 @@ export function CompactLayout(props: MovieModalViewProps) {
             cursor: 'pointer',
             WebkitTapHighlightColor: 'transparent',
           }}
+          className="m-interactive"
           aria-label="Close"
         >
           <svg

@@ -1,6 +1,7 @@
 import { invalidateDetails } from '@/services/modalPrefetch';
 import { isMinimal } from '@/minimal';
-import { SHEET_EXIT_MS, useCloseOnce } from '@/components/layout/SheetFrame';
+import { useSurfacePresence } from '@/components/motion/useSurfacePresence';
+import { useDetailMounted } from '@/loading/sheetOpenGate';
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { FixMatchResult } from './FixMatchSheet';
@@ -18,6 +19,8 @@ export function MovieDetailModal({
   ratingKey,
   tmdbId,
   onClose,
+  active = true,
+  onLeave,
   origin,
   onPersonSearch,
   restoreSimilar = false,
@@ -45,7 +48,6 @@ export function MovieDetailModal({
   }, []);
 
   // UI-only state
-  const [phase, setPhase] = useState<'entering' | 'visible' | 'exiting' | 'gone'>('entering');
   const [showSources, setShowSources] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [showFullPlot, setShowFullPlot] = useState(false);
@@ -57,17 +59,6 @@ export function MovieDetailModal({
   const [grabToast, setGrabToast] = useState(false);
   const [watchlistToast, setWatchlistToast] = useState(false);
   const [inWatchlist, setInWatchlist] = useState(false);
-
-  // Animate open on the very next frame — the reveal is deliberately NOT gated
-  // on `loading`. The layouts render their spinner inside the card, so while the
-  // card was held at opacity 0 waiting for data that spinner could never be
-  // seen: the tap looked dead until every fetch resolved, and the content then
-  // faded in on a further ~1.8s delay. Now the shell + spinner appear at once
-  // and real content replaces the spinner the instant it lands.
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setPhase('visible'));
-    return () => cancelAnimationFrame(frame);
-  }, []);
 
   // Check if movie is already in Radarr watchlist
   useEffect(() => {
@@ -87,42 +78,14 @@ export function MovieDetailModal({
     return () => { cancelled = true; };
   }, [resolvedTmdbId]);
 
-  const { mode, isTablet } = useLayoutMode();
-
-  // Animated close — compact: SheetFrame's exit (--m-dur-sheet-exit), tablet 200ms, expanded 300ms
-  const closeOnce = useCloseOnce();
-  const handleClose = useCallback(() => {
-    if (!closeOnce()) return;
-    setShowSources(false);
-    setShowCollection(false);
-    setPhase('exiting');
-    const duration = mode === 'compact' ? SHEET_EXIT_MS : isTablet ? 200 : 300;
-    setTimeout(() => {
-      setPhase('gone');
-      onClose();
-    }, duration);
-  }, [onClose, mode, isTablet, closeOnce]);
-
-
-  // MOTION.md §1.6: back (AppModalHost popstate) plays the exit from wherever the sheet is, then the host unmounts it.
-  useEffect(() => {
-    const onDismiss = (e: Event) => { e.preventDefault(); if (closeOnce()) setPhase('exiting'); };
-    window.addEventListener('luma:modal-dismiss', onDismiss);
-    return () => window.removeEventListener('luma:modal-dismiss', onDismiss);
-  }, [closeOnce]);
-
-  // Escape key
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        if (!showSources && !showUpgrade && !showFullPlot && !showTrailer && !showReviews && !showPlayback && !showSimilar && !showCollection) {
-          handleClose();
-        }
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleClose, showSources, showUpgrade, showFullPlot, showTrailer, showReviews, showPlayback, showSimilar, showCollection]);
+  // One lifecycle for the sheet (useSurfacePresence): enter phase, a single close, the exit timer owned by this
+  // mounted sheet, and Escape / Back only while this sheet is the top one.
+  const { mode } = useLayoutMode();
+  const nestedOpen = showSources || showUpgrade || showFullPlot || showTrailer || showReviews || showPlayback || showSimilar || showCollection;
+  const { phase, requestClose: handleClose } = useSurfacePresence({
+    kind: mode === 'compact' ? 'sheet' : 'modal', onExited: onClose, active, escapeBlocked: nestedOpen,
+    onClosing: () => { setShowSources(false); setShowCollection(false); onLeave?.(); },
+  });
 
   // Build view-model props
   const viewProps = {
@@ -136,6 +99,7 @@ export function MovieDetailModal({
     loading,
     error,
     phase,
+    active,
     showSources,
     showTrailer,
     showFullPlot,
@@ -195,10 +159,7 @@ export function MovieDetailModal({
   };
 
   const { isTvMode } = useTVMode();
-  useEffect(() => {
-    document.documentElement.dataset.detailMounted = '1';
-    return () => { delete document.documentElement.dataset.detailMounted; };
-  }, []);
+  useDetailMounted();
 
   if (phase === 'gone') return null;
 
@@ -227,7 +188,7 @@ export function MovieDetailModal({
             fontSize: 15,
             fontWeight: 600,
             whiteSpace: 'nowrap',
-            animation: 'matchToastIn 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
+            animation: 'matchToastIn var(--m-dur-reveal) var(--m-ease-reveal)',
             pointerEvents: 'none',
           }}
         >

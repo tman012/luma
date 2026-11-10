@@ -10,9 +10,10 @@
  * - Body scroll lock and the <html> background (#111318) from enter start to unmount.
  * `data-composed` stays on the root for the composed_ms hooks; it no longer gates visibility.
  */
-import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createContext, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { APP_BG, MOTION, reducedMotion } from '@/theme/motion';
+import { APP_BG, MODAL_MOTION, MOTION, REVEAL_TRANSITION, reducedMotion } from '@/theme/motion';
+import { useCloseOnce } from '@/components/motion/useSurfacePresence';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
 import { SHEET_MOVING_EVENT, tapShell } from '@/services/modalPrefetch';
 import type { UltraBlurColors } from '@/utils/modalParsers';
@@ -27,19 +28,8 @@ export const useSheetEntering = () => useContext(Entering);
 /** Duration the owner should wait after phase 'exiting' before unmounting. */
 export const SHEET_EXIT_MS = MOTION.dur.sheetExit;
 /** Enter fallback: the sheet counts as entered this long after the enter duration even without `finished`. */
-export const ENTER_FALLBACK_SLACK_MS = 200;
-
-/** One close per sheet: Back (luma:modal-dismiss) and the close button can both fire within
- *  MOTION.dur.dismissExit; only the first runs, so a second history step is never taken. */
-export function useCloseOnce(): () => boolean {
-  const at = useRef(-Infinity);
-  return useCallback(() => {
-    const t = performance.now();
-    if (t - at.current < MOTION.dur.dismissExit) return false;
-    at.current = t;
-    return true;
-  }, []);
-}
+export const ENTER_FALLBACK_SLACK_MS = MOTION.dur.settleSlack;
+export { useCloseOnce };
 
 function currentY(el: HTMLElement): number {
   const t = getComputedStyle(el).transform;
@@ -50,29 +40,19 @@ function currentY(el: HTMLElement): number {
   return m[1] ? v[13]! : v[5]!;
 }
 
-/** The phone sheet starts its slide only once `composed` (real title and artwork, or the error panel).
- *  An elapsed open budget must not slide in a color wash or a partial sheet. Latched: it does not go back. */
-export function useSheetGo(composed: boolean): boolean {
-  const [go, setGo] = useState(composed);
-  // Follow readiness both ways. A latched `true` kept a Fix Match reload on screen
-  // with the hero held and the previous meta still showing.
-  useLayoutEffect(() => { setGo(composed); }, [composed]);
-  return go;
-}
-
-/** The phone hero when the sheet has to start before the details are composed (Designer 10:16 PM): built once,
+/** The phone sheet opens on the tap, never held for the network: this is its hero while the details are not composed
+ *  yet (Designer 10:16 PM): built once,
  *  at the slide's start, from what the tapped card already had (its poster art, its poster-seeded colors, its
  *  title) and kept for the sheet's life, so the art, wash, body tint and title never restyle; only the detail
  *  boxes fade in when the data lands. `seeded` false: the composed details drive the hero as before. */
 export function useSeededHero(composed: boolean, colors: UltraBlurColors | null) {
-  const go = useSheetGo(composed);
   const tap = useRef(tapShell()).current;
   const seeded = useRef<boolean | null>(null);
-  if (go && seeded.current === null) seeded.current = !composed && !!tap;
+  if (seeded.current === null) seeded.current = !composed && !!tap;
   const frozen = useRef<{ colors: UltraBlurColors | null } | null>(null);
   if (seeded.current && !frozen.current) frozen.current = { colors };
   const on = seeded.current === true;
-  return { go, seeded: on, art: on ? tap!.poster : null, title: on ? tap!.title : '', colors: on ? frozen.current!.colors : colors };
+  return { go: true, seeded: on, art: on ? tap!.poster : null, title: on ? tap!.title : '', colors: on ? frozen.current!.colors : colors };
 }
 
 /** Seeded hero: the wash box has one fixed height in the seed and in the details (its blobs scale with the box),
@@ -83,8 +63,8 @@ export const SEEDED_WASH: CSSProperties = {
   maskImage: 'linear-gradient(to bottom, transparent 0%, black 80px, black calc(100% - 160px), transparent 100%)',
 };
 
-export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onScrimClick, children }: {
-  name: string; variant?: string; phase: SheetPhase; composed: boolean; go: boolean;
+export function SheetFrame({ name, variant = 'mobile', phase, composed, go = true, onScrimClick, children }: {
+  name: string; variant?: string; phase: SheetPhase; composed: boolean; go?: boolean;
   onScrimClick?: () => void; children: ReactNode;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -209,10 +189,10 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
       data-variant={variant}
       data-composed={composed ? 'true' : 'false'}
       data-phase={phase}
-      style={{ position: 'fixed', inset: 0, zIndex: MOTION.z.sheet }}
+      style={{ position: 'fixed', inset: 0, zIndex: MOTION.z.sheet, pointerEvents: phase === 'exiting' ? 'none' : undefined }}
     >
       <div ref={scrimRef} data-sheet-scrim="" aria-hidden="true"
-        onClick={onScrimClick}
+        onClick={entering ? undefined : onScrimClick}
         style={{ position: 'absolute', inset: 0, background: '#000', opacity: MOTION.scrim }} />
       <Entering.Provider value={(go && entering) || phase === 'exiting'}><CardRef.Provider value={cardRef}>{children}</CardRef.Provider></Entering.Provider>
     </div>,
@@ -221,13 +201,18 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go, onSc
 }
 
 /** The sheet card: rounded top, full height under the safe area, slides with the frame. */
-export function SheetCard({ background, children }: { background: string; children: ReactNode }) {
+export function SheetCard({ background, tint, hold = true, children }: { background: string; tint?: string | null; hold?: boolean; children: ReactNode }) {
   const ref = useContext(CardRef);
   const entering = useContext(Entering);
-  // While the card slides in, keep the first frame's content (same element identity, so React skips the
-  // subtree): late detail/ratings/cast commit once, at enter end, instead of on the animating frames.
+  // `hold`: while the card slides in, freeze the content as of the render that set it (same element identity, so
+  // React skips the subtree on the slide's frames); what lands later commits once, at enter end. A sheet that opens
+  // before its details exist passes hold={false} until its content has revealed, so seed, details and reveal all
+  // commit the moment they are ready and fade in on the sliding card (transform and opacity only), and nothing after
+  // that re-renders the shelves, cast and buttons on the animating frames.
   const snap = useRef<ReactNode>(children);
-  if (!entering) snap.current = children;
+  const frozen = useRef(false);
+  if (!entering || !hold) { snap.current = children; frozen.current = false; }
+  else if (!frozen.current) { snap.current = children; frozen.current = true; }
   const style: CSSProperties = {
     position: 'absolute',
     top: 'max(env(safe-area-inset-top, 0px), 6px)',
@@ -239,7 +224,15 @@ export function SheetCard({ background, children }: { background: string; childr
     transform: 'translate3d(0, 0, 0)',
     backfaceVisibility: 'hidden',
   };
-  return <div ref={ref} className="luma-bleed-down" data-sheet-card="" style={style}>{snap.current}</div>;
+  // The poster-derived base color is a layer that fades in (opacity, REVEAL token) when it arrives: the card's own
+  // color never changes, so a palette landing after the open can't flip the sheet's color in one frame.
+  return (
+    <div ref={ref} className="luma-bleed-down" data-sheet-card="" style={style}>
+      <div aria-hidden="true" data-sheet-tint="" style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
+        background: tint ?? 'transparent', opacity: tint ? 1 : 0, transition: REVEAL_TRANSITION }} />
+      {snap.current}
+    </div>
+  );
 }
 
 /** The sheet's first frame while details load (MOTION.md §1.2-1.3): the final layout's top (backdrop box,
@@ -303,7 +296,7 @@ export function SeedLayer({ show, ready, overlap, rows, hero }: { show: boolean;
     </div>
   );
 }
-export const SEED_FALLBACK_SLACK_MS = 200;
+export const SEED_FALLBACK_SLACK_MS = MOTION.dur.settleSlack;
 export const SEED_FADE_OUT = 'm-crossfade var(--m-dur-crossfade) var(--m-ease-standard) reverse both';
 
 /** Content that replaces a seed shell crossfades in (--m-dur-crossfade); content there from the first frame doesn't. */
@@ -314,8 +307,8 @@ export const SHELL_CROSSFADE = 'm-crossfade var(--m-dur-crossfade) var(--m-ease-
  *  scale(0.96)+opacity 0 -> rest over 320ms --m-ease-decel (side: translateX(24px)+fade). Exit when `phase`
  *  becomes 'exiting': from the current state to scale(0.98)+opacity 0 over 200ms --m-ease-accel; the scrim
  *  fades over 200ms. Reduced motion: opacity only, --m-dur-fast. WAAPI, transform/opacity only. */
-export const MODAL_ENTER_MS = 320;
-export const MODAL_EXIT_MS = 200;
+export const MODAL_ENTER_MS = MODAL_MOTION.enterMs;
+export const MODAL_EXIT_MS = MODAL_MOTION.exitMs;
 export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElement | null>,
   cardRef: React.RefObject<HTMLElement | null>, kind: 'modal' | 'side' | 'bottom' = 'modal', armed = true) {
   const anims = useRef<Animation[]>([]);
@@ -338,8 +331,9 @@ export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElem
     const stop = () => { anims.current.forEach((a) => a.cancel()); anims.current = []; };
     // 'bottom': the phone sheet rule (opaque card slides from translateY(100%); --m-dur-sheet-enter/exit).
     const bottom = kind === 'bottom';
-    const from = kind === 'side' ? 'translate3d(24px, 0, 0)' : bottom ? 'translate3d(0, 100%, 0)' : 'scale(0.96)';
-    const out = kind === 'side' ? 'translate3d(24px, 0, 0)' : bottom ? 'translate3d(0, 100%, 0)' : 'scale(0.98)';
+    const shift = `translate3d(${MODAL_MOTION.sideShift}px, 0, 0)`;
+    const from = kind === 'side' ? shift : bottom ? 'translate3d(0, 100%, 0)' : `scale(${MODAL_MOTION.enterScale})`;
+    const out = kind === 'side' ? shift : bottom ? 'translate3d(0, 100%, 0)' : `scale(${MODAL_MOTION.exitScale})`;
     const o0 = bottom ? 1 : 0;
     if (phase === 'exiting') {
       const cs = ok(card) ? getComputedStyle(card) : null;
@@ -349,8 +343,8 @@ export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElem
       stop();
       const d = rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetExit : MODAL_EXIT_MS;
       if (ok(card)) anims.current.push(card.animate(rm ? [{ opacity: curO }, { opacity: 0 }]
-        : [{ transform: curT, opacity: curO }, { transform: out, opacity: o0 }], { duration: d, easing: bottom ? MOTION.ease.sheetExit : MOTION.ease.accel, fill: 'forwards' }));
-      if (ok(scrim) && scrim !== card) anims.current.push(scrim.animate([{ opacity: so }, { opacity: 0 }], { duration: rm || !bottom ? d : MOTION.dur.sheetScrimExit, easing: bottom ? MOTION.ease.sheetScrimExit : MOTION.ease.accel, fill: 'forwards' }));
+        : [{ transform: curT, opacity: curO }, { transform: out, opacity: o0 }], { duration: d, easing: bottom ? MOTION.ease.sheetExit : MOTION.ease.modalExit, fill: 'forwards' }));
+      if (ok(scrim) && scrim !== card) anims.current.push(scrim.animate([{ opacity: so }, { opacity: 0 }], { duration: rm || !bottom ? d : MOTION.dur.sheetScrimExit, easing: bottom ? MOTION.ease.sheetScrimExit : MOTION.ease.modalExit, fill: 'forwards' }));
       return;
     }
     if (entered.current) {
@@ -362,8 +356,9 @@ export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElem
       { duration: rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetScrimEnter : MOTION.dur.standard, easing: bottom && !rm ? MOTION.ease.sheetScrimEnter : MOTION.ease.standard }));
     if (ok(card)) anims.current.push(card.animate(rm ? [{ opacity: 0 }, { opacity: 1 }]
       : [{ transform: from, opacity: o0 }, { transform: 'none', opacity: 1 }],
-      { duration: rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetEnter : MODAL_ENTER_MS, easing: bottom ? MOTION.ease.sheet : MOTION.ease.decel }));
+      { duration: rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetEnter : MODAL_ENTER_MS, easing: bottom ? MOTION.ease.sheet : MOTION.ease.modalEnter }));
     const enter = anims.current[anims.current.length - 1];
+    window.dispatchEvent(new Event(SHEET_MOVING_EVENT));   // releases the tapped card's press, as the phone sheet does
     if (!enter) { setEntering(false); return; }
     let done = false;
     const finish = () => {

@@ -2,11 +2,15 @@
  * popup has revealed (`ready`), off-screen, and only then swaps in, already
  * decoded. Until then (and on failure) it's the person placeholder, so there's
  * never a pending image in view. */
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 
-export function CastPhoto({ src, alt, ready, fallback, style }: {
-  src: string | null; alt: string; ready: boolean; fallback: string; style: React.CSSProperties;
-}) {
+interface CastPhotoProps { src: string | null; alt: string; ready: boolean; fallback: string; style: React.CSSProperties }
+
+/** Re-rendered only when what it draws changes: the sheet re-renders for every landing detail, and a shelf of cast
+ *  photos re-rendering with it was most of that cost. `style` is one constant per call site. */
+export const CastPhoto = memo(CastPhotoView, (a, b) => a.src === b.src && a.alt === b.alt && a.ready === b.ready && a.fallback === b.fallback);
+
+function CastPhotoView({ src, alt, ready, fallback, style }: CastPhotoProps) {
   const [shown, setShown] = useState<string | null>(null);
   useEffect(() => {
     setShown(null);

@@ -52,6 +52,8 @@ export interface TvModalViewProps {
   setSelectedSeason: (n: number) => void;
   // Phase animation
   phase: 'entering' | 'visible' | 'exiting' | 'gone';
+  /** False while another sheet is on top of this one: no swipe, no Escape. */
+  active?: boolean;
   // Sub-modal visibility
   showSources: SourcesTarget | null;
   showAddToSonarr: boolean;
@@ -93,6 +95,10 @@ export interface TvModalViewProps {
 }
 
 export interface TvDetailModalProps {
+  /** False while another sheet is on top of this one (it stays mounted underneath). Default true. */
+  active?: boolean;
+  /** The sheet started closing (its exit is playing); `onClose` follows when the exit is done. */
+  onLeave?: () => void;
   ratingKey?: number;
   tmdbId?: number;
   onClose: () => void;

@@ -87,7 +87,21 @@ export function finalBackdropUrl(url: string | null | undefined): string | null 
 
 /** Minimal mode on a phone-width screen (the desktop popup keeps its sizes). */
 export function phoneMinimal(): boolean {
-  return isMinimal() && typeof window !== 'undefined' && window.innerWidth < 1024;
+  return isMinimal() && viewportWidth() < 1024;
+}
+
+/** innerWidth flushes pending layout; a sheet's first render asks several times while its frame is still dirty. Read
+ *  once and again only after a resize. */
+let vw: number | null = null;
+let vwBound = false;
+function viewportWidth(): number {
+  if (typeof window === 'undefined') return Infinity;
+  if (!vwBound) {
+    vwBound = true;
+    window.addEventListener('resize', () => { vw = null; });
+  }
+  if (vw === null) vw = window.innerWidth;
+  return vw;
 }
 
 /** Plex art for the popup backdrop: a 780x439 transcode on phones (minimal); on desktop 1920x1080, or 2560x1440 at

@@ -152,7 +152,7 @@ export function MobileUpgradeSheet({
         flexDirection: 'column',
         justifyContent: 'flex-end',
         background: entered && !dismissing ? 'rgba(0,0,0,0.4)' : 'transparent',
-        transition: 'background 0.25s ease',
+        transition: 'background var(--m-dur-standard) var(--m-ease-standard)',
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) handleDismiss();
@@ -170,7 +170,7 @@ export function MobileUpgradeSheet({
           borderRadius: '20px 20px 0 0',
           overflow: 'hidden',
           transform: `translateY(${sheetTranslate})`,
-          transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: dragOffset > 0 ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           willChange: 'transform',
         }}
       >
@@ -241,7 +241,7 @@ export function MobileUpgradeSheet({
                     ? 'rgba(244, 67, 54, 0.2)'
                     : 'rgba(255,255,255,0.06)',
                   color: isError ? '#ef4444' : '#fff',
-                  transition: 'all 0.15s',
+                  transition: 'all var(--m-dur-hover) var(--m-ease-standard)',
                 }}
               >
                 <span>{isAdding ? 'Adding...' : isError ? 'Failed' : opt.name}</span>

@@ -44,7 +44,7 @@ function DropdownOption({ focusKey, label, sub, checkbox, active, onSelect }: {
         background: active && !checkbox ? 'rgba(255,255,255,0.08)' : 'transparent',
         color: active ? '#fff' : 'rgba(255,255,255,0.7)',
         fontSize: '15px', fontWeight: 600, cursor: 'pointer', textAlign: 'left',
-        transition: 'background 0.12s',
+        transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
       }}
     >
       {checkbox && (
@@ -86,7 +86,7 @@ function DropdownTrigger({ focusKey, value, open, onToggle }: {
       }}
     >
       <span>{value}</span>
-      <span style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.5)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', fontSize: '12px' }}>▾</span>
+      <span style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.5)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform var(--m-dur-hover) var(--m-ease-standard)', fontSize: '12px' }}>▾</span>
     </button>
   );
 }
@@ -269,7 +269,7 @@ export function AddToSonarrModal({ tvdbId, title, seasons, onClose, onAdded }: A
               fontSize: '16px',
               fontWeight: 700,
               cursor: adding || added || !canAdd ? 'default' : 'pointer',
-              transition: 'all 0.2s',
+              transition: 'all var(--m-dur-hover) var(--m-ease-standard)',
               opacity: adding || !canAdd ? 0.6 : 1,
             }}
           >

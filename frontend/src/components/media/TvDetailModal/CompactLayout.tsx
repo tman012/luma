@@ -2,7 +2,7 @@ import { sheetBase } from '@/utils/posterColors';
 import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows, ratingsExpectedAtTap } from '../sheetRows';
 import { APP_BG } from '@/theme/motion';
 import { SheetFrame, SheetCard, SeedLayer, useSeededHero, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
-import { detailSheetReady, useUnopenedClose } from '@/loading/sheetOpenGate';
+import { detailSheetReady } from '@/loading/sheetOpenGate';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT, tapShell } from '@/services/modalPrefetch';
 import { isMinimal } from '@/minimal';
@@ -121,8 +121,8 @@ function ActionButton({
         alignItems: 'center',
         gap: '6px',
         cursor: 'pointer',
-        transform: pressed ? 'scale(0.88)' : 'scale(1)',
-        transition: 'transform 0.18s cubic-bezier(0.34, 1.4, 0.64, 1)',
+        transform: pressed ? 'scale(var(--m-press-scale))' : 'scale(1)',
+        transition: 'transform var(--m-dur-press) var(--m-ease-standard)',
       }}
     >
       <div
@@ -213,11 +213,9 @@ export function CompactLayout(props: TvModalViewProps) {
   const sheetArt = sheetHero.art;
   const posterFill = liveShow && !liveShow.backdropUrl && !sheetArt ? liveShow.posterUrl : null;
   const composed = detailSheetReady(loading, !!error, !!liveShow, liveShow?.title, sheetHero.state, true);
-  useUnopenedClose(props.openKey, composed || phase === 'exiting' || phase === 'gone', onClose);
   const hero = useSeededHero(composed, detailColors);
   const heroHold = hero.seeded ? false : titleState === 'hold';
   const ultraBlurColors = hero.colors;
-  const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
   }, [composed]);
@@ -317,7 +315,7 @@ export function CompactLayout(props: TvModalViewProps) {
   const { handlers: swipeHandlers } = useSwipeToDismiss({
     scrollRef,
     onDismiss: onClose,
-    enabled: phase === 'visible' && !showSources && !showPlayback && !showAddToSonarr && !showSeasonsSheet && !showEpisodesSheet && seasonActionSheet === null,
+    enabled: phase === 'visible' && props.active !== false && !showSources && !showPlayback && !showAddToSonarr && !showSeasonsSheet && !showEpisodesSheet && seasonActionSheet === null,
   });
 
   // Track which episodes/seasons have been sent to Sonarr (hides search icons)
@@ -523,7 +521,7 @@ export function CompactLayout(props: TvModalViewProps) {
 
   return (
     <SheetFrame name="TvDetailModal" phase={phase} composed={composed} go={go} onScrimClick={onClose}>
-      <SheetCard background={sheetBg}>
+      <SheetCard background={APP_BG} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>
         {/* No sheet spinner past the deadline (Taylor 2026-11-02): the pre-reveal surface stays as is. */}
         {/* Scrollable content */}
         <div
@@ -1136,6 +1134,7 @@ export function CompactLayout(props: TvModalViewProps) {
             cursor: 'pointer',
             filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.6))',
           }}
+          className="m-interactive"
           aria-label="Close"
         >
           <svg
@@ -1359,7 +1358,7 @@ export function CompactLayout(props: TvModalViewProps) {
               fontSize: '16px',
               fontWeight: 600,
               boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
-              animation: 'searchPopupFadeIn 0.2s ease-out',
+              animation: 'searchPopupFadeIn var(--m-dur-crossfade) var(--m-ease-standard)',
             }}
           >
             {autoSearchToast.msg}
@@ -1526,7 +1525,7 @@ function SeasonActionSheet({
         flexDirection: 'column',
         justifyContent: 'flex-end',
         background: entered && !dismissing ? 'rgba(0,0,0,0.4)' : 'transparent',
-        transition: 'background 0.25s ease',
+        transition: 'background var(--m-dur-modal-enter) var(--m-ease-standard)',
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
     >
@@ -1544,7 +1543,7 @@ function SeasonActionSheet({
           borderRadius: '20px 20px 0 0',
           overflow: 'hidden',
           transform: `translateY(${sheetTranslate})`,
-          transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: dragOffset > 0 ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           willChange: 'transform',
         }}
       >
@@ -1743,8 +1742,8 @@ function SeasonRow({
         background: 'rgba(255,255,255,0.03)',
         border: '1px solid rgba(255,255,255,0.05)',
         cursor: 'pointer',
-        transform: pressed ? 'scale(0.98)' : 'scale(1)',
-        transition: 'transform 0.16s cubic-bezier(0.34, 1.4, 0.64, 1)',
+        transform: pressed ? 'scale(var(--m-press-scale))' : 'scale(1)',
+        transition: 'transform var(--m-dur-press) var(--m-ease-standard)',
       }}
     >
       {children}
@@ -1838,7 +1837,7 @@ function SeasonsShelf({
         flexDirection: 'column',
         justifyContent: 'flex-end',
         background: entered && !dismissing ? 'rgba(0,0,0,0.5)' : 'transparent',
-        transition: 'background 0.3s ease',
+        transition: 'background var(--m-dur-modal-enter) var(--m-ease-standard)',
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
     >
@@ -1856,7 +1855,7 @@ function SeasonsShelf({
           borderRadius: '20px 20px 0 0',
           overflow: 'hidden',
           transform: `translateY(${sheetTranslate})`,
-          transition: dragOffset > 0 ? 'none' : 'transform 0.42s cubic-bezier(0.34, 1.35, 0.64, 1)',
+          transition: dragOffset > 0 ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           willChange: 'transform',
         }}
       >
@@ -2119,7 +2118,7 @@ function EpisodesBrowsingSheet({
         flexDirection: 'column',
         justifyContent: 'flex-end',
         background: entered && !dismissing ? 'rgba(0,0,0,0.5)' : 'transparent',
-        transition: 'background 0.3s ease',
+        transition: 'background var(--m-dur-modal-enter) var(--m-ease-standard)',
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
     >
@@ -2137,7 +2136,7 @@ function EpisodesBrowsingSheet({
           borderRadius: '20px 20px 0 0',
           overflow: 'hidden',
           transform: `translateY(${sheetTranslate})`,
-          transition: dragOffset > 0 ? 'none' : 'transform 0.42s cubic-bezier(0.34, 1.35, 0.64, 1)',
+          transition: dragOffset > 0 ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           willChange: 'transform',
         }}
       >

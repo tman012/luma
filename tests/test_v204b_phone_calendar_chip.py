@@ -99,7 +99,8 @@ def test_picker_sheet_is_prods_and_native_on_test():
     assert 'addToNativeWatchlist({ tmdbId, title, year, profileId: opt?.id ?? null })' in s
     prod = _prod(f)
     ui = prod[prod.index('{/* Title */}'):]   # v205: prod's 'Select Quality' exactly
-    assert ui in s                                    # prod's picker UI, unchanged
+    # v359 (motion tokens): the picker's hover timing reads the shared token; undone here, the UI is prod's exactly.
+    assert ui in s.replace("transition: 'all var(--m-dur-hover) var(--m-ease-standard)'", "transition: 'all 0.15s'")   # prod's picker UI, unchanged
 
 
 def test_settings_movies_picker_option():

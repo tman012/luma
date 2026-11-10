@@ -113,7 +113,7 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
       <span style={{ flex: 1 }}>{label}</span>
       {busy === key && <Spinner />}
       {opts.chevron && busy !== key && (
-        <span style={{ color: 'rgba(255,255,255,0.35)', display: 'flex', transform: choosing ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s ease' }}>
+        <span style={{ color: 'rgba(255,255,255,0.35)', display: 'flex', transform: choosing ? 'rotate(90deg)' : 'none', transition: 'transform var(--m-dur-hover) var(--m-ease-standard)' }}>
           <Icon size={16} d={<polyline points="9 18 15 12 9 6" />} />
         </span>
       )}
@@ -158,7 +158,7 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       background: on ? '#fff' : 'transparent',
                       border: on ? '1.5px solid #fff' : '1.5px solid rgba(255,255,255,0.35)',
-                      color: NAVY, transition: 'all 0.15s ease',
+                      color: NAVY, transition: 'all var(--m-dur-hover) var(--m-ease-standard)',
                     }}>
                       {on && <Icon size={14} d={<polyline points="20 6 9 17 4 12" />} />}
                     </span>
@@ -207,7 +207,7 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
       onClick={(e) => { e.stopPropagation(); dismiss(); }}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-        opacity: visible ? 1 : 0, transition: 'opacity 0.22s ease',
+        opacity: visible ? 1 : 0, transition: 'opacity var(--m-dur-hover) var(--m-ease-standard)',
       }}
     />
   );
@@ -239,7 +239,7 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
             padding: '8px 16px calc(env(safe-area-inset-bottom, 0px) + 20px)',
             boxShadow: '0 -12px 40px rgba(0,0,0,0.5), var(--luma-bleed-shadow)',
             transform: visible ? `translateY(${drag}px)` : 'translateY(100%)',
-            transition: dragStart.current != null ? 'none' : 'transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1)',
+            transition: dragStart.current != null ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
             maxHeight: '88vh', overflowY: 'auto',
           }}
         >
@@ -261,7 +261,7 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
         padding: '22px 18px 18px', boxShadow: '0 24px 60px rgba(0,0,0,0.55)',
         border: '1px solid rgba(255,255,255,0.08)',
         opacity: visible ? 1 : 0, transform: visible ? 'scale(1)' : 'scale(0.96)',
-        transition: 'opacity 0.2s ease, transform 0.2s ease',
+        transition: 'opacity var(--m-dur-hover) var(--m-ease-standard), transform var(--m-dur-hover) var(--m-ease-standard)',
       }}>
         {content}
       </div>

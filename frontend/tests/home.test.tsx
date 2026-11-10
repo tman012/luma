@@ -104,10 +104,10 @@ describe('Home', () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ ...HOME, continue_watching: [{ ...HOME.continue_watching[0], show_key: '9', season: 1, episode: 2 }] })));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('home-rails'));
-    // The popup opens once it's ready (or at the 150 ms budget), never on the
-    // tap itself; the tapped card shows a pressed state meanwhile.
+    // The popup opens on the tap itself (the sheet reveals its content as it is ready); the tapped card
+    // shows a pressed state until the sheet starts moving.
     fireEvent.click(screen.getByTestId('card-21'));
-    expect(modals.openMovie).not.toHaveBeenCalled();
+    expect(modals.openMovie).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('card-21').getAttribute('data-pressed')).toBe('true');
     await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 21, origin: 'continue_watching' }), { timeout: 1500 });
     // v325 motion P1: a tap is held while its sheet is up (double-tap guard); closing the sheet frees it.

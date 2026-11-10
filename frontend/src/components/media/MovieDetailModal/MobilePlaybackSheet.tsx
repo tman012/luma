@@ -402,7 +402,7 @@ export function MobilePlaybackSheet({
         flexDirection: 'column',
         justifyContent: 'flex-end',
         background: entered && !dismissing ? 'rgba(0,0,0,0.4)' : 'transparent',
-        transition: 'background 0.25s ease',
+        transition: 'background var(--m-dur-standard) var(--m-ease-standard)',
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget && canDismiss) handleDismiss();
@@ -421,7 +421,7 @@ export function MobilePlaybackSheet({
           borderRadius: '20px 20px 0 0',
           overflow: 'hidden',
           transform: `translateY(${sheetTranslate})`,
-          transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: dragOffset > 0 ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           willChange: 'transform',
         }}
       >
@@ -447,7 +447,7 @@ export function MobilePlaybackSheet({
         {/* Content wrapper — animates height between steps */}
         <div style={{
           overflow: 'hidden',
-          transition: contentHeight !== undefined ? 'height 0.25s cubic-bezier(0.32, 0.72, 0, 1)' : 'none',
+          transition: contentHeight !== undefined ? 'height var(--m-dur-standard) var(--m-ease-standard)' : 'none',
           height: contentHeight !== undefined ? `${contentHeight}px` : 'auto',
         }}>
           <div ref={contentRef}>
@@ -478,7 +478,7 @@ export function MobilePlaybackSheet({
                     border: '1px solid rgba(255,255,255,0.12)',
                     background: 'rgba(255,255,255,0.06)',
                     color: '#fff',
-                    transition: 'background 0.15s',
+                    transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
                   }}
                 >
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -538,7 +538,7 @@ export function MobilePlaybackSheet({
                         border: '1px solid rgba(255,255,255,0.12)',
                         background: available ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
                         color: available ? '#fff' : 'rgba(255,255,255,0.3)',
-                        transition: 'background 0.15s',
+                        transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
                         opacity: resumeLoading ? 0.5 : 1,
                       }}
                     >
@@ -596,7 +596,7 @@ export function MobilePlaybackSheet({
                     border: '1px solid rgba(255,255,255,0.12)',
                     background: 'rgba(255,255,255,0.06)',
                     color: '#fff',
-                    transition: 'background 0.15s',
+                    transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
                     opacity: resumeLoading ? 0.5 : 1,
                   }}
                 >
@@ -645,7 +645,7 @@ export function MobilePlaybackSheet({
                     background: 'rgba(255,255,255,0.06)',
                     color: '#fff',
                     cursor: resumeLoading ? 'default' : 'pointer',
-                    transition: 'background 0.15s',
+                    transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
                     opacity: resumeLoading ? 0.5 : 1,
                   }}
                 >
@@ -695,7 +695,7 @@ export function MobilePlaybackSheet({
                   border: '1px solid rgba(16,185,129,0.3)',
                   background: 'rgba(16,185,129,0.08)',
                   color: '#fff',
-                  transition: 'background 0.15s',
+                  transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
                 }}
               >
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="#10b981"><polygon points="6,3 20,12 6,21" /></svg>
@@ -718,7 +718,7 @@ export function MobilePlaybackSheet({
                   border: '1px solid rgba(255,255,255,0.12)',
                   background: 'rgba(255,255,255,0.06)',
                   color: '#fff',
-                  transition: 'background 0.15s',
+                  transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
                 }}
               >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

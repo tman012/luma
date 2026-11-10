@@ -271,7 +271,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
         <div style={{ padding: '40px 0 56px', textAlign: 'center', fontSize: 15, color: 'rgba(255,255,255,0.5)' }}>No matches</div>
       )}
       {results && results.length > 0 && (
-        <div style={{ opacity: searching ? 0.55 : 1, transition: 'opacity 0.2s' }}>
+        <div style={{ opacity: searching ? 0.55 : 1, transition: 'opacity var(--m-dur-hover) var(--m-ease-standard)' }}>
           {results.map((c) => {
             const isApplying = applying === c.guid;
             return (
@@ -378,7 +378,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
       style={{
         position: 'fixed', inset: 0, zIndex: 10070, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-        background: scrimVisible ? 'rgba(0,0,0,0.45)' : 'transparent', transition: 'background 0.25s ease',
+        background: scrimVisible ? 'rgba(0,0,0,0.45)' : 'transparent', transition: 'background var(--m-dur-standard) var(--m-ease-standard)',
       }}
     >
       <div className="luma-bleed-panel"
@@ -390,7 +390,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
           display: 'flex', flexDirection: 'column', background: BG, borderRadius: '20px 20px 0 0',
           boxShadow: '0 -12px 40px rgba(0,0,0,0.45), var(--luma-bleed-shadow)', overflow: 'hidden',
           transform: `translateY(${dismissing ? '100%' : entered ? `${dragOffset}px` : '100%'})`,
-          transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: dragOffset > 0 ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           willChange: 'transform',
         }}
       >
@@ -411,7 +411,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
       style={{
         position: 'fixed', inset: 0, zIndex: 10070, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-        background: scrimVisible ? 'rgba(0,0,0,0.6)' : 'transparent', transition: 'background 0.2s ease',
+        background: scrimVisible ? 'rgba(0,0,0,0.6)' : 'transparent', transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
       }}
     >
       <div
@@ -423,7 +423,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
           background: BG, borderRadius: 20, border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 24px 80px rgba(0,0,0,0.6)', overflow: 'hidden',
           opacity: scrimVisible ? 1 : 0,
           transform: scrimVisible ? `translateY(${dragOffset}px) scale(1)` : 'scale(0.97)',
-          transition: dragOffset > 0 ? 'none' : 'opacity 0.2s ease, transform 0.2s ease',
+          transition: dragOffset > 0 ? 'none' : 'opacity var(--m-dur-hover) var(--m-ease-standard), transform var(--m-dur-hover) var(--m-ease-standard)',
         }}
       >
         {header}

@@ -3,10 +3,11 @@
  * Clicking outside the card or pressing Escape navigates to home.
  */
 
-import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 import { useModalMotion } from '@/components/layout/SheetFrame';
+import { useSurfacePresence } from '@/components/motion/useSurfacePresence';
 import { NAVY_GLASS_BORDER, NAVY_GLASS_PANEL } from '@/theme/tokens';
 
 interface Props {
@@ -21,21 +22,13 @@ export const SETTINGS_SCRIM = 'rgba(21,16,42,0.72)';
 export const SETTINGS_SHELL = 'rgba(21,16,42,0.92)';
 export const SETTINGS_SHELL_BORDER = '1px solid rgba(255,255,255,0.08)';
 
-type Phase = 'entering' | 'visible' | 'exiting' | 'gone';
-
 export function PageModal({ children, variant = 'default' }: Props) {
   const settings = variant === 'settings';
-  const [phase, setPhase] = useState<Phase>('entering');
   const overlayRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
-  useModalMotion(phase, overlayRef, cardRef);
   const navigate = useNavigate();
-
-  // Animate open
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setPhase('visible'));
-    return () => cancelAnimationFrame(frame);
-  }, []);
+  const { phase, requestClose: handleClose } = useSurfacePresence({ kind: 'modal', onExited: () => navigate('/') });
+  useModalMotion(phase, overlayRef, cardRef);
 
   // Body scroll lock
   useEffect(() => {
@@ -46,25 +39,7 @@ export function PageModal({ children, variant = 'default' }: Props) {
     };
   }, []);
 
-  const handleClose = useCallback(() => {
-    setPhase('exiting');
-    setTimeout(() => {
-      setPhase('gone');
-      navigate('/');
-    }, 300);
-  }, [navigate]);
-
-  // Escape key
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [handleClose]);
-
   if (phase === 'gone') return null;
-
 
   return createPortal(
     <div className="luma-fullscreen luma-bleed"

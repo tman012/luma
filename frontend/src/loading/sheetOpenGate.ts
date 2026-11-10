@@ -1,29 +1,23 @@
-/** A movie/TV detail sheet stays closed until its visible title and artwork are
- *  actually ready. An elapsed cap must not open a color wash or a partial sheet.
+/** Detail sheet open helpers.
  *
- *  Bound: SHEET_OPEN_BOUND_MS (the existing 6s sheet-priority safety cap) from
- *  the moment the modal mounts. Past it, if the sheet is still not showable,
- *  the open is abandoned (onClose, nothing revealed). That is not a minimum
- *  delay: a warm title shows on the frame it becomes ready.
+ *  A movie/TV sheet opens on the tap into its final frame and never waits for the network: the details, the logo
+ *  and the artwork reveal into it once they are ready (useOneReveal), and an open that cannot load shows the
+ *  existing "Couldn't load details" panel. `detailSheetReady` therefore only says whether the sheet is composed
+ *  (real title, settled hero, known ownership); it no longer decides whether the sheet is shown.
  *
- *  Showable:
- *  - Hard failure with no detail: the existing "Couldn't load details" panel.
- *  - Otherwise a real non-empty title, a settled hero (logo decoded, or the
- *    lookup/image failed so the text title is final; backdrop decoded, or art
- *    genuinely absent/failed so the no-art frame is final), and known ownership
- *    so the action row does not reflow.
- *  Ratings are not part of this gate. They fade into a reserved row.
+ *  `SHEET_OPEN_BOUND_MS` is the sheet-priority safety cap (loading/sheetPriority). Ratings are not part of
+ *  composed: they fade into a reserved row.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { SHEET_PRIORITY_MS } from '@/loading/sheetPriority';
 
 export const SHEET_OPEN_BOUND_MS = SHEET_PRIORITY_MS;
 
-const DETAIL_SHEET = '[data-modal="MovieDetailModal"], [data-modal="TvDetailModal"]';
-const PERSON_SHEET = '[data-modal="PersonDetailModal"]';
+const NOT_EXITING = ':not([data-phase="exiting"])';
+const DETAIL_SHEET = `[data-modal="MovieDetailModal"]${NOT_EXITING}, [data-modal="TvDetailModal"]${NOT_EXITING}`;
+const PERSON_SHEET = `[data-modal="PersonDetailModal"]${NOT_EXITING}`;
 
-/** True only when that surface is actually portaled. A mounted modal whose sheet is still
- *  closed is not a surface to return to. */
+/** True when that surface is portaled and not on its way out (an exiting sheet is not a surface to return to). */
 export function detailSurfaceOpen(which: 'detail' | 'person' = 'detail'): boolean {
   if (typeof document === 'undefined') return false;
   return !!document.querySelector(which === 'person' ? PERSON_SHEET : DETAIL_SHEET);
@@ -37,15 +31,15 @@ export function detailSheetReady(
   return !loading && hasDetail && !!title && title.trim().length > 0 && hero !== 'hold' && ownedKnown;
 }
 
-/** Closes an open that never became showable. `show` true (or a later true) cancels the timer. */
-export function useUnopenedClose(openKey: unknown, show: boolean, onClose: () => void): void {
-  const showRef = useRef(show);
-  const closeRef = useRef(onClose);
-  showRef.current = show;
-  closeRef.current = onClose;
+/** `html[data-detail-mounted]` while at least one detail sheet is mounted (a parent sheet stays mounted under a child). */
+let mountedDetails = 0;
+export function useDetailMounted(): void {
   useEffect(() => {
-    if (show) return;
-    const t = window.setTimeout(() => { if (!showRef.current) closeRef.current(); }, SHEET_OPEN_BOUND_MS);
-    return () => window.clearTimeout(t);
-  }, [openKey, show]);
+    mountedDetails += 1;
+    document.documentElement.dataset.detailMounted = '1';
+    return () => {
+      mountedDetails -= 1;
+      if (mountedDetails <= 0) { mountedDetails = 0; delete document.documentElement.dataset.detailMounted; }
+    };
+  }, []);
 }

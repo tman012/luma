@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 // ---------------------------------------------------------------------------
 
 import type { UltraBlurColors } from '@/utils/modalParsers';
+import { MOTION } from '@/theme/motion';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -257,13 +258,13 @@ function BlurLayer({
           maskImage: mask,
           borderRadius: resolvedRadius,
           backfaceVisibility: 'hidden',
-          ...(hold !== undefined ? { opacity: hold ? 0 : 1, transition: instant ? 'none' : 'opacity 0.45s ease-out' } : {}),
+          ...(hold !== undefined ? { opacity: hold ? 0 : 1, transition: instant ? 'none' : 'opacity var(--m-dur-reveal) var(--m-ease-reveal)' } : {}),
           // Animation: start invisible if delayed, animate to visible
           ...(hasAnimation
             ? {
                 // Fades in with the backdrop (the palette is settled before the
                 // popup renders it), never after it.
-                animation: `${animationName} 0.45s ease-out both`,
+                animation: `${animationName} var(--m-dur-reveal) var(--m-ease-reveal) both`,
               }
             : {}),
         }}
@@ -321,7 +322,7 @@ function BlurLayer({
 // the old one, which is then dropped: an invisible crossfade, never a pop.
 // ---------------------------------------------------------------------------
 
-export const CROSSFADE_MS = 600;
+export const CROSSFADE_MS = MOTION.dur.palette;
 
 export function UltraBlurOverlay(props: UltraBlurOverlayProps) {
   const { colors } = props;
@@ -339,7 +340,7 @@ export function UltraBlurOverlay(props: UltraBlurOverlayProps) {
   return (
     <>
       <BlurLayer {...props} colors={prev} />
-      <div data-blur-crossfade style={{ position: 'absolute', inset: 0, animation: `ultraBlurFadeIn ${CROSSFADE_MS}ms ease both` }}>
+      <div data-blur-crossfade style={{ position: 'absolute', inset: 0, animation: `ultraBlurFadeIn ${CROSSFADE_MS}ms var(--m-ease-standard) both` }}>
         <BlurLayer {...props} />
       </div>
       <style>{'@keyframes ultraBlurFadeIn { from { opacity: 0; } to { opacity: 1; } }'}</style>

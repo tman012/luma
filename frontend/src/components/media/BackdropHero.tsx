@@ -58,7 +58,7 @@ export function BackdropHero({
       borderTopLeftRadius: '14px',
       borderTopRightRadius: '14px',
       opacity: instant || phase === 'visible' ? 1 : 0,
-      transition: instant ? 'none' : 'opacity 0.4s ease-out',
+      transition: instant ? 'none' : 'opacity var(--m-dur-reveal) var(--m-ease-reveal)',
       willChange: 'opacity',
       ...effects.headerContainerMask,
     }),
@@ -77,7 +77,7 @@ export function BackdropHero({
     if (el && src && el.complete && el.naturalWidth > 0) setLoadedSrc(src);
   }, [src]);
   // The one backdrop fades in softly when it paints (also on the composed phone sheet, `instant`); reduced motion: no fade.
-  const fade: React.CSSProperties = { transition: reducedMotion() ? 'none' : 'opacity 0.45s ease-out' };
+  const fade: React.CSSProperties = { transition: reducedMotion() ? 'none' : 'opacity var(--m-dur-reveal) var(--m-ease-reveal)' };
   return (
     <div ref={containerRef} style={{ ...containerStyle, background: instant && loaded ? 'transparent' : APP_BG }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
       {backdropUrl ? (
