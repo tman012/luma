@@ -158,7 +158,7 @@ describe('Home', () => {
     vi.stubGlobal('fetch', vi.fn(() => d.promise));
     const seen: string[] = [];
     const obs = new MutationObserver(() => {
-      const s = screen.queryByTestId('startup-loading') ? 'loading' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
+      const s = screen.queryByTestId('startup-loading') ? 'loading' : `rails:${document.querySelectorAll('h2').length}`;
       if (seen[seen.length - 1] !== s) seen.push(s);
     });
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
@@ -252,7 +252,7 @@ describe('Home', () => {
       vi.stubGlobal('fetch', vi.fn(async () => json(POSTERS)));
       const seen: string[] = [];
       const obs = new MutationObserver(() => {
-        const st = screen.queryByTestId('startup-loading') ? 'loading' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
+        const st = screen.queryByTestId('startup-loading') ? 'loading' : `rails:${document.querySelectorAll('h2').length}`;
         if (seen[seen.length - 1] !== st) seen.push(st);
       });
       render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);

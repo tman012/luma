@@ -20,7 +20,7 @@ import { MinimalHomePage } from '@/pages/MinimalHomePage';
 import { runHomeGate } from '@/startup/homeGate';
 import { artRect, createSplash, flipTransform, releaseSplash, resetSplash, splashActive, splashRemainingMs, type Splash } from '@/startup/splash';
 import { firstScreenImages } from '@/startup/decode';
-import { MOTION, SPLASH_MOTION } from '@/theme/motion';
+import { SPLASH_MOTION } from '@/theme/motion';
 import { _resetSheetPriority } from '@/loading/sheetPriority';
 
 const read = (p: string) => readFileSync(resolve(__dirname, '..', p), 'utf8');
@@ -124,7 +124,7 @@ describe('the readiness gate', () => {
 type Call = { el: HTMLElement; keyframes: Keyframe[]; ms: number };
 
 function stage(opts: { reduced?: boolean; capMs?: number } = {}) {
-  document.body.innerHTML = `<div id="splash"><div id="splash-bg"></div><div id="splash-stage"><img id="splash-logo" alt=""></div></div><div id="root"></div>`;
+  document.body.innerHTML = `<div id="splash"><div id="splash-bg"></div><div id="splash-stage"><div id="splash-logo"><img id="splash-mark" alt=""><img id="splash-uma" alt=""></div></div></div><div id="root"></div>`;
   const calls: Call[] = [];
   let t = 0;
   const splash = document.getElementById('splash')!;
@@ -135,9 +135,9 @@ function stage(opts: { reduced?: boolean; capMs?: number } = {}) {
       return { finished: new Promise<void>(r => setTimeout(r, Number(o.duration))) };
     });
   }
-  // The CSS intro: finished after introMs of the page's life.
+  // The CSS entrance (the mark, then "uma"): finished after introMs of the page's life.
   const introMs = opts.reduced ? SPLASH_MOTION.reducedIntroMs : SPLASH_MOTION.introMs;
-  (logo as unknown as { getAnimations: unknown }).getAnimations = () => [{ finished: new Promise<void>(r => setTimeout(r, Math.max(0, introMs - t))) }];
+  (splash as unknown as { getAnimations: unknown }).getAnimations = () => [{ finished: new Promise<void>(r => setTimeout(r, Math.max(0, introMs - t))) }];
   logo.getBoundingClientRect = () => ({ left: 95, top: 400, width: 200, height: 91, right: 295, bottom: 491, x: 95, y: 400, toJSON() {} });
   const advance = async (ms: number) => { t += ms; await vi.advanceTimersByTimeAsync(ms); };
   const s = createSplash({ now: () => t, reduced: () => !!opts.reduced, capMs: opts.capMs ?? 7000 });
@@ -157,7 +157,7 @@ describe('the splash', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); document.body.innerHTML = ''; document.documentElement.removeAttribute('data-splash-flip'); });
 
-  it('warm: no wait beyond the intro, then the logo flies into the Home logo while the background fades', async () => {
+  it('warm: no wait beyond the entrance, then the logo alone flies into the Home logo; the background never moves', async () => {
     const { s, calls, advance, splash } = stage();
     const target = homeLogo();
     void s.release({ target: () => target });
@@ -167,11 +167,12 @@ describe('the splash', () => {
     await advance(1);
     expect(s.phase).toBe('handoff');
     expect(document.documentElement.hasAttribute('data-splash-flip')).toBe(true);
+    expect(document.documentElement.getAttribute('data-splash')).toBe('handoff');   // Home fades in around the logo
     expect(splash.style.pointerEvents).toBe('none');    // taps reach Home during the handoff
     const logoMove = calls.find(c => c.el.id === 'splash-logo')!;
-    const bgFade = calls.find(c => c.el.id === 'splash-bg')!;
     expect(logoMove.ms).toBe(SPLASH_MOTION.handoffMs);
-    expect(bgFade.keyframes).toEqual([{ opacity: 1 }, { opacity: 0 }]);
+    expect(logoMove.keyframes[0]).toEqual({ transform: 'translate(0px, 0px) scale(1)' });
+    expect(calls.map(c => c.el.id)).toEqual(['splash-logo']);   // the background and the splash itself are never animated
     // translate + scale only; the box lands on the Home logo's: 90 / 200 scale, centers 72/32.5 vs 195/445.5
     expect(logoMove.keyframes[1]).toEqual({ transform: 'translate(-123px, -413px) scale(0.45)' });
     await advance(SPLASH_MOTION.handoffMs);
@@ -231,12 +232,12 @@ describe('the splash', () => {
     expect(s.stats.mode).toBe('fade');                    // nothing to fly into: a plain crossfade
   });
 
-  it('reduced motion: one crossfade of the whole splash, no scale or translate, Home logo never hidden', async () => {
+  it('reduced motion: one crossfade of the whole splash, no scale or translate, one logo on screen at a time', async () => {
     const { s, calls, advance } = stage({ reduced: true });
     void s.release({ target: () => homeLogo() });
     await advance(SPLASH_MOTION.reducedIntroMs);
     expect(s.phase).toBe('handoff');
-    expect(document.documentElement.hasAttribute('data-splash-flip')).toBe(false);
+    expect(document.documentElement.hasAttribute('data-splash-flip')).toBe(true);   // Home's logo waits until the splash is gone
     expect(calls).toHaveLength(1);
     expect(calls[0]!.el.id).toBe('splash');
     expect(calls[0]!.keyframes).toEqual([{ opacity: 1 }, { opacity: 0 }]);
@@ -244,6 +245,7 @@ describe('the splash', () => {
     expect(JSON.stringify(calls)).not.toMatch(/transform|scale|translate/);
     await advance(SPLASH_MOTION.reducedHandoffMs);
     expect(s.phase).toBe('done');
+    expect(document.documentElement.hasAttribute('data-splash-flip')).toBe(false);
     expect(s.stats.mode).toBe('fade');
   });
 
@@ -427,16 +429,17 @@ describe('the native launch matches the splash', () => {
   const manifest = JSON.parse(readFileSync(root('static/manifest.json'), 'utf8'));
 
   it('index.html paints the logo with no spinner and no text, before any script', () => {
-    expect(html).toMatch(/<div id="splash"[^>]*>[\s\S]*<img id="splash-logo"[^>]*src="data:image\/webp;base64,/);
+    expect(html).toMatch(/<div id="splash"[^>]*>[\s\S]*<div id="splash-logo">[\s\S]*<img id="splash-mark"[^>]*src="data:image\/webp;base64,[\s\S]*<img id="splash-uma"[^>]*src="data:image\/webp;base64,/);
     expect(html.indexOf('id="splash"')).toBeLessThan(html.indexOf('<script'));
     expect(html).not.toMatch(/Loading|spinner|splash-ring|splash-status/);
     const body = html.slice(html.indexOf('<body>'), html.indexOf('<script'));
     expect(body.replace(/<[^>]+>/g, '').trim()).toBe('');            // no text node anywhere in the splash markup
   });
 
-  it('the inline logo is the committed splash asset', () => {
-    const b64 = readFileSync(root('static/images/luma_splash.webp')).toString('base64');
-    expect(html).toContain(`data:image/webp;base64,${b64}`);
+  it('the inline logo layers are the committed splash assets', () => {
+    for (const f of ['luma_splash_mark.webp', 'luma_splash_uma.webp']) {
+      expect(html).toContain(`data:image/webp;base64,${readFileSync(root(`static/images/${f}`)).toString('base64')}`);
+    }
   });
 
   it('manifest colors, theme color and the splash background are one color', () => {
@@ -448,11 +451,21 @@ describe('the native launch matches the splash', () => {
   });
 
   it('the inline CSS repeats the motion tokens exactly', () => {
-    expect(html).toContain(`animation: lumaSplashIn ${SPLASH_MOTION.introMs}ms ${SPLASH_MOTION.introEase} both`.replace(/,(?=\d|0)/g, ', '));
-    expect(html).toContain(`from { opacity: 0; transform: scale(${SPLASH_MOTION.introScale}); }`);
+    const ease = (e: string) => e.replace(/,(?=\d|0)/g, ', ');
+    expect(html).toContain(`animation: lumaSplashMark ${SPLASH_MOTION.markMs}ms ${ease(SPLASH_MOTION.markEase)} both`);
+    expect(html).toContain(`animation: lumaSplashUma ${SPLASH_MOTION.umaMs}ms ${ease(SPLASH_MOTION.umaEase)} ${SPLASH_MOTION.umaDelayMs}ms both`);
+    expect(html).toContain(`from { opacity: 0; transform: scale(${SPLASH_MOTION.markScale}); }`);
+    expect(html).toContain(`transform: translateX(-${SPLASH_MOTION.umaShift}%)`);
+    expect(html).toContain(`clip-path: inset(0 ${100 - SPLASH_MOTION.umaClipFrom}% 0 ${SPLASH_MOTION.umaClipFrom}%)`);
+    expect(html).toContain(`opacity: 1; transition: opacity ${SPLASH_MOTION.homeFadeMs}ms ${ease(SPLASH_MOTION.homeEase)}`);
+    expect(html).toContain(`lumaHomeRise ${SPLASH_MOTION.homeFadeMs}ms ${ease(SPLASH_MOTION.homeEase)} both`);
+    expect(html).toContain(`translateY(${SPLASH_MOTION.homeRisePx}px)`);
     expect(html).toContain(`width: ${SPLASH_MOTION.logoWidth}`);
     expect(html).toContain(`animation: lumaSplashFade ${SPLASH_MOTION.reducedIntroMs}ms linear both`);
-    expect(SPLASH_MOTION.introMs).toBe(MOTION.dur.sheetEnter);
+    expect(SPLASH_MOTION.introMs).toBe(SPLASH_MOTION.umaDelayMs + SPLASH_MOTION.umaMs);
+    expect(SPLASH_MOTION.introMs).toBeLessThanOrEqual(1000);
+    expect(SPLASH_MOTION.homeFadeMs).toBeLessThanOrEqual(SPLASH_MOTION.handoffMs);
+    expect(SPLASH_MOTION.homeRisePx).toBeLessThanOrEqual(8);
     expect(SPLASH_MOTION.capMs).toBe(7000);
     expect(read('src/components/start/StartupLoading.tsx')).toContain('SPLASH_MOTION.logoWidth');
   });
@@ -471,9 +484,9 @@ describe('the native launch matches the splash', () => {
     expect(html).toContain('--luma-screen-h, 100lvh');
   });
 
-  it('the service worker is v362 and the build stamp names it', () => {
-    expect(read('../static/sw.js')).toContain("const CACHE_VERSION = 'media-kiosk-v362';");
-    expect(JSON.parse(read('../static/sw-stamp.json')).cache_version).toBe('media-kiosk-v362');
+  it('the service worker is v363 and the build stamp names it', () => {
+    expect(read('../static/sw.js')).toContain("const CACHE_VERSION = 'media-kiosk-v363';");
+    expect(JSON.parse(read('../static/sw-stamp.json')).cache_version).toBe('media-kiosk-v363');
   });
 });
 
