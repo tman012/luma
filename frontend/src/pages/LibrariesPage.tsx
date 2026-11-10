@@ -22,8 +22,6 @@ import { useKioskWidth } from '@/components/home/KioskHome';
 import { CheckIcon, ChevronIcon, ChevronLeftIcon, GripIcon, XIcon } from '@/components/nav/AppNav';
 import { UserMenu } from '@/components/nav/UserMenu';
 import { HomeLogo } from '@/components/home/HomeLogo';
-import { DOCK, DesktopDockRouted } from '@/components/home/DesktopDock';
-import { openSearch } from '@/components/search/MinimalSearchHost';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { usePlexOwner } from '@/components/home/PlexSettings';
 import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
@@ -132,10 +130,9 @@ export function SettingsPage() {
       <div style={settingsPage} data-step="settings" data-layout="desktop">
         <GlowLayer />
         <style>{css}</style>
-        <DesktopDockRouted onSearch={openSearch} />
         <header style={deskHeader}>
           {calendar ? (
-            // v319: Home's logo goes Home. The page title sits under the header so it clears the top dock.
+            // v319: Home's logo goes Home. The page title sits under the header. v358: no Settings route draws the top nav bar.
             <Link to="/" aria-label="Home" data-testid="tv-home-link" style={{ display: 'inline-flex', borderRadius: 12 }} className="luma-focus">
               <HomeLogo data-testid="tv-logo" />
             </Link>
@@ -422,12 +419,9 @@ const tvTitle: React.CSSProperties = {
   margin: '16px 0 0', textAlign: 'center', fontFamily: FONT, fontSize: 24, fontWeight: 600,
   color: 'rgba(255,255,255,0.95)', lineHeight: '32px',
 };
-/** Logo row is 20+64. The dock ends 10px lower; the shadow covers that strip so scrolled text does not pass under it. */
-const DOCK_OVERHANG = Math.max(0, DOCK.top + DOCK.h - (20 + 64));
 const deskHeader: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `20px 60px 0 ${LOGO_LEFT}px`,
   position: 'sticky', top: 0, zIndex: 40, background: NAVY_BASE,
-  boxShadow: DOCK_OVERHANG ? `0 ${DOCK_OVERHANG}px 0 ${NAVY_BASE}` : undefined,
 };
 const deskPage: React.CSSProperties = {
   display: 'flex', gap: NAV_GAP, padding: `${HEADING_GAP}px 60px 32px ${LOGO_LEFT}px`, boxSizing: 'border-box',

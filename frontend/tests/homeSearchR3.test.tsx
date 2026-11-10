@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const modals = { openMovie: vi.fn(), openTv: vi.fn(), close: vi.fn() };
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => modals }));
 
-import { HomeSearchR3, buildR3, r3Css, R3_BAND } from '@/components/search/HomeSearchR3';
+import { HomeSearchR3, buildR3, modalTabStops, r3Css, R3_MODAL_OPEN, R3_MODAL_REST, R3_MODAL_W } from '@/components/search/HomeSearchR3';
 import { HomeSearchPalette } from '@/components/search/HomeSearchPalette';
 import { openSearch } from '@/components/search/MinimalSearchHost';
 import { _resetSheetPriority } from '@/loading/sheetPriority';
@@ -54,45 +54,48 @@ const type = async (q: string) => {
 };
 
 describe('R3 layout (1440 and 1024)', () => {
-  it('rest (v235): only the field, centered in the top bar; no heading, no band, no results', () => {
+  it('rest (v235, v358): the field is in the closed search modal; no heading, no band, no results', () => {
     render(<HomeSearchR3 />);
     expect(screen.queryByRole('heading', { name: 'Search' })).toBeNull();
     expect((screen.getByTestId('search-input') as HTMLInputElement).placeholder).toBe('Search movies and shows');   // v241 (H2)
     expect(screen.queryByTestId('r3-results')).toBeNull();
     expect(screen.queryByTestId('r3-cover')).toBeNull();      // the full Home hero shows at rest
     expect(screen.queryByTestId('r3-rest')).toBeNull();
-    expect(r3Css).toContain('.r3-head{position:fixed;z-index:55;top:102px;left:50%;transform:translateX(-50%)');   // under the dock
+    expect(screen.getByTestId('r3-modal').dataset.open).toBe('false');
+    expect(screen.getByTestId('search-modal').contains(screen.getByTestId('search-input'))).toBe(true);
   });
-  it('typing shows the band and the results; clearing goes back to rest', async () => {
+  it('typing shows the results inside the modal (no hero band); clearing goes back to rest', async () => {
     render(<HomeSearchR3 />);
     await type('dune');
-    expect(screen.getByTestId('r3-cover')).toBeTruthy();
-    expect(screen.getByTestId('r3-results')).toBeTruthy();
+    expect(screen.queryByTestId('r3-cover')).toBeNull();      // v358: the modal's backdrop, not a band over the hero
+    expect(screen.getByTestId('search-modal').contains(screen.getByTestId('r3-results'))).toBe(true);
+    expect(screen.getByTestId('search-modal').dataset.searching).toBe('true');
     await type('');
-    expect(screen.queryByTestId('r3-cover')).toBeNull();
     expect(screen.queryByTestId('r3-results')).toBeNull();
+    expect(screen.getByTestId('search-modal').dataset.searching).toBe('false');
   });
-  it('sizes: field 480x48 (H2); top card 420/300px; posters 136/112px; band 200px', () => {
+  it('sizes: field 48px tall (H2), as wide as the modal; top card 420/300px; posters 136/112px; modal 1040px wide', () => {
     const at = (expr: string, vw: number) => {   // evaluate the clamp(min, Nvw, max) at a viewport width
       const m = /clamp\((\d+)px, ([\d.]+)vw, (\d+)px\)/.exec(expr)!;
       return Math.min(Number(m[3]), Math.max(Number(m[1]), (Number(m[2]) * vw) / 100));
     };
     const v = (name: string) => new RegExp(`${name}:(clamp\\([^)]*\\))`).exec(r3Css)![1]!;
-    // v241 (H2): a fixed 480x48 pill, radius 24, rgba(51,53,58,.85), no border
+    // v241 (H2): a 48px pill, radius 24, rgba(51,53,58,.85), no border; v358: it fills the modal's field row
     expect(r3Css).toContain('.r3-field{display:flex;align-items:center;gap:12px;width:480px;height:48px;box-sizing:border-box;padding:0 20px;border-radius:24px;');
+    expect(r3Css).toContain('.r3-panel .r3-field{flex:1;width:auto;min-width:0}');
     expect(r3Css).toContain('background:rgba(51,53,58,.85);border:0;color:#c4c6d0');
     expect(r3Css).toContain('.r3-input::placeholder{color:#c4c6d0;opacity:1}');
     expect([at(v('--r3-top'), 1440), at(v('--r3-top'), 1024)]).toEqual([417.6, 300]);
     expect([at(v('--r3-po'), 1440), at(v('--r3-po'), 1024)]).toEqual([136, 112]);
     expect([at(v('--r3-pad'), 1440), at(v('--r3-pad'), 1024)]).toEqual([48, 34.816]);
-    expect(R3_BAND).toBe(200);
-    expect(r3Css).toContain(`.r3-body{position:fixed;z-index:45;top:${R3_BAND}px`);
+    expect([R3_MODAL_W, R3_MODAL_REST, R3_MODAL_OPEN]).toEqual([1040, 88, 760]);
+    expect(r3Css).toContain('.r3-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;');
   });
-  it('searching (v246 D3): the hero shrinks to a band; chips over one grid of titles, then people; no top card, no Find more', async () => {
+  it('searching (v246 D3): chips over one grid of titles, then people; no top card, no Find more', async () => {
     render(<HomeSearchR3 />);
     await type('dune');
     expect(screen.getByTestId('r3-search').dataset.searching).toBe('true');
-    expect(screen.getByTestId('r3-cover')).toBeTruthy();
+    expect(screen.getByTestId('r3-modal').dataset.open).toBe('true');
     expect(screen.queryByTestId('r3-top')).toBeNull();
     expect(screen.queryByTestId('find-more')).toBeNull();
     const cards = screen.getAllByTestId('r3-card');
@@ -109,6 +112,7 @@ describe('R3 layout (1440 and 1024)', () => {
     expect(resultIds({ media_type: 'movie', id: 438631, title: 'Dune' } as never)).toEqual(expect.objectContaining({ ratingKey: undefined, tmdbId: 438631 }));
     fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Escape' });
     expect(screen.queryByTestId('r3-results')).toBeNull();
+    expect(screen.getByTestId('r3-modal').dataset.open).toBe('false');   // v358: one Escape closes the modal
   });
 });
 
@@ -123,10 +127,11 @@ describe('R3: no key badges, no helper text', () => {
     act(() => openSearch());
     expect(screen.getByTestId('search-palette').textContent).not.toContain('Esc');
   });
-  it('the C2 palette stands down on the kiosk Home; open-search focuses the R3 field', async () => {
+  it('the C2 palette stands down on the kiosk Home; open-search opens the R3 modal and focuses its field', async () => {
     render(<><HomeSearchR3 /><HomeSearchPalette /></>);
     act(() => openSearch());
     expect(screen.queryByTestId('search-palette')).toBeNull();
+    expect(screen.getByTestId('r3-modal').dataset.open).toBe('true');
     expect(document.activeElement).toBe(screen.getByTestId('search-input'));
   });
 });
@@ -284,79 +289,222 @@ describe('v228 R3 rest: Recently added under the band', () => {
   });
 });
 
-describe('desktop dock replaces the chevron menu', () => {
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.pushState({}, '', '/'); });
-  const bar = () => (screen.getByTestId('a1-bar').dataset.open === 'true' ? screen.getByTestId('a1-bar') : null);
-  const head = () => { const h = screen.getByTestId('r3-head'); return { hidden: h.dataset.open !== 'true' || h.hasAttribute('inert') }; };
-  const openSearch = () => fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-  it('at rest the dock is visible and the search field is hidden', () => {
+describe('v358 nav bar on Home: Search opens the search modal, nothing drops down', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.pushState({}, '', '/'); document.documentElement.style.overflow = ''; document.body.style.overflow = ''; });
+  const modal = () => screen.getByTestId('r3-modal');
+  const isOpen = () => modal().dataset.open === 'true';
+  const searchBtn = () => screen.getByRole('button', { name: 'Search' });
+  const openSearch = () => fireEvent.click(searchBtn());
+  const tab = (shift = false) => fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Tab', shiftKey: shift });
+
+  it('at rest the bar is visible and the modal is closed, inert and out of the accessibility tree', () => {
     render(<HomeSearchR3 />);
-    expect(bar()).toBeNull();
-    expect(head().hidden).toBe(true);
-    expect(screen.queryByTestId('a1-chevron')).toBeNull();
     expect(screen.getByTestId('desktop-dock')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Search' }).getAttribute('aria-expanded')).toBe('false');
+    expect(isOpen()).toBe(false);
+    expect(modal().hasAttribute('inert')).toBe(true);
+    expect(modal().getAttribute('aria-hidden')).toBe('true');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByTestId('a1-chevron')).toBeNull();
+    expect(screen.queryByTestId('a1-bar')).toBeNull();          // the bar that dropped under the dock is gone
+    expect(searchBtn().hasAttribute('aria-expanded')).toBe(false);
+    expect(searchBtn().getAttribute('aria-haspopup')).toBe('dialog');
+    expect(r3Css).not.toMatch(/a1-bar|r3-cover/);
+    expect(r3Css).toContain('.r3-modal[data-open="false"]{opacity:0;visibility:hidden;pointer-events:none}');
   });
-  it('Search opens the existing field and focuses it; it does not toggle closed', () => {
+
+  it('Search opens a centered dialog over the page (role=dialog, aria-modal, named Search) and focuses the field', () => {
     render(<HomeSearchR3 />);
     openSearch();
-    expect(bar()).toBeTruthy();
-    expect(head().hidden).toBe(false);
-    expect(screen.getByRole('button', { name: 'Search' }).getAttribute('aria-expanded')).toBe('true');
+    expect(isOpen()).toBe(true);
+    expect(modal().hasAttribute('inert')).toBe(false);
+    expect(modal().hasAttribute('aria-hidden')).toBe(false);
+    const dialog = screen.getByRole('dialog', { name: 'Search' });
+    expect(dialog).toBe(screen.getByTestId('search-modal'));
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.contains(screen.getByTestId('search-input'))).toBe(true);
     expect(document.activeElement).toBe(screen.getByTestId('search-input'));
-    expect(r3Css).toContain('.a1-bar{position:fixed;z-index:49;top:0;left:0;right:0;height:152px;background:rgba(17,19,24,.55);backdrop-filter:blur(24px)');
-    openSearch();
-    expect(bar()).toBeTruthy();
+    expect(searchBtn().dataset.current).toBe('true');          // the pill is on Search while its modal is open
+    // centered over the whole page, above the bar (z 56) and under the person view and the sheets
+    expect(r3Css).toContain('.r3-modal{position:fixed;inset:0;z-index:58;display:flex;align-items:center;justify-content:center;padding:48px;');
+    expect(r3Css).toContain('.r3-backdrop{position:absolute;inset:0;background:rgba(21,16,42,.72);');
+    expect(r3Css).toContain(`.r3-panel{position:relative;width:min(${R3_MODAL_W}px, 100%);height:${R3_MODAL_REST}px;max-height:100%;`);
+    expect(r3Css).toContain(`.r3-panel[data-searching="true"]{height:min(${R3_MODAL_OPEN}px, 100%)}`);
+    expect(r3Css).toContain('@media (prefers-reduced-motion: reduce){[data-r3-search]{--a1-dur:0ms}}');
+    openSearch();                                               // it does not toggle closed
+    expect(isOpen()).toBe(true);
     expect(document.activeElement).toBe(screen.getByTestId('search-input'));
   });
-  it('Esc closes it', () => {
+
+  it('Escape closes it and focus returns to the Search button', () => {
     render(<HomeSearchR3 />);
+    openSearch();
+    expect(document.activeElement).toBe(screen.getByTestId('search-input'));
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(isOpen()).toBe(false);
+    expect(document.activeElement).toBe(searchBtn());
+    expect(searchBtn().dataset.current).toBeUndefined();
+  });
+
+  it('Escape with a query typed closes it in one press, clears the query, and returns focus', async () => {
+    render(<HomeSearchR3 />);
+    openSearch();
+    await type('dune');
+    expect(screen.getByTestId('r3-results')).toBeTruthy();
+    fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Escape' });
+    expect(isOpen()).toBe(false);
+    expect(screen.queryByTestId('r3-results')).toBeNull();
+    expect((screen.getByTestId('search-input') as HTMLInputElement).value).toBe('');
+    expect(document.activeElement).toBe(searchBtn());
+  });
+
+  it('a backdrop click closes it and returns focus; clicks inside the dialog do not close it', () => {
+    render(<HomeSearchR3 />);
+    openSearch();
+    const click = (el: Element) => { fireEvent.mouseDown(el); fireEvent.mouseUp(el); fireEvent.click(el); };
+    click(screen.getByTestId('search-input'));
+    click(screen.getByTestId('search-modal'));
+    click(screen.getByTestId('r3-head'));
+    expect(isOpen()).toBe(true);
+    // a drag that starts in the field and ends on the backdrop is not a backdrop click
+    fireEvent.mouseDown(screen.getByTestId('search-input'));
+    fireEvent.click(screen.getByTestId('search-backdrop'));
+    expect(isOpen()).toBe(true);
+    click(screen.getByTestId('search-backdrop'));
+    expect(isOpen()).toBe(false);
+    expect(document.activeElement).toBe(searchBtn());
+  });
+
+  it('the Close button closes it and returns focus', () => {
+    render(<HomeSearchR3 />);
+    openSearch();
+    const close = screen.getByRole('button', { name: 'Close' });
+    expect(close.textContent).toBe('');
+    fireEvent.click(close);
+    expect(isOpen()).toBe(false);
+    expect(document.activeElement).toBe(searchBtn());
+  });
+
+  it('focus trap: Tab and Shift+Tab cycle inside the dialog and never reach the page behind it', async () => {
+    render(<><button data-testid="behind">behind</button><HomeSearchR3 /></>);
+    openSearch();
+    const input = screen.getByTestId('search-input');
+    const close = screen.getByTestId('search-close');
+    expect(modalTabStops(screen.getByTestId('search-modal'))).toEqual([input, close]);
+    close.focus();
+    tab();
+    expect(document.activeElement).toBe(input);                 // last wraps to first
+    tab(true);
+    expect(document.activeElement).toBe(close);                 // first wraps to last
+    screen.getByTestId('behind').focus();                       // focus that escaped comes back on the next Tab
+    tab();
+    expect(document.activeElement).toBe(input);
+    screen.getByTestId('behind').focus();
+    tab(true);
+    expect(document.activeElement).toBe(close);
+    await type('dune');                                         // with results: field, close, chips, cards, add buttons, people
+    const stops = modalTabStops(screen.getByTestId('search-modal'));
+    expect(stops[0]).toBe(input);
+    expect(stops.length).toBeGreaterThan(8);
+    expect(stops.every(el => screen.getByTestId('search-modal').contains(el))).toBe(true);
+    stops[stops.length - 1]!.focus();
+    tab();
+    expect(document.activeElement).toBe(input);
+    input.focus();
+    tab(true);
+    expect(document.activeElement).toBe(stops[stops.length - 1]);
+    expect(screen.getByTestId('search-modal').contains(screen.getByTestId('behind'))).toBe(false);
+  });
+
+  it('body scroll is locked while the modal is open and restored when it closes', () => {
+    document.documentElement.style.overflow = 'auto';           // a page that scrolls (useBodyScroll)
+    document.body.style.overflow = 'auto';
+    render(<HomeSearchR3 />);
+    expect([document.documentElement.style.overflow, document.body.style.overflow]).toEqual(['auto', 'auto']);
+    openSearch();
+    expect([document.documentElement.style.overflow, document.body.style.overflow]).toEqual(['hidden', 'hidden']);
+    document.documentElement.style.overflow = 'auto';           // useBodyScroll re-asserts on visibilitychange; the lock answers
+    fireEvent(document, new Event('visibilitychange'));
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect([document.documentElement.style.overflow, document.body.style.overflow]).toEqual(['auto', 'auto']);
+  });
+
+  it('v326: Esc and Tab with a sheet open over the search are the sheet\'s; the search stays', () => {
+    render(<><div data-modal="MovieDetailModal"><button data-testid="in-sheet">x</button></div><HomeSearchR3 /></>);
     openSearch();
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(bar()).toBeNull();
+    expect(isOpen()).toBe(true);
+    screen.getByTestId('in-sheet').focus();
+    tab();
+    expect(document.activeElement).toBe(screen.getByTestId('in-sheet'));
   });
-  it('v326: Esc with a sheet open over R3 is the sheet\'s; R3 stays', () => {
-    render(<><div data-modal="MovieDetailModal" /><HomeSearchR3 /></>);
+
+  it('search-to-sheet is unchanged: a result opens its sheet over the modal, which stays open with its results', async () => {
+    render(<HomeSearchR3 />);
     openSearch();
+    await type('dune');
+    const cards = screen.getAllByTestId('r3-card');
+    fireEvent.click(cards[0]!);
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 1, tmdbId: 438631, origin: 'search' }));
+    fireEvent.click(cards[2]!);
+    await waitFor(() => expect(modals.openTv).toHaveBeenCalledWith({ ratingKey: 2, tmdbId: 90228, origin: 'search' }));
+    expect(isOpen()).toBe(true);
+    expect(screen.getAllByTestId('r3-card')).toHaveLength(cards.length);
+    // Enter in the field opens the first result, as before
+    modals.openMovie.mockReset();
+    fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Enter' });
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 1, tmdbId: 438631, origin: 'search' }));
+  });
+
+  it('a person opens the person view (search-query) and the modal closes under it', async () => {
+    const seen: unknown[] = [];
+    const on = (e: Event) => { seen.push((e as CustomEvent).detail); };
+    window.addEventListener('search-query', on);
+    render(<HomeSearchR3 />);
+    openSearch();
+    await type('dune');
+    fireEvent.click(screen.getByTestId('r3-person'));
+    expect(seen).toEqual([{ query: 'Denis Villeneuve', tab: 'people', personId: 137427 }]);
+    expect(isOpen()).toBe(false);
+    window.removeEventListener('search-query', on);
+  });
+
+  it('Escape with the watchlist profile sheet open closes that sheet first, then the modal', async () => {
+    render(<HomeSearchR3 />);
+    openSearch();
+    await type('dune');
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(screen.getAllByTestId('r3-wl-add')[0]!);
+    expect(await screen.findByTestId('watchlist-add-sheet')).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(bar()).not.toBeNull();
+    expect(screen.queryByTestId('watchlist-add-sheet')).toBeNull();
+    expect(isOpen()).toBe(true);
+    expect(screen.getByTestId('r3-results')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(isOpen()).toBe(false);
   });
-  it('a click outside closes it; clicks on the dock and in the field do not', () => {
-    render(<><p data-testid="outside">hero</p><HomeSearchR3 /></>);
-    openSearch();
-    fireEvent.pointerDown(screen.getByTestId('search-input'));
-    fireEvent.pointerDown(screen.getByRole('link', { name: 'Libraries' }));
-    fireEvent.pointerDown(screen.getByTestId('a1-bar'));
-    expect(bar()).toBeTruthy();
-    fireEvent.pointerDown(screen.getByTestId('outside'));
-    expect(bar()).toBeNull();
+
+  it('on the minimal build the bar has Search, Libraries and Calendar; no dead Explore or Watchlist button', () => {
+    render(<HomeSearchR3 />);
+    expect([...screen.getByTestId('desktop-dock').querySelectorAll('button, a')].map(el => el.textContent)).toEqual(['Search', 'Libraries', 'Calendar']);
   });
-  it('on the test install Libraries, Explore and Watchlist do nothing (no such pages)', () => {
+  it.each([['Calendar', '/settings/tv', ''], ['Libraries', '/settings/tv', '?view=series']])('on the minimal build %s goes to %s%s and closes the modal', (name, path, search) => {
     render(<HomeSearchR3 />);
     openSearch();
-    const before = window.location.pathname;
-    for (const name of ['Libraries', 'Explore', 'Watchlist']) {
-      fireEvent.click(screen.getByRole('link', { name }));
-      expect(window.location.pathname).toBe(before);
-      expect(bar()).toBeTruthy();
-    }
+    fireEvent.click(screen.getByRole('link', { name }));
+    expect([window.location.pathname, window.location.search]).toEqual([path, search]);
+    expect(isOpen()).toBe(false);
   });
-  it('on the test install Calendar goes to /settings/tv and closes the field', () => {
-    render(<HomeSearchR3 />);
-    openSearch();
-    fireEvent.click(screen.getByRole('link', { name: 'Calendar' }));
-    expect(window.location.pathname).toBe('/settings/tv');
-    expect(bar()).toBeNull();
-  });
-  it('outside the test install the links go to /browse, /explore, /settings/tv and /watchlist', () => {
+  it('outside the minimal build the links go to /browse, /explore, /watchlist and /settings/tv', () => {
     delete window.__LUMA_MINIMAL__;
     render(<HomeSearchR3 />);
     const seen: string[] = [];
-    for (const name of ['Libraries', 'Explore', 'Calendar', 'Watchlist']) {
+    for (const name of ['Libraries', 'Explore', 'Watchlist', 'Calendar']) {
       fireEvent.click(screen.getByRole('link', { name }));
       seen.push(window.location.pathname);
     }
-    expect(seen).toEqual(['/browse', '/explore', '/settings/tv', '/watchlist']);
+    expect(seen).toEqual(['/browse', '/explore', '/watchlist', '/settings/tv']);
+    expect(screen.queryByTestId('desktop-dock')).toBeNull();    // on /settings/tv the bar is not drawn
   });
 });
 
@@ -393,25 +541,25 @@ describe('v244: uniform 2:3 tiles, no overlap, 2-line titles, a placeholder for 
   });
 });
 
-describe('v245: one seamless reveal', () => {
+describe('v245/v358: one reveal for the search modal', () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
-  it('the glass bar and the controls share one transition (same properties, duration and easing), no delay on open', () => {
-    expect(r3Css).toContain('[data-r3-search]{--a1-dur:240ms;--a1-ease:cubic-bezier(.2,0,0,1)}');
-    expect(r3Css).toContain('.a1-bar,.r3-head{transition:transform var(--a1-dur) var(--a1-ease),opacity var(--a1-dur) var(--a1-ease),visibility 0s linear var(--a1-dur)}');
-    expect(r3Css).toContain('.a1-bar[data-open="true"],.r3-head[data-open="true"]{opacity:1;visibility:visible;transition-delay:0s}');
-    expect((r3Css.match(/--a1-dur\)/g) || []).length).toBe(3);   // the one shared rule: transform, opacity, visibility delay
-    expect(r3Css).not.toMatch(/\.a1-bar\{[^}]*(transition|animation)/);
+  it('the modal fades on one duration and easing, with no delay on open; reduced motion makes it instant', () => {
+    expect(r3Css).toContain('[data-r3-search]{--a1-dur:200ms;--a1-ease:cubic-bezier(.2,0,0,1)}');
+    expect(r3Css).toContain('transition:opacity var(--a1-dur) var(--a1-ease),visibility 0s linear var(--a1-dur)}');
+    expect(r3Css).toContain('.r3-modal[data-open="true"]{opacity:1;visibility:visible;transition-delay:0s}');
+    expect(r3Css).toContain('transition:height var(--a1-dur) var(--a1-ease),transform var(--a1-dur) var(--a1-ease)}');
+    expect(r3Css).toContain('@media (prefers-reduced-motion: reduce){[data-r3-search]{--a1-dur:0ms}}');
   });
-  it('both are always mounted and flip state in the same render (open and close)', () => {
+  it('the modal and its field are always mounted and flip state in the same render (open and close)', () => {
     render(<HomeSearchR3 />);
-    const b = screen.getByTestId('a1-bar'); const h = screen.getByTestId('r3-head');
-    expect([b.dataset.open, h.dataset.open]).toEqual(['false', 'false']);
+    const m = screen.getByTestId('r3-modal'); const h = screen.getByTestId('r3-head'); const input = screen.getByTestId('search-input');
+    expect(m.dataset.open).toBe('false');
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-    expect([b.dataset.open, h.dataset.open]).toEqual(['true', 'true']);
-    expect(screen.getByTestId('a1-bar')).toBe(b);
+    expect(m.dataset.open).toBe('true');
+    expect([screen.getByTestId('r3-modal'), screen.getByTestId('r3-head'), screen.getByTestId('search-input')]).toEqual([m, h, input]);
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect([b.dataset.open, h.dataset.open]).toEqual(['false', 'false']);
-    expect(h.hasAttribute('inert')).toBe(true);
+    expect(m.dataset.open).toBe('false');
+    expect(m.hasAttribute('inert')).toBe(true);
   });
   it('a reused card with a new poster URL shows the new image (the broken state belongs to the old URL)', async () => {
     tm = { ...TM, movies: [{ id: 841, title: 'Dune', release_date: '1984-12-14', poster_path: '/broken.jpg' }] };

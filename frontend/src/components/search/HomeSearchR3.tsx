@@ -1,15 +1,18 @@
 /**
- * v227 R3 (Taylor's pick): desktop and tablet Home search (>= 1024px, the kiosk Home). A "Search" title and
- * field sit at the top of the page (not mid-hero). While searching, the hero shrinks to a short band and the
- * results show a large top-result card beside a mixed grid (movies and TV in your library), then People, then
- * "Find more for “q”", which opens the TMDb titles from the existing TMDb search path (performSearch's
- * /search?type=all; word-match filtered as C2). No key badges, no helper text. Phones keep their overlay.
+ * v227 R3 (Taylor's pick): desktop and tablet Home search (>= 1024px, the kiosk Home), with the top nav bar
+ * (DesktopDock). v358: the bar's Search button (and '/', `open-search`) opens a centered search modal over the
+ * page; nothing drops down under the bar. The modal holds the same field and the same results: filter chips over
+ * one grid of titles (your library first, then the TMDb titles from the existing TMDb search path, performSearch's
+ * /search?type=all; word-match filtered as C2), then people. A result opens its sheet over the modal. Focus is
+ * kept inside the modal, Escape or a backdrop click closes it, and focus goes back to the Search button.
+ * No key badges, no helper text. Phones keep their overlay.
  * Same data rules as the C2 palette: performSearch, 300 ms debounce, 2-character minimum, abort on retype.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { FONT } from '@/components/start/StartUI';
 import { DesktopDock } from '@/components/home/DesktopDock';
+import { CLOSE_SYMBOL, SYMBOL_VIEWBOX } from '@/assets/desktop-nav/symbols';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import {
   openResult, resultIds, warmResult, warmResults, resultWarmKey,
@@ -146,33 +149,72 @@ export function HomeSearchR3() {
     setQuery(''); setRes(null); setPhase('idle'); setExpanded(false); lastQ.current = '';
   }, []);
 
-  // '/' and the header's open-search focus the field (the C2 palette stands down while this is mounted)
+  const searching = query.trim().length >= MIN_QUERY;
+  // The modal is closed until Search opens it (or while a query is typed).
+  const [modal, setModal] = useState(false);
+  const shown = modal || searching;
+  const panelRef = useRef<HTMLDivElement>(null);
+  const searchBtnRef = useRef<HTMLButtonElement>(null);
+  const openModal = useCallback(() => { flushSync(() => setModal(true)); inputRef.current?.focus(); }, []);
+  // Closing hands focus back to the Search button, unless the page is changing or another surface takes over.
+  const closeModal = useCallback((refocus = true) => {
+    setModal(false); clear();
+    if (refocus) searchBtnRef.current?.focus(); else inputRef.current?.blur();
+  }, [clear]);
+
+  // '/' and the header's open-search open the modal (the C2 palette stands down while this is mounted)
   useEffect(() => {
-    const onOpen = () => { flushSync(() => setBar(true)); inputRef.current?.focus(); };
-    window.addEventListener('open-search', onOpen);
-    return () => window.removeEventListener('open-search', onOpen);
-  }, []);
+    window.addEventListener('open-search', openModal);
+    return () => window.removeEventListener('open-search', openModal);
+  }, [openModal]);
   useEffect(() => () => { abortRef.current?.abort(); if (debRef.current) clearTimeout(debRef.current); }, []);
 
-  const searching = query.trim().length >= MIN_QUERY;
-  // v243 A1: the top bar is hidden behind a chevron until opened (or while a query is typed).
-  const [bar, setBar] = useState(false);
-  const shown = bar || searching;
-  const closeBar = useCallback(() => { setBar(false); clear(); inputRef.current?.blur(); }, [clear]);
+  // The add sheets (watchlist profile, TV path) sit over the modal and take Escape first.
+  const overSheet = useRef(false);
+  overSheet.current = !!(wlAdd || tvAdd);
   useEffect(() => {
     if (!shown) return;
-    // A sheet/modal open over R3 owns Escape: only it closes, R3 stays (Tester, v326).
-    const onKeyDoc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[data-modal]')) closeBar(); };
-    const onDown = (e: PointerEvent | MouseEvent) => {
-      const t = e.target as Element | null;
-      if (!t || !t.closest) return;
-      if (t.closest('.a1-bar, .r3-head, [data-desktop-dock], .r3-body, .r3-tvadd, [role="dialog"], [data-testid="user-menu"]')) return;
-      closeBar();
+    const onKeyDoc = (e: KeyboardEvent) => {
+      // A sheet/modal open over R3 owns the keyboard: only it closes, R3 stays (Tester, v326).
+      if (e.defaultPrevented || document.querySelector('[data-modal]')) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (overSheet.current) { setWlAdd(null); setTvAdd(null); } else closeModal();
+        return;
+      }
+      if (e.key !== 'Tab' || overSheet.current) return;
+      // Focus trap: Tab and Shift+Tab stay inside the dialog.
+      const panel = panelRef.current;
+      if (!panel) return;
+      const stops = modalTabStops(panel);
+      const first = stops[0], last = stops[stops.length - 1];
+      const active = document.activeElement;
+      if (!first || !last) { e.preventDefault(); return; }
+      if (!panel.contains(active)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+      else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', onKeyDoc);
-    document.addEventListener('pointerdown', onDown);
-    return () => { document.removeEventListener('keydown', onKeyDoc); document.removeEventListener('pointerdown', onDown); };
-  }, [shown, closeBar]);
+    return () => document.removeEventListener('keydown', onKeyDoc);
+  }, [shown, closeModal]);
+  // Body scroll lock while the modal is open (re-asserted when the tab comes back, as useBodyScroll does).
+  useEffect(() => {
+    if (!shown) return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    const lock = () => { html.style.overflow = 'hidden'; body.style.overflow = 'hidden'; };
+    lock();
+    const onVis = () => { if (document.visibilityState === 'visible') lock(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, [shown]);
+  const downOnBackdrop = useRef(false);
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('home-search', { detail: { searching } }));
   }, [searching]);
@@ -189,12 +231,14 @@ export function HomeSearchR3() {
     if (!res) return;
     return warmResults([...res.owned, ...res.unowned]);
   }, [res]);
-  const openPerson = (p: SearchPerson) =>
+  // The person view is its own full-screen surface (KioskSearch): the modal closes as it opens, as the C2 palette does.
+  const openPerson = (p: SearchPerson) => {
+    closeModal(false);
     window.dispatchEvent(new CustomEvent('search-query', { detail: { query: p.name, tab: 'people', personId: p.id } }));
+  };
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') { e.preventDefault(); if (query) clear(); else inputRef.current?.blur(); }
-    else if (e.key === 'Enter' && phase === 'done' && view.top) { e.preventDefault(); open(view.top); }
+    if (e.key === 'Enter' && phase === 'done' && view.top) { e.preventDefault(); open(view.top); }
   };
 
   const q = lastQ.current;
@@ -202,8 +246,6 @@ export function HomeSearchR3() {
   return (
     <div data-r3-search data-testid="r3-search" data-searching={searching ? 'true' : 'false'} style={{ fontFamily: FONT }}>
       <style>{r3Css}</style>
-      {/* v235 (PM): at rest Home shows its full hero and rails; the band covers them only while searching */}
-      {searching && <div className="r3-cover" data-testid="r3-cover" aria-hidden="true" />}
       {wlAdd && wlId(wlAdd) && (
         <WatchlistAddSheet tmdbId={wlId(wlAdd)!} title={getTitle(wlAdd)} year={getYear(wlAdd) || null} onClose={() => setWlAdd(null)}
           onAdded={() => { const id = wlId(wlAdd)!; setWlIds(p => new Set([...(p ?? []), id])); setWlAdd(null); }} />
@@ -216,44 +258,60 @@ export function HomeSearchR3() {
           </div>
         </div>
       )}
-      <div className="a1-bar" data-testid="a1-bar" data-open={shown ? 'true' : 'false'} aria-hidden="true" />
-      <DesktopDock searchExpanded={shown} onBeforeNavigate={closeBar}
-        onSearch={() => { flushSync(() => setBar(true)); inputRef.current?.focus(); }} />
-      <div className="r3-head" data-testid="r3-head" data-open={shown ? 'true' : 'false'} inert={!shown}>
-        <label className="r3-field" data-focus-ring>
-          <span className="r3-icon"><H2SearchIcon /></span>
-          <input ref={inputRef} className="r3-input" data-testid="search-input" type="search" placeholder="Search movies and shows" aria-label="Search"
-            value={query} autoComplete="off" spellCheck={false} onKeyDown={onKey}
-            onChange={e => {
-              const v = e.target.value; setQuery(v);
-              if (debRef.current) clearTimeout(debRef.current);
-              debRef.current = setTimeout(() => void run(v.trim()), DEBOUNCE_MS);
-            }} />
-        </label>
-      </div>
-      {searching && (
-        <div className="r3-body" data-testid="r3-results" data-state={phase === 'loading' ? (skeleton ? 'loading' : 'pending') : nothing ? 'empty' : phase}>
-          {phase === 'loading' && skeleton && (
-            <div className="r3-main" data-testid="search-reserved" aria-hidden="true">
-              <div className="r3-top r3-sk" style={{ height: 'calc(var(--r3-top) * 0.56 + 150px)' }} />
-              <div className="r3-grid">{[0, 1, 2, 3, 4].map(i => <div key={i} className="r3-po r3-sk" />)}</div>
+      <DesktopDock searchOpen={shown} searchRef={searchBtnRef} onBeforeNavigate={() => closeModal(false)} onSearch={openModal} />
+      {/* Always mounted (the field keeps its state); closed it is inert and out of the accessibility tree. */}
+      <div className="r3-modal" data-testid="r3-modal" data-open={shown ? 'true' : 'false'} inert={!shown} aria-hidden={shown ? undefined : true}>
+        <div className="r3-backdrop" data-testid="search-backdrop"
+          onMouseDown={() => { downOnBackdrop.current = true; }}
+          onClick={() => { if (downOnBackdrop.current) closeModal(); downOnBackdrop.current = false; }} />
+        <div ref={panelRef} className="r3-panel" role="dialog" aria-modal="true" aria-label="Search" data-testid="search-modal"
+          data-searching={searching ? 'true' : 'false'} onMouseDown={() => { downOnBackdrop.current = false; }}>
+          <div className="r3-head" data-testid="r3-head">
+            <label className="r3-field" data-focus-ring>
+              <span className="r3-icon"><H2SearchIcon /></span>
+              <input ref={inputRef} className="r3-input" data-testid="search-input" type="search" placeholder="Search movies and shows" aria-label="Search"
+                value={query} autoComplete="off" spellCheck={false} onKeyDown={onKey}
+                onChange={e => {
+                  const v = e.target.value; setQuery(v);
+                  if (debRef.current) clearTimeout(debRef.current);
+                  debRef.current = setTimeout(() => void run(v.trim()), DEBOUNCE_MS);
+                }} />
+            </label>
+            <button type="button" className="r3-close" data-testid="search-close" aria-label="Close" onClick={() => closeModal()}>
+              <svg width={22} height={22} viewBox={SYMBOL_VIEWBOX} fill="currentColor" aria-hidden="true" focusable="false"><path d={CLOSE_SYMBOL} /></svg>
+            </button>
+          </div>
+          {searching && (
+            <div className="r3-body" data-testid="r3-results" data-state={phase === 'loading' ? (skeleton ? 'loading' : 'pending') : nothing ? 'empty' : phase}>
+              {phase === 'loading' && skeleton && (
+                <div className="r3-main" data-testid="search-reserved" aria-hidden="true">
+                  <div className="r3-top r3-sk" style={{ height: 'calc(var(--r3-top) * 0.56 + 150px)' }} />
+                  <div className="r3-grid">{[0, 1, 2, 3, 4].map(i => <div key={i} className="r3-po r3-sk" />)}</div>
+                </div>
+              )}
+              {nothing && <div className="r3-empty" data-testid="search-empty">{res?.rateLimited ? TMDB_BUSY_TEXT : 'No results'}</div>}
+              {phase === 'error' && (
+                <div className="r3-empty" data-testid="search-error">
+                  <div>Couldn't search</div>
+                  <button type="button" className="r3-btn r3-primary" style={{ marginTop: 16 }} onClick={() => void run(lastQ.current)}>Try again</button>
+                </div>
+              )}
+              {phase === 'done' && !nothing && (
+                <div className="luma-fade-in"><D3Results key={q} titles={[...(view.top ? [view.top] : []), ...view.grid, ...view.more]} people={view.people}
+                  onOpen={open} onPerson={openPerson} wlFor={wlFor} /></div>
+              )}
             </div>
-          )}
-          {nothing && <div className="r3-empty" data-testid="search-empty">{res?.rateLimited ? TMDB_BUSY_TEXT : 'No results'}</div>}
-          {phase === 'error' && (
-            <div className="r3-empty" data-testid="search-error">
-              <div>Couldn't search</div>
-              <button type="button" className="r3-btn r3-primary" style={{ marginTop: 16 }} onClick={() => void run(lastQ.current)}>Try again</button>
-            </div>
-          )}
-          {phase === 'done' && !nothing && (
-            <div className="luma-fade-in"><D3Results key={q} titles={[...(view.top ? [view.top] : []), ...view.grid, ...view.more]} people={view.people}
-              onOpen={open} onPerson={openPerson} wlFor={wlFor} /></div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
+}
+
+/** What Tab can reach inside the search modal, in order. */
+export function modalTabStops(panel: HTMLElement): HTMLElement[] {
+  return [...panel.querySelectorAll<HTMLElement>('input, button, a[href], select, textarea, [tabindex]')]
+    .filter(el => !(el as HTMLButtonElement).disabled && el.tabIndex >= 0 && !el.closest('[aria-hidden="true"], [inert]'));
 }
 
 type D3Filter = 'all' | 'movie' | 'tv' | 'people' | 'owned';
@@ -329,22 +387,33 @@ function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: (el: HTML
   );
 }
 
-/** Layout: 48px page gutter at 1440 (32px at 1024); the field is 640px (520px at 1024); the band is 200px. */
-export const R3_BAND = 200;
+/** The search modal: a centered dialog, 1040px wide at most with a 48px margin. At rest it is the field row
+ * (R3_MODAL_REST tall); while searching it is R3_MODAL_OPEN tall and the results scroll inside it. */
+export const R3_MODAL_W = 1040;
+export const R3_MODAL_REST = 88;
+export const R3_MODAL_OPEN = 760;
 export const r3Css = `
 [data-r3-search]{--r3-pad:clamp(32px, 3.4vw, 48px);--r3-top:clamp(300px, 29vw, 420px);--r3-po:clamp(112px, 9.5vw, 136px);color:rgba(255,255,255,.95);line-height:normal}
-.r3-cover{position:fixed;left:0;right:0;top:0;bottom:0;z-index:40;pointer-events:none;
-  background:linear-gradient(to bottom, transparent 0, rgba(21,16,42,.55) ${R3_BAND - 80}px, #15102a ${R3_BAND}px, #15102a 100%)}
-/* Field sits under the 84px dock (bottom at 94) so the two do not overlap. */
-.r3-head{position:fixed;z-index:55;top:102px;left:50%;transform:translateX(-50%);display:flex;align-items:center}
-/* v245: one seamless reveal: the glass bar (fill + blur) and the controls share one transition, in the same frame */
-[data-r3-search]{--a1-dur:240ms;--a1-ease:cubic-bezier(.2,0,0,1)}
-.a1-bar,.r3-head{transition:transform var(--a1-dur) var(--a1-ease),opacity var(--a1-dur) var(--a1-ease),visibility 0s linear var(--a1-dur)}
-.a1-bar[data-open="true"],.r3-head[data-open="true"]{opacity:1;visibility:visible;transition-delay:0s}
-.a1-bar[data-open="false"]{transform:translateY(-100%);opacity:0;visibility:hidden;pointer-events:none}
-.r3-head[data-open="false"]{transform:translate(-50%,-152px);opacity:0;visibility:hidden;pointer-events:none}
-.a1-bar{position:fixed;z-index:49;top:0;left:0;right:0;height:152px;background:rgba(17,19,24,.55);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
-  border-bottom:1px solid rgba(255,255,255,.08);will-change:transform,opacity}
+[data-r3-search]{--a1-dur:200ms;--a1-ease:cubic-bezier(.2,0,0,1)}
+/* Over the nav bar (z 56) and under the person view (z 60/70) and the detail sheets. */
+.r3-modal{position:fixed;inset:0;z-index:58;display:flex;align-items:center;justify-content:center;padding:48px;box-sizing:border-box;
+  transition:opacity var(--a1-dur) var(--a1-ease),visibility 0s linear var(--a1-dur)}
+.r3-modal[data-open="true"]{opacity:1;visibility:visible;transition-delay:0s}
+.r3-modal[data-open="false"]{opacity:0;visibility:hidden;pointer-events:none}
+.r3-backdrop{position:absolute;inset:0;background:rgba(21,16,42,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.r3-panel{position:relative;width:min(${R3_MODAL_W}px, 100%);height:${R3_MODAL_REST}px;max-height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;
+  border-radius:28px;background:linear-gradient(180deg,rgba(167,139,250,.14) 0,rgba(167,139,250,0) 120px),rgba(21,16,42,.94);
+  box-shadow:inset 0 0 0 1px rgba(196,181,253,.24),0 24px 60px rgba(8,5,24,.6);
+  transition:height var(--a1-dur) var(--a1-ease),transform var(--a1-dur) var(--a1-ease)}
+.r3-panel[data-searching="true"]{height:min(${R3_MODAL_OPEN}px, 100%)}
+.r3-modal[data-open="false"] .r3-panel{transform:translateY(-6px) scale(.98)}
+html[data-luma-modal] .r3-backdrop{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(21,16,42,.84)}
+.r3-head{flex:none;display:flex;align-items:center;gap:12px;height:${R3_MODAL_REST}px;box-sizing:border-box;padding:0 20px}
+.r3-panel .r3-field{flex:1;width:auto;min-width:0}
+.r3-close{flex:none;width:44px;height:44px;padding:0;border:0;border-radius:22px;display:grid;place-items:center;cursor:pointer;outline:none;
+  color:#e2e2e9;background:rgba(255,255,255,.08)}
+.r3-close:hover{background:rgba(255,255,255,.14)}
+.r3-close:focus-visible{outline:2px solid #ede9fe;outline-offset:2px;box-shadow:0 0 0 4px rgba(21,16,42,.72),0 0 0 7px rgba(99,102,241,.78)}
 @media (prefers-reduced-motion: reduce){[data-r3-search]{--a1-dur:0ms}}
 /* v241 (H2): 480x48 pill, rgba(51,53,58,.85) fill, no border, filled 20px search icon, #c4c6d0 */
 .r3-field{display:flex;align-items:center;gap:12px;width:480px;height:48px;box-sizing:border-box;padding:0 20px;border-radius:24px;
@@ -354,7 +423,7 @@ export const r3Css = `
 .r3-input{flex:1;min-width:0;background:none;border:0;outline:none;color:#e2e2e9;font:inherit;font-size:16px;caret-color:#e2e2e9}
 .r3-input::placeholder{color:#c4c6d0;opacity:1}
 .r3-input::-webkit-search-cancel-button{display:none}
-.r3-body{position:fixed;z-index:45;top:${R3_BAND}px;left:0;right:0;bottom:0;overflow-y:auto;overscroll-behavior:contain;padding:8px var(--r3-pad) 40px;box-sizing:border-box}
+.r3-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:4px 24px 28px;box-sizing:border-box}
 .r3-main{display:flex;gap:24px;align-items:flex-start;margin-bottom:28px}
 .r3-top{width:var(--r3-top);flex:none;border-radius:16px;overflow:hidden;background:rgba(26,20,52,.88);border:1px solid rgba(255,255,255,.1);box-shadow:0 24px 64px rgba(0,0,0,.55)}
 .r3-top-img{position:relative;height:calc(var(--r3-top) * 0.56);background:rgba(255,255,255,.06)}

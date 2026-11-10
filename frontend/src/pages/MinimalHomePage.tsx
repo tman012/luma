@@ -131,7 +131,7 @@ export function MinimalHomePage() {
         {!kioskReady && <StartupLoading />}
         <div style={kioskReady ? undefined : { visibility: 'hidden' }} aria-hidden={kioskReady ? undefined : true}>
         <KioskHome onReady={() => setKioskReady(true)} />
-        {/* v235: logo and avatar; the search field is centered in this bar (HomeSearchR3). */}
+        {/* v235: logo and avatar. v358: HomeSearchR3 draws the top nav bar between them and owns the search modal. */}
         <header style={kioskBar} data-testid="kiosk-header">
           <HomeLogo />
           {menu(48)}
