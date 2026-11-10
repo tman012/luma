@@ -1684,6 +1684,29 @@ def _migrate_seed_trusted_proxies(data: dict, existing: bool = False) -> bool:
     return True
 
 
+_LEGACY_THEME_COLOR = "#0a0a0a"
+_STARTUP_THEME_COLOR = "#15102a"
+
+
+def _migrate_legacy_theme_color(data: dict) -> bool:
+    """v361: ui.theme_color left at the retired default #0a0a0a becomes the startup color #15102a.
+
+    The default was #0a0a0a until SW v108, and bootstrap writes every default into settings.json, so older
+    installs still carry it and /manifest.json served it as theme_color (the native launch bar) next to the
+    #15102a splash. Runs once (marker under _migrations); any other value is a deliberate choice and stays,
+    and so does #0a0a0a set again after this ran.
+    """
+    done = data.setdefault('_migrations', {})
+    if done.get('theme_color_startup_v361'):
+        return False
+    ui = data.get('ui')
+    if isinstance(ui, dict) and str(ui.get('theme_color', '')).strip().lower() == _LEGACY_THEME_COLOR:
+        ui['theme_color'] = _STARTUP_THEME_COLOR
+        logger.info("Migrated ui.theme_color %s -> %s", _LEGACY_THEME_COLOR, _STARTUP_THEME_COLOR)
+    done['theme_color_startup_v361'] = True
+    return True
+
+
 def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bool:
     """Run all migrations on *data* (mutated in place).
     *existing* is True when *data* came from a settings file on disk (an
@@ -1717,6 +1740,7 @@ def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bo
     changed |= _migrate_seed_hostnames(data, data_dir)
     changed |= _migrate_seed_trusted_proxies(data, existing)
     changed |= _migrate_tracker_search_settings(data)
+    changed |= _migrate_legacy_theme_color(data)
     return changed
 
 
