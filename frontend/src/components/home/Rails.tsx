@@ -7,6 +7,7 @@ import type { KnownLogo } from '@/services/modalPrefetch';
 import { FONT } from '@/components/start/StartUI';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MOTION, reducedMotion } from '@/theme/motion';
+import type { RailGate } from '@/startup/railGate';
 import { PRESS_RELEASED_EVENT, scheduleWarm, startWarmLoad, tapPending, warmDetail } from '@/services/modalPrefetch';
 import { OwnedOrb, plexOwned, useRailOwnership, type CardOwnership } from './railOwnership';
 import { LONG_PRESS_STYLE, useLongPress } from './useLongPress';
@@ -302,7 +303,15 @@ export function SkeletonCrossfade({ loading, children }: { loading: boolean; chi
 /** v254: What you're missing (app/daily_missing), a regular Home rail; its cards long-press to dismiss. */
 export const WYM_RAIL_ID = 'what_youre_missing';
 
-export function HomeRails({ cw, rails, onOpen, onDismiss, afterFirst }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card, el?: HTMLElement | null) => void; onDismiss?: (card: Card) => void; afterFirst?: React.ReactNode }) {
+/** How many cards of a rail fit the screen width (Rails.tsx sizes: padding, clamp() widths, 12px gap): the art the startup
+ *  gate waits for, the partly visible card included. The cards past them are lazy, off the first screen sideways. */
+export function cardsAcross(kind: 'wide' | 'watchlist' | 'poster', vw: number): number {
+  const clamp = (lo: number, v: number, hi: number) => Math.min(hi, Math.max(lo, v));
+  const [card, pad] = kind === 'wide' ? [clamp(240, vw * 0.72, 320), 20] : kind === 'watchlist' ? [116, 12] : [clamp(112, vw * 0.3, 160), 20];
+  return Math.max(1, Math.ceil((vw - pad) / (card + 12)));
+}
+
+export function HomeRails({ cw, rails, onOpen, onDismiss, afterFirst, gate }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card, el?: HTMLElement | null) => void; onDismiss?: (card: Card) => void; afterFirst?: React.ReactNode; gate?: RailGate }) {
   // v181: prod's rule: no orb on all-owned library rails (Continue watching, every Plex library rail);
   // the orb only on mixed rails (Trakt), resolved by prod's batch check.
   const own = useRailOwnership(rails.flatMap(r => r.items).filter(c => c.tmdb_id));
@@ -311,6 +320,19 @@ export function HomeRails({ cw, rails, onOpen, onDismiss, afterFirst }: { cw: Ca
   // Each Home load starts a fresh ratings warm count (RATINGS_WARMS_PER_LOAD).
   useEffect(() => { startWarmLoad(); }, []);
   useEffect(() => { const t = window.setTimeout(() => saveHomeLayout(root.current), 500); return () => window.clearTimeout(t); });
+  // The startup gate: every rail's art (the cards across the screen) loads and decodes before Home is shown; a rail that is not
+  // ready at the handoff stays collapsed and fades in on its own (startup/railGate). Runs before the page releases the splash.
+  useLayoutEffect(() => {
+    const host = root.current;
+    if (!gate || !host) return;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    Array.from(host.children).filter((e): e is HTMLElement => e.tagName === 'SECTION' && !!e.getAttribute('data-testid')?.startsWith('rail-')).forEach((el, i) => {
+      const id = el.getAttribute('data-testid')!;
+      const kind = id === 'rail-continue' ? 'wide' : id === 'rail-watchlist' ? 'watchlist' : 'poster';
+      const r = el.getBoundingClientRect();
+      gate.bind(id, el, Array.from(el.querySelectorAll('img')).slice(0, cardsAcross(kind, vw)), r.height > 0 ? r.top < vh : i < 2);
+    });
+  });
   return (
     <div ref={root} data-testid="home-rails" className="luma-rails-in">
       {cw.length > 0 && (
@@ -338,12 +360,13 @@ export const railCss = `
 .luma-rail::-webkit-scrollbar{display:none}
 .luma-shimmer{background:linear-gradient(90deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,.11) 50%,rgba(255,255,255,.05) 100%);background-size:200% 100%;animation:lumaShimmer 1.4s ease-in-out infinite}
 @keyframes lumaShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
-.luma-rails-in{animation:lumaRailsIn var(--m-dur-crossfade) var(--m-ease-standard) both}
 .luma-skel-out{animation:lumaSkelOut var(--m-dur-crossfade) var(--m-ease-standard) both}
 @keyframes lumaSkelOut{from{opacity:1}to{opacity:0}}
-[data-xf-hold] .luma-rails-in,[data-xf-hold] .luma-skel-out{animation-play-state:paused}
-@keyframes lumaRailsIn{from{opacity:0}to{opacity:1}}
-@media (prefers-reduced-motion: reduce){.luma-shimmer{animation:none}.luma-rails-in{animation:none}}
+[data-xf-hold] .luma-skel-out{animation-play-state:paused}
+[data-rail-pending]{display:none !important}
+[data-rail-reveal]{animation:lumaRailReveal var(--m-dur-reveal) var(--m-ease-reveal) both}
+@keyframes lumaRailReveal{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion: reduce){.luma-shimmer{animation:none}[data-rail-reveal]{animation:none}}
 `;
 
 const cardButton: React.CSSProperties = {

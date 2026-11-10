@@ -1,6 +1,8 @@
 /** The startup splash (index.html paints it before any script runs). This module owns what happens next: hold it until
- *  the first screen is ready, then hand it off, once per page load. A background refresh never shows it again: there is
- *  no way back from 'done'. Transform and opacity only. */
+ *  the first screen is ready and its entrance has played, then hand it off, once per page load. The splash background
+ *  never moves: it is Home's own color, so it is simply dropped at the handoff while Home fades in (the page behind
+ *  it is held at opacity 0 by html[data-splash] until then). Only the centered logo travels (FLIP into Home's logo).
+ *  A background refresh never shows it again: there is no way back from 'done'. Transform and opacity only. */
 import { SPLASH_MOTION, reducedMotion } from '@/theme/motion';
 
 export type SplashPhase = 'showing' | 'handoff' | 'done';
@@ -9,6 +11,10 @@ export type SplashReason = 'ready' | 'cap';
 export interface ReleaseOptions {
   /** The images on the first screen. Each is decoded before the handoff (the caller makes them eager). */
   images?: () => HTMLImageElement[];
+  /** Also waited for before the handoff: every Home rail's art, decoded (startup/railGate). */
+  ready?: () => Promise<void>;
+  /** Runs once, at the start of the handoff (after the waits, or at the cap): whatever is not ready stays collapsed. */
+  onHandoff?: () => void;
   /** Home's own logo: the splash logo flies into it. Without one (or when it has no size) the splash just crossfades. */
   target?: () => HTMLElement | null;
 }
@@ -31,6 +37,7 @@ interface Env {
 
 const ART_ATTR = 'data-splash-art';
 const FLIP_ATTR = 'data-splash-flip';
+const SPLASH_ATTR = 'data-splash';
 
 /** The artwork's box inside a target image: `data-splash-art="x y w h naturalW naturalH"` names the crop of the
  *  image that is the logo (Home's phone logo carries transparent padding); without it the whole box is. */
@@ -96,7 +103,8 @@ export class Splash {
     this.released = true;
     this.stats.releasedAt = this.env.now();
     this.arm();
-    void Promise.all([this.decodeImages(), this.introDone()]).then(() => this.go('ready'), () => this.go('ready'));
+    const ready = (): Promise<void> => { try { return this.opts.ready?.() ?? Promise.resolve(); } catch { return Promise.resolve(); } };
+    void Promise.all([this.decodeImages(), ready(), this.introDone()]).then(() => this.go('ready'), () => this.go('ready'));
     return this.finished;
   }
 
@@ -108,10 +116,10 @@ export class Splash {
     return Promise.all(imgs.map(i => (typeof i.decode === 'function' ? i.decode() : Promise.resolve()).catch(() => {}))).then(() => {});
   }
 
-  /** Resolves when the logo's intro has finished (the minimum the splash stays up). */
+  /** Resolves when the logo's entrance (the mark, then "uma") has finished: the minimum the splash stays up. */
   private introDone(): Promise<void> {
-    const logo = this.el('splash-logo');
-    const anims = typeof logo?.getAnimations === 'function' ? logo.getAnimations() : [];
+    const root = this.el('splash');
+    const anims = typeof root?.getAnimations === 'function' ? root.getAnimations({ subtree: true }) : [];
     if (anims.length) return Promise.all(anims.map(a => a.finished.catch(() => {}))).then(() => {});
     const ms = this.env.reduced() ? SPLASH_MOTION.reducedIntroMs : SPLASH_MOTION.introMs;
     const marks = (this.env.doc.defaultView as (Window & { __lumaSplash?: { introStart?: number } }) | null)?.__lumaSplash;
@@ -125,6 +133,7 @@ export class Splash {
     if (this.capTimer != null) { clearTimeout(this.capTimer); this.capTimer = null; }
     this.stats.reason = reason;
     this.stats.handoffAt = this.env.now();
+    try { this.opts.onHandoff?.(); } catch { /* a screen's cleanup never blocks the handoff */ }
     const doc = this.env.doc;
     const splash = this.el('splash');
     if (!splash) { this.finish('none'); return; }
@@ -135,22 +144,32 @@ export class Splash {
     let mode: SplashStats['mode'] = 'fade';
     try {
       if (typeof splash.animate !== 'function') { this.finish('none'); return; }
-      if (logo) { logo.style.animation = 'none'; logo.style.opacity = '1'; }
-      const target = this.env.reduced() ? null : this.opts.target?.() ?? null;
+      const reduced = this.env.reduced();
+      const targetEl = this.opts.target?.() ?? null;
+      const target = reduced ? null : targetEl;
       const from = logo?.getBoundingClientRect();
       const to = target ? artRect(target) : null;
-      const ms = SPLASH_MOTION.handoffMs;
       if (logo && bg && from && to && to.w > 0 && to.h > 0 && from.width > 0) {
         mode = 'flip';
+        // The background is Home's own color and never moves or fades: with Home held at opacity 0 behind it, dropping it
+        // changes nothing on screen. Home then fades in around the logo while the logo travels into its place.
+        bg.style.visibility = 'hidden';
         doc.documentElement.setAttribute(FLIP_ATTR, '');
-        const moves = [
-          logo.animate([{ transform: 'translate(0px, 0px) scale(1)' }, { transform: flipTransform(from, to) }], { duration: ms, easing: SPLASH_MOTION.handoffEase, fill: 'forwards' }),
-          bg.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: SPLASH_MOTION.handoffEase, fill: 'forwards' }),
-        ];
-        await Promise.all(moves.map(a => a.finished.catch(() => {})));
+        doc.documentElement.setAttribute(SPLASH_ATTR, 'handoff');
+        const move = logo.animate([{ transform: 'translate(0px, 0px) scale(1)' }, { transform: flipTransform(from, to) }], { duration: SPLASH_MOTION.handoffMs, easing: SPLASH_MOTION.handoffEase, fill: 'forwards' });
+        await move.finished.catch(() => {});
       } else {
-        const a = splash.animate([{ opacity: 1 }, { opacity: 0 }], { duration: this.env.reduced() ? SPLASH_MOTION.reducedHandoffMs : SPLASH_MOTION.handoffMs, easing: SPLASH_MOTION.handoffEase, fill: 'forwards' });
+        // Reduced motion, or nothing to fly into: one plain crossfade of the splash over Home's fade-in. Nothing travels.
+        // Home's own logo stays hidden until the splash is gone, so only one logo is ever on screen.
+        if (targetEl) doc.documentElement.setAttribute(FLIP_ATTR, '');
+        doc.documentElement.setAttribute(SPLASH_ATTR, 'handoff');
+        const ms = reduced ? SPLASH_MOTION.reducedHandoffMs : SPLASH_MOTION.handoffMs;
+        const a = splash.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: SPLASH_MOTION.handoffEase, fill: 'forwards' });
         await a.finished.catch(() => {});
+        if (targetEl) {
+          doc.documentElement.removeAttribute(FLIP_ATTR);
+          try { targetEl.animate([{ opacity: 0 }, { opacity: 1 }], { duration: Math.round(ms / 2), easing: SPLASH_MOTION.handoffEase }); } catch { /* the logo simply appears */ }
+        }
       }
     } catch {
       mode = 'none';
@@ -166,6 +185,7 @@ export class Splash {
     this.stats.mode = mode;
     this.stats.doneAt = this.env.now();
     this.env.doc.documentElement.removeAttribute(FLIP_ATTR);
+    this.env.doc.documentElement.removeAttribute(SPLASH_ATTR);
     this.env.doc.getElementById('splash')?.remove();
     this.resolveDone();
   }

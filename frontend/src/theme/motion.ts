@@ -61,13 +61,20 @@ export const MOTION = {
   z: { page: 0, nav: 100, overlay: 9000, sheet: 10000, sheetNested: 10050, toast: 10080, system: 10100 },
 } as const;
 
-/** Startup splash: the Luma logo scales and fades in, holds until Home is ready, then flies into Home's own logo while
- *  the splash background fades out. index.html paints the same intro before any script runs, so its CSS repeats these
- *  values as literals (tests/startupSplash360.test.tsx keeps the two in step). */
+/** Startup splash. Entrance: the L ribbon mark scales and fades in, then "uma" reveals beside it. The splash then holds
+ *  (background never moves) until Home is ready and the entrance has finished. Handoff: the centered logo itself scales
+ *  and translates into Home's logo while Home fades in around it (opacity and a few px of rise). index.html paints the
+ *  entrance before any script runs, so its CSS repeats these values as literals (tests/startupSplash363.test.tsx keeps
+ *  the two in step). */
 export const SPLASH_MOTION = {
-  introMs: MOTION.dur.sheetEnter, introEase: MOTION.ease.decel, introScale: 0.84,
-  handoffMs: MOTION.dur.sheetEnter, handoffEase: MOTION.ease.standard,
-  /** Reduced motion: the intro is a short fade and the handoff one crossfade, nothing scales or travels. */
+  markMs: 520, markEase: MOTION.ease.decel, markScale: 0.72,
+  umaDelayMs: 340, umaMs: 560, umaEase: MOTION.ease.reveal, umaShift: 5, umaClipFrom: 41,
+  /** The entrance's length: the minimum the splash stays up (the last of "uma" lands here). */
+  introMs: 340 + 560,
+  handoffMs: 640, handoffEase: MOTION.ease.contentFade,
+  /** Home's own fade and rise during the handoff, started with the logo's flight and never longer than it. */
+  homeFadeMs: 520, homeEase: MOTION.ease.contentFade, homeRisePx: MOTION.rise,
+  /** Reduced motion: the entrance is a short fade and the handoff one crossfade, nothing scales, travels or rises. */
   reducedIntroMs: MOTION.dur.fast, reducedHandoffMs: MOTION.dur.crossfade,
   /** Hard cap from the start of the page load: Home is shown with whatever has loaded. */
   capMs: 7000,

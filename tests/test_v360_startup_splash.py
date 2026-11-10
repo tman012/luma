@@ -35,7 +35,17 @@ def test_launch_colors_match_the_splash_background():
     html = INDEX.read_text()
     assert manifest['background_color'] == BG and manifest['theme_color'] == BG
     assert f'<meta name="theme-color" content="{BG}">' in html
-    assert f'#splash-bg {{ position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: {BG}; }}' in html
+    assert re.search(r'#splash-bg \{[^}]*background: ' + BG + ';', html)
+    assert f'html, body, #root {{ margin: 0; background: {BG}; }}' in html
+
+
+def test_the_splash_is_the_two_committed_logo_layers_and_the_background_never_animates():
+    import base64
+    html = INDEX.read_text()
+    for name in ('luma_splash_mark.webp', 'luma_splash_uma.webp'):
+        b64 = base64.b64encode((ROOT / 'static' / 'images' / name).read_bytes()).decode()
+        assert f'data:image/webp;base64,{b64}' in html, name
+    assert not re.search(r'#splash-bg[^{]*\{[^}]*animation', html)
 
 
 def test_ios_launch_images_follow_the_url_base(test_app, monkeypatch, tmp_path):
@@ -58,7 +68,7 @@ def test_ios_launch_images_are_solid_splash_color():
         assert im.getcolors(maxcolors=4) == [(w * h, (0x15, 0x10, 0x2a))], p.name
 
 
-def test_the_service_worker_is_v362_and_the_stamp_is_truthful():
-    assert "const CACHE_VERSION = 'media-kiosk-v362';" in (ROOT / 'static' / 'sw.js').read_text()
+def test_the_service_worker_is_v363_and_the_stamp_is_truthful():
+    assert "const CACHE_VERSION = 'media-kiosk-v363';" in (ROOT / 'static' / 'sw.js').read_text()
     stamp = json.loads((ROOT / 'static' / 'sw-stamp.json').read_text())
-    assert stamp['cache_version'] == 'media-kiosk-v362'
+    assert stamp['cache_version'] == 'media-kiosk-v363'

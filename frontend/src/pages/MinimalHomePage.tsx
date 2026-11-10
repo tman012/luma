@@ -10,6 +10,7 @@ import { HomeRails, WYM_RAIL_ID, cardArt, cardIds, cardLogoOf, railCss } from '@
 import { StartupLoading } from '@/components/start/StartupLoading';
 import { releaseSplash, splashActive, splashRemainingMs } from '@/startup/splash';
 import { runHomeGate } from '@/startup/homeGate';
+import { RailGate } from '@/startup/railGate';
 import { decodeAll, firstScreenImages } from '@/startup/decode';
 import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
@@ -42,6 +43,9 @@ export function MinimalHomePage() {
   const [slow, setSlow] = useState(false);
   const [kioskReady, setKioskReady] = useState(false);
   const shown = useRef(false);
+  // Startup: every rail's art decodes before the splash hands off; a rail not ready by then stays collapsed (startup/railGate).
+  const railGate = useRef<RailGate | null>(null);
+  if (!railGate.current) railGate.current = new RailGate(!splashActive());
   const modals = useModalHost();
   // v254 What you're missing: prod's long-press dismiss (MobileHomePage confirmDismissMissing).
   const [dismissTarget, setDismissTarget] = useState<Card | null>(null);
@@ -77,9 +81,9 @@ export function MinimalHomePage() {
     }
     // One request returns every ready rail (the server drops a failed or slow one at 6 s). The first posters decode
     // before Home shows, so they don't fill in after the swap. Later (a Retry, a resize) the first load holds at most
-    // POSTER_HOLD_MS for them. On startup the splash does it exactly: Home renders under the splash and the splash
-    // waits for the images actually on the first screen (startup/decode firstScreenImages, up to its hard cap), so
-    // nothing below the fold is waited for. Past the cap a first load gives way to Retry and a late answer is dropped.
+    // POSTER_HOLD_MS for them. On startup Home renders under the splash (held at opacity 0) and the splash waits for
+    // every rail's art, below the fold included (startup/railGate), up to its hard cap; a rail not ready by the handoff
+    // stays collapsed and fades in on its own. Past the cap a first load gives way to Retry and a late answer is dropped.
     const splash = !keep && splashActive();
     const gate = runHomeGate({
       load: fetchHome,
@@ -100,7 +104,13 @@ export function MinimalHomePage() {
   const bootSettled = !!data || failed || slow || kioskReady || (!loading && !authenticated);
   // The first screen is on the page (rows, a truthful error, a sign-in redirect): the splash hands off into Home's logo.
   useLayoutEffect(() => {
-    if (bootSettled) void releaseSplash({ images: () => firstScreenImages(), target: () => document.querySelector<HTMLElement>('[data-splash-target]') });
+    if (bootSettled) {
+      const gate = railGate.current!;
+      void releaseSplash({
+        images: () => firstScreenImages(), ready: () => gate.whenReady(), onHandoff: () => gate.close(),
+        target: () => document.querySelector<HTMLElement>('[data-splash-target]'),
+      });
+    }
   }, [bootSettled]);
 
   if (loading && !data) return <StartupLoading />;
@@ -211,7 +221,7 @@ export function MinimalHomePage() {
             {/* v280: prod MobilePushBanner — permission + push subscribe on MINIMAL phone Home. */}
             <MobilePushBanner />
             <main data-phone-rails>
-              {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
+              {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget, railGate.current!)}
             </main>
             {/* v259 Tester LOW: prod's last rail keeps its 28 px bottom margin (Rail <section style={{ marginBottom: 28 }}>,
                 AuthenticatedHomePage.tsx:272) above the 48 px spacer; test's rails have top margins only. */}
@@ -322,12 +332,12 @@ export function withMissing(data: HomeData | null, items: Card[] | null): HomeDa
 }
 
 function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpen: (c: Card) => void,
-                  onDismiss: (c: Card) => void) {
+                  onDismiss: (c: Card) => void, gate?: RailGate) {
   if (data && data.plex !== false) {
     // Tester LOW: /api/home answering {} (or without rails / continue_watching) shows the empty state, not a crash
     const { cw, rails } = homeParts(data);
     const any = cw.length > 0 || rails.some(r => r.items.length > 0);
-    if (any) return <HomeRails cw={cw} rails={rails} onOpen={onOpen} onDismiss={onDismiss} afterFirst={<HomePills after />} />;
+    if (any) return <HomeRails cw={cw} rails={rails} onOpen={onOpen} onDismiss={onDismiss} afterFirst={<HomePills after />} gate={gate} />;
     return <><HomePills /><div style={emptyBox} data-testid="home-empty"><p style={emptyLine}>Nothing here yet</p></div></>;
   }
   // Down / unreachable: no CW rail — pills at top (same as empty).
