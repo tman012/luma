@@ -45,9 +45,8 @@ describe('desktop TV Calendar full-width', () => {
     expect(close.closest('header')).toBeTruthy();
     expect(close.querySelector('[data-testid=tv-logo]')!.getAttribute('alt')).toBe('Luma');
     expect(document.querySelector('[data-home-chevron], .a1-chev')).toBeNull();
-    expect(screen.getByTestId('desktop-dock')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Calendar' }).getAttribute('aria-current')).toBe('page');
-    expect(screen.getByRole('link', { name: 'Libraries' }).getAttribute('aria-current')).toBeNull();
+    expect(screen.queryByTestId('desktop-dock')).toBeNull();               // v358: the nav bar is not drawn on any Settings route
+    expect(screen.queryByRole('link', { name: 'Calendar' })).toBeNull();
     expect(screen.getByTestId('tv-page-title').textContent).toBe('TV Calendar');
     expect(screen.getByTestId('settings-main').style.maxWidth).toBe('');   // takes the full width
   });

@@ -62,7 +62,7 @@ function Dropdown({ name, admin, busy, onSignOut, size = 48 }: Props) {
     return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close); };
   }, [open]);
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} style={{ position: 'relative' }} data-dock-avoid="">
       <style>{css}</style>
       <Avatar name={name} size={size} aria-label="Account" aria-haspopup="menu" aria-expanded={open}
         onClick={() => setOpen(o => !o)} />

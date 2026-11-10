@@ -33,6 +33,7 @@ import { signalContentReady } from '@/components/start/StartupLoading';
 import { SetupToast } from '@/components/start/SetupToast';
 import { LibrariesPage, LibrariesRedirect, SettingsPage as MinimalSettingsPage } from '@/pages/LibrariesPage';
 import { getUrlBase } from '@/urlHelpers';
+import { MINIMAL_ROUTES } from './minimalRoutes';
 
 // Lazy-load non-home routes — keeps initial bundle small
 const ExploreKioskPage = lazy(() => import('@/pages/ExploreKioskPage').then(m => ({ default: m.ExploreKioskPage })));
@@ -252,14 +253,15 @@ function MinimalApp() {
         <StartupSplashGate />
         <MinimalSearchHost />
         <Routes>
-          <Route path="/" element={<MinimalHomePage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/start" element={<StartPage />} />
-          <Route path="/unlock" element={<UnlockPage />} />
-          <Route path="/settings" element={<MinimalSettingsPage />} />
-          <Route path="/settings/libraries" element={<LibrariesRedirect />} />
-          <Route path="/settings/:section" element={<MinimalSettingsPage />} />
-          <Route path="/settings/:section/*" element={<MinimalSettingsPage />} />
+          {/* MINIMAL_ROUTES is the one list of minimal pages (the top nav bar offers only destinations in it). */}
+          <Route path={MINIMAL_ROUTES.home} element={<MinimalHomePage />} />
+          <Route path={MINIMAL_ROUTES.login} element={<LoginPage />} />
+          <Route path={MINIMAL_ROUTES.start} element={<StartPage />} />
+          <Route path={MINIMAL_ROUTES.unlock} element={<UnlockPage />} />
+          <Route path={MINIMAL_ROUTES.settings} element={<MinimalSettingsPage />} />
+          <Route path={MINIMAL_ROUTES.settingsLibraries} element={<LibrariesRedirect />} />
+          <Route path={MINIMAL_ROUTES.settingsSection} element={<MinimalSettingsPage />} />
+          <Route path={MINIMAL_ROUTES.settingsSub} element={<MinimalSettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </AppModalHost>

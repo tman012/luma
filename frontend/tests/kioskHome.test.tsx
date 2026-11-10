@@ -261,7 +261,7 @@ describe('v227 R3 on Home: desktop and tablet only, phone unchanged', () => {
 describe('v235 desktop Home at rest: the full hero; R3 results only while a query is typed', () => {
   beforeEach(() => { wide = true; reduced = false; stubMatchMedia(); });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
-  it('rest: the hero slideshow, the header, the centered field; no band, no Search heading, no results; typing shows them', async () => {
+  it('rest: the hero slideshow, the header, the nav bar; no band, no Search heading, no results; typing shows them in the search modal', async () => {
     vi.stubGlobal('fetch', vi.fn(async (u: string) => (String(u).includes('/api/hero/content') ? json({ success: true, movies: TEN })
       : json({ movies: [], tv_shows: [], people: [] }))));
     renderHome();
@@ -275,7 +275,8 @@ describe('v235 desktop Home at rest: the full hero; R3 results only while a quer
     expect(screen.queryByTestId('r3-results')).toBeNull();
     fireEvent.change(screen.getByTestId('search-input'), { target: { value: 'dune' } });
     await waitFor(() => expect(screen.getByTestId('r3-results')).toBeTruthy());
-    expect(screen.getByTestId('r3-cover')).toBeTruthy();
+    expect(screen.queryByTestId('r3-cover')).toBeNull();        // v358: results are in the search modal, the hero is not banded
+    expect(screen.getByTestId('search-modal').contains(screen.getByTestId('r3-results'))).toBe(true);
     fireEvent.change(screen.getByTestId('search-input'), { target: { value: '' } });
     await waitFor(() => expect(screen.queryByTestId('r3-results')).toBeNull());
     expect(screen.queryByTestId('r3-cover')).toBeNull();
