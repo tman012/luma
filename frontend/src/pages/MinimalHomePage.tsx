@@ -7,11 +7,13 @@ import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { FONT, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { HomeRails, WYM_RAIL_ID, cardArt, cardIds, cardLogoOf, railCss } from '@/components/home/Rails';
-import { StartupLoading, signalContentReady } from '@/components/start/StartupLoading';
+import { StartupLoading } from '@/components/start/StartupLoading';
+import { releaseSplash, splashActive, splashRemainingMs } from '@/startup/splash';
+import { runHomeGate } from '@/startup/homeGate';
+import { decodeAll, firstScreenImages } from '@/startup/decode';
 import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
 import { localArt, parseWlImages, setLocalArt } from '@/services/localArt';
-import { pageDecode } from '@/loading/sheetPriority';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { Card } from '@/components/home/homeApi';
 import { LUMA_BLUE } from '@/ui/lumaButton';
@@ -73,26 +75,33 @@ export function MinimalHomePage() {
       setData(null);
       setWymOverride(null);
     }
-    // One request returns every ready rail (the server drops a failed or slow one at 6 s). Past
-    // SKELETON_TIMEOUT_MS a first load gives way to Retry and a late answer is dropped. Then the first
-    // posters decode (POSTER_HOLD_MS, never past the same cap) so they don't fill in after the swap.
-    let done = false;
-    const t0 = Date.now();
-    const timer = window.setTimeout(() => { if (alive && !done && !keep) { done = true; setSlow(true); } }, SKELETON_TIMEOUT_MS);
-    fetchHome()
-      .then(d => {
-        if (!alive || done) return;
-        done = true;
-        window.clearTimeout(timer);
-        const cap = Math.max(0, Math.min(POSTER_HOLD_MS, SKELETON_TIMEOUT_MS - (Date.now() - t0)));
-        void decodeAll(firstPosterUrls(d, window.innerWidth), cap).then(() => { if (alive) { shown.current = true; setData(d); } });
-      })
-      .catch(() => { if (alive && !done) { done = true; shown.current = true; if (!keep) setFailed(true); } });
-    return () => { alive = false; window.clearTimeout(timer); };
+    // One request returns every ready rail (the server drops a failed or slow one at 6 s). The first posters decode
+    // before Home shows, so they don't fill in after the swap. Later (a Retry, a resize) the first load holds at most
+    // POSTER_HOLD_MS for them. On startup the splash does it exactly: Home renders under the splash and the splash
+    // waits for the images actually on the first screen (startup/decode firstScreenImages, up to its hard cap), so
+    // nothing below the fold is waited for. Past the cap a first load gives way to Retry and a late answer is dropped.
+    const splash = !keep && splashActive();
+    const gate = runHomeGate({
+      load: fetchHome,
+      urls: d => (splash ? [] : firstPosterUrls(d, window.innerWidth)),
+      decode: decodeAll,
+      capMs: splash ? Math.min(SKELETON_TIMEOUT_MS, splashRemainingMs()) : SKELETON_TIMEOUT_MS,
+      holdMs: POSTER_HOLD_MS,
+    });
+    void gate.promise.then(r => {
+      if (!alive) return;
+      if (r.reason === 'ready') { shown.current = true; setData(r.data); }
+      else if (r.reason === 'timeout') { if (!keep) setSlow(true); }
+      else { shown.current = true; if (!keep) setFailed(true); }
+    });
+    return () => { alive = false; gate.cancel(); };
   }, [ready, attempt, kiosk]);
 
   const bootSettled = !!data || failed || slow || kioskReady || (!loading && !authenticated);
-  useLayoutEffect(() => { if (bootSettled) signalContentReady(); }, [bootSettled]);
+  // The first screen is on the page (rows, a truthful error, a sign-in redirect): the splash hands off into Home's logo.
+  useLayoutEffect(() => {
+    if (bootSettled) void releaseSplash({ images: () => firstScreenImages(), target: () => document.querySelector<HTMLElement>('[data-splash-target]') });
+  }, [bootSettled]);
 
   if (loading && !data) return <StartupLoading />;
   if (!authenticated) return <Navigate to={needsStart ? '/start' : pinUnlock ? '/unlock' : '/login'} replace />;
@@ -222,7 +231,7 @@ export function MinimalHomePage() {
       {/* TopBar: z 50 (prod) */}
       <header style={phoneBar} data-testid="phone-header">
         <div style={phoneRow}>
-          <img src={assetUrl(PHONE_LOGO_SRC)} alt="Luma" style={phoneLogo} draggable={false} data-testid="phone-logo" />
+          <img src={assetUrl(PHONE_LOGO_SRC)} alt="Luma" style={phoneLogo} draggable={false} data-testid="phone-logo" data-splash-target="" data-splash-art={PHONE_LOGO_ART} />
           <div style={{ flex: 1 }} />
           <button type="button" style={searchBtn} aria-label="Search" onClick={openSearch} data-testid="search-button">
             <ProdSearchIcon />
@@ -265,16 +274,7 @@ export function firstPosterUrls(data: HomeData | null, vw: number): string[] {
   return urls;
 }
 
-/** Load and decode each URL (an error counts as done); resolves when all are done or after *capMs*. */
-export function decodeAll(urls: string[], capMs: number): Promise<void> {
-  if (!urls.length || typeof Image === 'undefined') return Promise.resolve();
-  // Through the sheet hold (v341l): a tap cancels the ones still downloading and they start again after its reveal.
-  const each = urls.map(u => pageDecode(u));
-  return new Promise<void>(resolve => {
-    const t = window.setTimeout(resolve, capMs);
-    void Promise.all(each).then(() => { window.clearTimeout(t); resolve(); });
-  });
-}
+export { decodeAll };
 
 /** v228 R3 rest (PM): Recently added under the band: the Plex libraries' recently-added rails (not Trakt or
  * the watchlist), interleaved one from each in turn, 12 at most. */
@@ -380,7 +380,9 @@ export const phoneBar: React.CSSProperties = {
 const phoneRow: React.CSSProperties = { height: 56, display: 'flex', alignItems: 'center', paddingLeft: 6, paddingRight: 12 };
 /** Prod's text logo: luma_text.webp, 100 px tall in the 56 px row, 2 px up. */
 export const PHONE_LOGO_SRC = '/static/images/luma_text.webp';
-const phoneLogo: React.CSSProperties = { height: 100, objectFit: 'contain', marginTop: -2 };
+/** luma_text.webp is 1520 x 1024; the logo artwork is the 916 x 416 crop at (215, 258): the splash logo lands on that box. */
+const PHONE_LOGO_ART = '215 258 916 416 1520 1024';
+const phoneLogo: React.CSSProperties = { height: 100, aspectRatio: '1520 / 1024', objectFit: 'contain', marginTop: -2 };
 /** Prod's content offset (:1026): the bar plus 16 px. */
 const phoneContent: React.CSSProperties = {
   position: 'relative', zIndex: 1, paddingTop: 'calc(56px + env(safe-area-inset-top, 0px) + 16px)',

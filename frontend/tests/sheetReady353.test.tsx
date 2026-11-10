@@ -1,6 +1,6 @@
 /** Movie and TV sheets open on the tap into a layout-stable frame and reveal the title and artwork into it once
  *  they are decoded; they are never held for the network and never abandoned by a timer. A timer does not open a
- *  color wash. Startup / full refresh is the navy Loading… screen; a later refetch does not blank rows that are
+ *  color wash. Startup / full refresh is the Luma logo splash (no spinner, no text); a later refetch does not blank rows that are
  *  already on screen. */
 import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -32,7 +32,6 @@ import { detailSheetReady, SHEET_OPEN_BOUND_MS } from '@/loading/sheetOpenGate';
 import { SHEET_EXIT_MS } from '@/components/layout/SheetFrame';
 import { _resetImageLoader } from '@/loading/imageLoader';
 import { _resetModalPrefetch } from '@/services/modalPrefetch';
-import { STARTUP_LOADING_TEXT } from '@/components/start/StartupLoading';
 
 const src = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8');
 const sheet = () => document.querySelector('[data-modal="MovieDetailModal"]');
@@ -208,31 +207,26 @@ const HOME = {
 };
 
 describe('startup and background refresh', () => {
-  it('a first load shows Loading… and not a skeleton or an empty home', () => {
+  it('a first load shows the logo screen (no text, no spinner) and not a skeleton or an empty home', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     const el = screen.getByTestId('startup-loading');
-    expect(el.textContent).toContain(STARTUP_LOADING_TEXT);
-    expect(STARTUP_LOADING_TEXT).toBe('Loading\u2026');
-    const spin = el.querySelector('.luma-spin') as HTMLElement;
-    expect(parseFloat(spin.style.width)).toBeGreaterThanOrEqual(40);
-    expect(parseFloat(spin.style.height)).toBeGreaterThanOrEqual(40);
-    expect(parseFloat((el.querySelector('p') as HTMLElement).style.fontSize)).toBeGreaterThanOrEqual(28);
+    expect(el.textContent).toBe('');
+    expect(el.querySelector('.luma-spin')).toBeNull();
+    expect(el.querySelector('img')).toBeTruthy();
     expect(screen.queryByTestId('home-skeleton')).toBeNull();
     expect(screen.queryByText('Nothing here yet')).toBeNull();
     expect(screen.queryByTestId('home-rails')).toBeNull();
   });
 
-  it('the document splash reuses the navy glow and the same Loading… word', () => {
+  it('the document splash is the logo on the Home background: no spinner, no text; reduced motion fades only', () => {
     const html = readFileSync(resolve(__dirname, '../index.html'), 'utf8');
-    expect(html).toContain('Loading\u2026');
-    expect(html).toMatch(/#splash-ring\s*\{[^}]*width:\s*48px/);
-    expect(html).toMatch(/font:\s*600 32px/);
-    expect(html).toContain('#262a66 0%, #15102a 55%, #0a0818 100%');
+    expect(html).not.toContain('Loading');
+    expect(html).not.toContain('splash-ring');
+    expect(html).not.toContain('splash-status');
     expect(html).toContain('prefers-reduced-motion: reduce');
-    expect(src('components/start/StartUI.tsx')).toContain('.luma-spin,.luma-start-fade{animation:none}');
-    expect(src('main.tsx')).toContain("addEventListener('luma:content-ready'");
-    expect(src('main.tsx')).not.toMatch(/requestAnimationFrame\(\(\) => \{\s*document\.getElementById\('splash'\)/);
+    expect(src('main.tsx')).not.toContain('luma:content-ready');
+    expect(src('main.tsx')).toContain('armSplash()');
     expect(src('App.tsx')).toContain('signalContentReady');
   });
 

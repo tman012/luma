@@ -7,5 +7,5 @@ export const HOME_LOGO_H = 64;
 
 export function HomeLogo({ 'data-testid': testId = 'kiosk-logo' }: { 'data-testid'?: string }) {
   // data-dock-avoid: the top nav bar measures this box and keeps clear of it.
-  return <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid={testId} data-dock-avoid="" style={{ height: HOME_LOGO_H, width: 'auto' }} draggable={false} />;
+  return <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid={testId} data-dock-avoid="" data-splash-target="" style={{ height: HOME_LOGO_H, width: 'auto', aspectRatio: '916 / 416' }} draggable={false} />;
 }

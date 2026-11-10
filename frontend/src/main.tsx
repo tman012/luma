@@ -6,6 +6,8 @@ import { installConnectServiceFetchHook } from '@/components/connect/connectServ
 import { getUrlBase } from './urlHelpers';
 import { watchBuild } from '@/utils/buildWatch';
 import { preloadRatingIcons } from '@/utils/ratingIcons';
+import { armSplash } from '@/startup/splash';
+import { stylesReady } from '@/startup/styles';
 
 // TODO: Migrate all apiFetch('/api/...') calls in service files to use apiFetch from apiClient.ts
 // This ensures URL base is correctly applied. For now, services use native fetch which works
@@ -14,17 +16,15 @@ import { preloadRatingIcons } from '@/utils/ratingIcons';
 
 installConnectServiceFetchHook();
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// index.html already painted the startup splash. Its hard cap starts now; each screen releases it when ready.
+armSplash();
 
-// The startup splash stays until the app has real content, a truthful error, or a
-// sign-in screen. A full refresh shows it again because the document reloads.
-window.addEventListener('luma:content-ready', () => {
-  // Remove immediately. A fade left the loader painted over the screen that was already ready.
-  document.getElementById('splash')?.remove();
+void stylesReady().then(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
 });
 
 // =============================================================================
