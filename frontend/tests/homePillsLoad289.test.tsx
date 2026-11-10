@@ -35,10 +35,10 @@ const json = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 500, json: 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('v289 phone Home pills load slot (no top→under-CW jump)', () => {
-  it('startup shows Loading… and does not paint pills or skeletons while /api/home is pending', () => {
+  it('startup shows the logo screen and does not paint pills or skeletons while /api/home is pending', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
-    expect(screen.getByTestId('startup-loading').textContent).toContain('Loading\u2026');
+    expect(screen.getByTestId('startup-loading').textContent).toBe('');
     expect(screen.queryByTestId('home-skeleton')).toBeNull();
     expect(screen.queryByTestId('home-pills')).toBeNull();
   });

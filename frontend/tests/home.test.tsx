@@ -46,7 +46,7 @@ describe('Home', () => {
     const fetchMock = vi.fn(() => d.promise);
     vi.stubGlobal('fetch', fetchMock);
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
-    expect(screen.getByTestId('startup-loading').textContent).toContain('Loading\u2026');
+    expect(screen.getByTestId('startup-loading').textContent).toBe('');
     expect(screen.queryByTestId('home-skeleton')).toBeNull();
     expect(screen.queryByTestId('home-rails')).toBeNull();
     expect(screen.queryByText('Nothing here yet')).toBeNull();

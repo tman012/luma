@@ -1,24 +1,29 @@
-/** Full-screen startup / full-refresh wait: the existing navy glow, the start
- *  screen's loading circle, and the exact word Loading…. Not a detail sheet
- *  and not a skeleton. */
-import { Center, StartShell, Status } from '@/components/start/StartUI';
+/** The wait for Home when the document splash is not on screen (sign-in just finished, the splash's hard cap passed,
+ *  a resize across the kiosk width): the splash's own picture, the logo centered on the Luma background. No spinner,
+ *  no text, no skeleton. On a cold start index.html's splash covers it, and the same logo box sits underneath, so
+ *  taking the splash away reveals the same pixels. */
+import { assetUrl } from '@/urlHelpers';
+import { SPLASH_MOTION } from '@/theme/motion';
+import { releaseSplash } from '@/startup/splash';
 
-export const STARTUP_LOADING_TEXT = 'Loading\u2026';
+export const SPLASH_LOGO_SRC = '/static/images/luma_splash.webp';
 
 export function StartupLoading() {
   return (
-    <StartShell step="startup-loading">
-      <Center>
-        <div role="status" aria-live="polite" aria-busy="true" data-testid="startup-loading">
-          <Status text={STARTUP_LOADING_TEXT} prominent />
-        </div>
-      </Center>
-    </StartShell>
+    <div className="luma-fullscreen" style={shell} data-step="startup-loading" data-testid="startup-loading" aria-busy="true">
+      <img src={assetUrl(SPLASH_LOGO_SRC)} alt="" style={logo} draggable={false} />
+    </div>
   );
 }
 
-/** Drops the document splash (index.html) once real UI or a truthful error is up. */
+/** Real UI is up (sign-in, a settings page, an error): hand the document splash off. Idempotent. */
 export function signalContentReady(): void {
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new Event('luma:content-ready'));
+  void releaseSplash();
 }
+
+const shell: React.CSSProperties = {
+  position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: SPLASH_MOTION.bg, overflow: 'hidden',
+};
+const logo: React.CSSProperties = { width: SPLASH_MOTION.logoWidth, height: 'auto', aspectRatio: '916 / 416', userSelect: 'none' };

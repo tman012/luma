@@ -29,7 +29,7 @@ describe('v326 desktop TV Calendar clean', () => {
     expect(img.getAttribute('data-testid')).toBe('kiosk-logo');
     expect(img.getAttribute('alt')).toBe('Luma');
     expect(img.getAttribute('src')).toContain('luma_wordmark.webp');
-    expect(img.getAttribute('style')).toBe('height: 64px; width: auto;');
+    expect(img.getAttribute('style')).toBe('height: 64px; width: auto; aspect-ratio: 916 / 416;');   // v360: reserves its box before the art loads (no layout shift under the splash)
     expect(img.getAttribute('draggable')).toBe('false');
   });
 

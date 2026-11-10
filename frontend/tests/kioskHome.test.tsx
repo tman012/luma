@@ -53,12 +53,12 @@ describe('web kiosk home (>=1024px)', () => {
   beforeEach(() => { wide = true; reduced = false; stubMatchMedia(); });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); setHidden(false); });
 
-  it('shows the spinner on solid navy, then the slideshow; only /api/hero/content is called', async () => {
+  it('shows the logo screen on solid navy, then the slideshow; only /api/hero/content is called', async () => {
     let resolve!: (r: Response) => void;
     const fetchMock = vi.fn(() => new Promise<Response>(r => { resolve = r; }));
     vi.stubGlobal('fetch', fetchMock);
     renderHome();
-    expect(screen.getByTestId('startup-loading').textContent).toContain('Loading\u2026');
+    expect(screen.getByTestId('startup-loading').textContent).toBe('');
     expect(screen.getByTestId('kiosk-home').closest('[aria-hidden="true"]')).toBeTruthy();
     expect(screen.getByTestId('kiosk-home').style.background).toMatch(/#15102a|rgb\(21, 16, 42\)/);
     await act(async () => { resolve(json({ success: true, movies: TEN })); });
