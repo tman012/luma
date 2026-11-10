@@ -8,7 +8,8 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useModalMotion, MODAL_EXIT_MS, SHEET_EXIT_MS } from '@/components/layout/SheetFrame';
+import { useModalMotion } from '@/components/layout/SheetFrame';
+import { useSurfacePresence } from '@/components/motion/useSurfacePresence';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
@@ -54,6 +55,10 @@ const SORT_LABELS: Record<SortBy, string> = {
 };
 
 interface PersonDetailModalProps {
+  /** False while another sheet is on top of this one (it stays mounted underneath). Default true. */
+  active?: boolean;
+  /** The sheet started closing (its exit is playing); `onClose` follows when the exit is done. */
+  onLeave?: () => void;
   personId: number;
   personName: string;
   onClose: () => void;
@@ -67,6 +72,8 @@ export function PersonDetailModal({
   personId,
   personName,
   onClose: onCloseNow,
+  active = true,
+  onLeave,
 }: PersonDetailModalProps) {
   const modalHost = useModalHost();
   const [person, setPerson] = useState<PersonData | null>(null);
@@ -84,28 +91,18 @@ export function PersonDetailModal({
 
   const isCompact = mode === 'compact';
   // MOTION.md §1: compact = phone bottom sheet, else desktop modal; the exit plays before unmount.
-  const [phase, setPhase] = useState<'entering' | 'exiting'>('entering');
+  const { phase, requestClose: onClose } = useSurfacePresence({
+    kind: isCompact ? 'sheet' : 'modal', onExited: onCloseNow, active, onClosing: onLeave,
+  });
   const scrimMotionRef = useRef<HTMLDivElement>(null);
   const cardMotionRef = useRef<HTMLDivElement>(null);
   useModalMotion(phase, scrimMotionRef, cardMotionRef, isCompact ? 'bottom' : 'modal');
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onClose = useCallback(() => {
-    if (closeTimer.current) return;
-    setPhase('exiting');
-    closeTimer.current = setTimeout(onCloseNow, isCompact ? SHEET_EXIT_MS : MODAL_EXIT_MS);
-  }, [onCloseNow, isCompact]);
-  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
-  useEffect(() => {
-    const onDismiss = (e: Event) => { e.preventDefault(); setPhase('exiting'); };
-    window.addEventListener('luma:modal-dismiss', onDismiss);
-    return () => window.removeEventListener('luma:modal-dismiss', onDismiss);
-  }, []);
 
   // Swipe-to-dismiss for compact mode
   const { handlers: swipeHandlers } = useSwipeToDismiss({
     scrollRef,
     onDismiss: onClose,
-    enabled: isCompact && !bioOpen,
+    enabled: isCompact && active && !bioOpen,
   });
 
   useEffect(() => {
@@ -128,12 +125,13 @@ export function PersonDetailModal({
   }, [personId]);
 
   useEffect(() => {
+    if (!active) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [onClose]);
+  }, [onClose, active]);
 
   // Batch-check ownership for credits so the sort/owned-badge logic works.
   // ownershipLoaded gates the Unowned filter so we never flash owned results.
@@ -391,7 +389,7 @@ export function PersonDetailModal({
                       alignItems: 'center',
                       justifyContent: 'center',
                       flexShrink: 0,
-                      transition: 'all 0.15s',
+                      transition: 'all var(--m-dur-hover) var(--m-ease-standard)',
                     }}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -459,7 +457,7 @@ export function PersonDetailModal({
                       fontSize: isCompact ? '14px' : '16px',
                       fontWeight: isActive ? 600 : 500,
                       cursor: 'pointer',
-                      transition: 'all 0.15s',
+                      transition: 'all var(--m-dur-hover) var(--m-ease-standard)',
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -513,7 +511,7 @@ export function PersonDetailModal({
                           fontSize: isCompact ? '12px' : '14px',
                           fontWeight: isActive ? 600 : 500,
                           cursor: 'pointer',
-                          transition: 'color 0.15s, background 0.15s',
+                          transition: 'color var(--m-dur-hover) var(--m-ease-standard), background var(--m-dur-hover) var(--m-ease-standard)',
                         }}
                       >
                         {SORT_LABELS[opt]}
@@ -543,7 +541,7 @@ export function PersonDetailModal({
                       fontSize: isCompact ? '12px' : '14px',
                       fontWeight: unownedOnly ? 600 : 500,
                       cursor: 'pointer',
-                      transition: 'color 0.15s, background 0.15s, border-color 0.15s',
+                      transition: 'color var(--m-dur-hover) var(--m-ease-standard), background var(--m-dur-hover) var(--m-ease-standard), border-color var(--m-dur-hover) var(--m-ease-standard)',
                     }}
                   >
                     Unowned
@@ -773,7 +771,7 @@ export function PersonDetailModal({
                   fontWeight: 500,
                   cursor: 'pointer',
                   width: '100%',
-                  transition: 'color 0.15s',
+                  transition: 'color var(--m-dur-hover) var(--m-ease-standard)',
                 }}
               >
                 {showAll ? 'Show less' : 'Show more'}
@@ -782,7 +780,7 @@ export function PersonDetailModal({
                   fill="none" stroke="currentColor" strokeWidth="2"
                   strokeLinecap="round" strokeLinejoin="round"
                   style={{
-                    transition: 'transform 0.3s',
+                    transition: 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
                     transform: showAll ? 'rotate(180deg)' : 'rotate(0deg)',
                     opacity: 0.6,
                   }}

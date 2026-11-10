@@ -50,8 +50,8 @@ describe('v341: one reveal for the whole sheet', () => {
       expect(c).not.toMatch(/data-details-fade=/);
     }
     const css = src('index.css');
-    expect(css).toMatch(/\[data-reveal-gate\] > :not\(\[data-hero-keep\]\)\{transition:opacity 0\.45s ease-out\}/);
+    expect(css).toMatch(/\[data-reveal-gate\] > :not\(\[data-hero-keep\]\)\{transition:opacity var\(--m-dur-reveal\) var\(--m-ease-reveal\)\}/);
     expect(css).toMatch(/\[data-reveal-gate="hold"\] > :not\(\[data-hero-keep\]\)\{opacity:0\}/);
-    expect(src('hooks/useSheetBackdrop.ts')).toMatch(/HERO_FADE = 'opacity 0\.45s ease-out'/);
+    expect(src('hooks/useSheetBackdrop.ts')).toMatch(/HERO_FADE = REVEAL_TRANSITION/);
   });
 });

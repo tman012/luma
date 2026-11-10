@@ -27,6 +27,13 @@ def test_prod_palette_path_unchanged():
         cur = cur.replace("// The sheet base mixes into the app surface #111318 (MOTION §7 #12), not the navy token.\nconst NAVY: [number, number, number] = [0x11, 0x13, 0x18];",
                           "const NAVY: [number, number, number] = [0x15, 0x10, 0x2a];")
         cur = re.sub(r"              // No will-change: the blobs never move;[^\n]*\n", "              willChange: lite ? undefined : 'transform',\n", cur)
+        # v359 (motion tokens): the overlay's fade timings read the shared tokens; undone here, the rest is prod's.
+        if f.endswith('UltraBlurOverlay.tsx'):
+            cur = (cur.replace("import { MOTION } from '@/theme/motion';\n", '')
+                   .replace('opacity var(--m-dur-reveal) var(--m-ease-reveal)', 'opacity 0.45s ease-out')
+                   .replace('${animationName} var(--m-dur-reveal) var(--m-ease-reveal) both', '${animationName} 0.45s ease-out both')
+                   .replace('MOTION.dur.palette', '600')
+                   .replace('${CROSSFADE_MS}ms var(--m-ease-standard) both', '${CROSSFADE_MS}ms ease both'))
         if f.endswith('modalColors.ts'):
             cur = _undo_colors_abort(cur)
         assert prod == cur, f

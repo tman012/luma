@@ -3,6 +3,7 @@ import { renderHook, act, cleanup, render } from '@testing-library/react';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { useSheetHero, BACKDROP_CAP_MS, BACKDROP_ART_DEADLINE_MS, HERO_FADE } from '@/hooks/useSheetBackdrop';
+import { REVEAL_TRANSITION } from '@/theme/motion';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 import { BackdropHero } from '@/components/media/BackdropHero';
 
@@ -156,16 +157,16 @@ describe('one backdrop per sheet open', () => {
   });
 
   it('a single combined fade: the title box and the backdrop share the one soft fade', () => {
-    expect(HERO_FADE).toBe('opacity 0.45s ease-out');
+    expect(HERO_FADE).toBe(REVEAL_TRANSITION);
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
       const c = src(`components/media/${k}/CompactLayout.tsx`);
       expect(c).toMatch(/data-hero-title=\{sheetHero\.state\}[\s\S]{0,200}opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1, transition: reducedMotion\(\) \? 'none' : HERO_FADE/);
       const e = src(`components/media/${k}/ExpandedLayout.tsx`);
       expect(e).toMatch(/revealStyle\(reveal\.revealed \? sheetHero\.state : 'hold'\), animation: reveal\.revealed \? HERO_ANIM : 'none'/);
       // v341m: the desktop title has no fade of its own; it rides the content layer's CONTENT_WITH_HERO flip.
-      expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1,[\s\S]{0,600}transition: 'transform 0\.5s cubic-bezier\(0\.22, 1, 0\.36, 1\)',[\s\S]{0,400}animation: 'none'/);
+      expect(e).toMatch(/opacity: sheetHero\.state === 'hold' \|\| !reveal\.revealed \? 0 : 1,[\s\S]{0,600}transition: 'transform var\(--m-dur-modal-enter\) var\(--m-ease-modal-enter\)',[\s\S]{0,400}animation: 'none'/);
     }
-    expect(src('components/media/BackdropHero.tsx')).toMatch(/transition: reducedMotion\(\) \? 'none' : 'opacity 0\.45s ease-out'/);
+    expect(src('components/media/BackdropHero.tsx')).toMatch(/transition: reducedMotion\(\) \? 'none' : 'opacity var\(--m-dur-reveal\) var\(--m-ease-reveal\)'/);
   });
 
   it('empty hero is charcoal APP_BG until its image has loaded', () => {

@@ -74,9 +74,11 @@ async function open(s: Sheet, rowText: string | null, ms = 3000) {
   for (let i = 0; i < ms / 50; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
 }
 /** What the hero shows: 'logo' (a loaded logo over a hidden text title), the visible text title, or '' (neither). */
+/** An element on the page that the user can't see: itself or an ancestor sits at opacity 0 (the held reveal). */
+const held = (el: Element | null) => { for (let e = el; e; e = e.parentElement) if ((e as HTMLElement).style?.opacity === '0') return true; return false; };
 function heroShows(): string {
-  const logo = document.querySelector<HTMLImageElement>('img[src*="logo.png"]');
-  const h1 = Array.from(document.querySelectorAll('h1')).find((h) => h.style.display !== 'none' && h.style.visibility !== 'hidden');
+  const logo = Array.from(document.querySelectorAll<HTMLImageElement>('img[src*="logo.png"]')).find((i) => !held(i)) ?? null;
+  const h1 = Array.from(document.querySelectorAll('h1')).find((h) => h.style.display !== 'none' && h.style.visibility !== 'hidden' && !held(h));
   if (h1 && (h1.textContent ?? '').trim()) return (h1.textContent ?? '').trim();
   return logo && logo.complete ? 'logo' : '';
 }
@@ -119,9 +121,9 @@ for (const mode of ['compact', 'expanded'] as const) {
       for (const [name, setup, rowText] of cases) it(`${s.name}: ${name}`, async () => {
         layoutMode.mode = mode; setup();
         await open(s, rowText, 4000);
-        // A logo that never finishes is not a title: the sheet stays closed (no cap-forced text).
+        // A logo that never finishes is not a title: the frame is open, the title stays held (no cap-forced text).
         if (name.startsWith('logo never finishes')) {
-          expect(document.querySelector('[data-modal="MovieDetailModal"], [data-modal="TvDetailModal"]')).toBeNull();
+          expect(document.querySelector('[data-modal="MovieDetailModal"], [data-modal="TvDetailModal"]')).not.toBeNull();
           expect(heroShows()).toBe('');
           return;
         }
@@ -152,13 +154,14 @@ describe('v345b: desktop movie, logo shown means the text is hidden (kept in the
   const s = SHEETS[1];
   const h1 = () => Array.from(document.querySelectorAll('h1')).find((h) => (h.textContent ?? '').trim() === s.title)!;
   const visible = (h: HTMLElement) => h.style.display !== 'none' && h.style.visibility !== 'hidden';
-  it('the sheet stays closed while art holds, then shows the decoded logo with the text hidden', async () => {
+  it('the frame is open while art holds, then shows the decoded logo with the text hidden', async () => {
     layoutMode.mode = 'expanded'; cfg.domStall = true; cfg.artMs = 1300;   // the backdrop holds the hero
     const row = document.createElement('button'); row.setAttribute('aria-label', s.title); document.body.appendChild(row);
     void openWhenReady(s.kind, s.rk, s.id, row, () => {}, undefined, []);
     render(s.el());
     for (let i = 0; i < 6; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-    expect(document.querySelector('[data-modal="MovieDetailModal"]'), 'no sheet while art is undecoded').toBeNull();
+    expect(document.querySelector('[data-modal="MovieDetailModal"]'), 'the frame opens while art is undecoded').not.toBeNull();
+    expect(heroShows(), 'nothing of the hero is visible before the art is decoded').toBe('');
     for (let i = 0; i < 40; i++) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
     expect(document.querySelector('img[src*="logo.png"]')).not.toBeNull();
     expect(h1(), 'text kept in the DOM').toBeTruthy();

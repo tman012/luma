@@ -9,7 +9,9 @@ const ROOT = resolve(__dirname, '../..');
 const P = 'frontend/src/components/media/MovieDetailModal/ExpandedLayout.tsx';
 const test = readFileSync(resolve(ROOT, P), 'utf8');
 const prod = execSync(`git show 1b4ea74:${P}`, { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 26 });
-const fn = (c: string) => c.slice(c.indexOf('function FileInfoButton'), c.indexOf('\n}\n', c.indexOf('function FileInfoButton')));
+// The button's timings read the shared hover token now; the same 0.2 s ease in prod.
+const HOVER = 'var(--m-dur-hover) var(--m-ease-standard)';
+const fn = (c: string) => c.slice(c.indexOf('function FileInfoButton'), c.indexOf('\n}\n', c.indexOf('function FileInfoButton'))).split(HOVER).join('0.2s ease');
 const mount = (c: string) => { const a = c.indexOf('<FileInfoButton'); return c.slice(a, c.indexOf('/>', a)); };
 
 describe('wide popup file-info button (v216)', () => {

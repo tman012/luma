@@ -78,10 +78,38 @@ describe('phone sheet hold', () => {
     view.unmount();
     delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
   });
-  it('SheetFrame has no useSheetGo of its own (layouts pass go)', () => {
+  it('hold={false}: content that lands while the card slides commits at once; hold freezes it as of the render that set it', async () => {
+    const finishes: Array<() => void> = [];
+    (HTMLElement.prototype as unknown as { animate: unknown }).animate = vi.fn(() => ({
+      finished: new Promise<void>((resolve) => { finishes.push(resolve); }),
+      cancel() {}, play() {}, pause() {},
+    }));
+    const ui = (hold: boolean, label: string) => (
+      <SheetFrame name="MovieDetailModal" phase="entering" composed go>
+        <SheetCard background="#111318" hold={hold}><p>{label}</p></SheetCard>
+      </SheetFrame>
+    );
+    const view = render(ui(false, 'seed'));
+    view.rerender(ui(false, 'details'));
+    expect(document.querySelector('[data-sheet-card]')?.textContent).toBe('details');
+    view.unmount();
+    const held = render(ui(true, 'seed'));
+    held.rerender(ui(true, 'details'));
+    expect(document.querySelector('[data-sheet-card]')?.textContent).toBe('seed');
+    held.unmount();
+    const late = render(ui(false, 'seed'));
+    late.rerender(ui(false, 'details'));
+    late.rerender(ui(true, 'revealed'));
+    late.rerender(ui(true, 'ratings'));
+    expect(document.querySelector('[data-sheet-card]')?.textContent).toBe('revealed');
+    late.unmount();
+    delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+  });
+  it('SheetFrame has no hold timer of its own: it opens unless a layout passes go false', () => {
     const s = read('components/layout/SheetFrame.tsx');
     const frame = s.slice(s.indexOf('export function SheetFrame('), s.indexOf('export function SheetCard('));
     expect(frame).not.toContain('useSheetGo(');
-    expect(frame).toContain('go: boolean;');
+    expect(frame).toContain('go = true');
+    expect(s).not.toContain('export function useSheetGo');
   });
 });

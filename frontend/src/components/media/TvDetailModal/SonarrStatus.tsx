@@ -77,7 +77,7 @@ export function showSonarrToast(text: string, ms = 2200) {
     background: 'rgba(28,32,48,0.92)', color: '#fff', fontSize: '14px', fontWeight: '600',
     border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
     backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-    opacity: '0', transition: 'opacity 180ms ease, transform 180ms ease',
+    opacity: '0', transition: 'opacity var(--m-dur-hover) var(--m-ease-standard), transform var(--m-dur-hover) var(--m-ease-standard)',
     fontFamily: 'inherit',
   } as Partial<CSSStyleDeclaration>);
   document.body.appendChild(el);

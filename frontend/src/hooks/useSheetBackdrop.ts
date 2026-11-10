@@ -10,6 +10,7 @@
  *   no-art state), a logo not decoded is the text title. Once latched nothing changes for that open (`openKey`):
  *   no backdrop arrives later, no swap, no text-to-logo jump. Nothing paints before the latch. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { REVEAL_TRANSITION } from '@/theme/motion';
 import { tapElapsed } from '@/services/modalPrefetch';
 import type { TitleState } from '@/hooks/useTitleReveal';
 import { SURFACE_DEADLINE_MS } from '@/loading/revealGate';
@@ -23,7 +24,7 @@ export const BACKDROP_ART_DEADLINE_MS = 1600;
 /** Details that land past the 1.0s deadline (a slow TMDb): their backdrop still gets this long to decode. */
 export const BACKDROP_LATE_DECODE_MS = BACKDROP_ART_DEADLINE_MS - BACKDROP_CAP_MS;
 /** The hero's one soft fade (backdrop and title/logo together). */
-export const HERO_FADE = 'opacity 0.45s ease-out';
+export const HERO_FADE = REVEAL_TRANSITION;
 
 /** The URL once its decode has finished, and whether it succeeded. */
 function useDecoded(url: string | null): { url: string | null; ok: boolean } {
@@ -144,7 +145,7 @@ export function useSheetHero(art: string | null | undefined, artSettled: boolean
     logoShown: !!latched && unpainted !== latched, logoRef, logoLoaded };
 }
 /** The same fade for an element that mounts at the latch (the desktop backdrop img). */
-export const HERO_ANIM = 'm-crossfade 0.45s ease-out both';
+export const HERO_ANIM = 'm-crossfade var(--m-dur-reveal) var(--m-ease-reveal) both';
 
 /** Desktop: one trigger for the content and the backdrop layer. The content runs the backdrop's own HERO_ANIM, in
  *  the same commit, on its own compositor layer (will-change), so Chrome gives both pending animations one start

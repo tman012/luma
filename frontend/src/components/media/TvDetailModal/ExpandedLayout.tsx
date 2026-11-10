@@ -1,7 +1,6 @@
 import { useOneReveal, useEndPriorityOnError, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
 import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO } from '@/hooks/useSheetBackdrop';
-import { detailSheetReady, useUnopenedClose } from '@/loading/sheetOpenGate';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -151,7 +150,7 @@ function PillButton({
         fontSize,
         fontWeight: 600,
         cursor: 'pointer',
-        transition: 'background 0.15s ease',
+        transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
         backdropFilter: primary ? 'none' : 'blur(12px)',
         WebkitBackdropFilter: primary ? 'none' : 'blur(12px)',
       }}
@@ -221,7 +220,7 @@ function CastShelf({
           zIndex: 8,
           background: 'transparent',
           padding: isTablet ? '40px 0 32px' : '48px 0 48px',
-          animation: imagesReady ? 'tvCastShelfBounce 0.55s cubic-bezier(0.34, 1.56, 0.64, 1)' : 'none',
+          animation: imagesReady ? 'tvCastShelfBounce var(--m-dur-modal-enter) var(--m-ease-modal-enter)' : 'none',
           transform: imagesReady ? 'translateY(0)' : 'translateY(100%)',
         }}
       >
@@ -329,7 +328,7 @@ function EpisodeGridModal({
         background: OVERLAY_SURFACE,
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
         overflowY: 'auto',
-        animation: 'tvSeasonGridFadeIn 0.25s ease',
+        animation: 'tvSeasonGridFadeIn var(--m-dur-selected) var(--m-ease-standard)',
       }}
     >
       <div
@@ -377,7 +376,7 @@ function EpisodeGridModal({
                     background: isActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
                     color: isActive ? '#fff' : 'rgba(255,255,255,0.6)',
                     fontSize: '14px', fontWeight: 600, cursor: 'pointer',
-                    transition: 'all 0.15s ease', whiteSpace: 'nowrap',
+                    transition: 'all var(--m-dur-hover) var(--m-ease-standard)', whiteSpace: 'nowrap',
                   }}
                 >
                   <span style={{
@@ -429,7 +428,7 @@ function EpisodeGridModal({
                 key={key}
                 onClick={(e) => { e.stopPropagation(); onEpisodeClick(activeSeason!.season_number, ep.episode_number); }}
                 data-tv-card="episode"
-                style={{ ...CARD_GLASS, cursor: 'pointer', transition: 'transform 0.2s ease' }}
+                style={{ ...CARD_GLASS, cursor: 'pointer', transition: 'transform var(--m-dur-hover) var(--m-ease-standard)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
               >
@@ -468,7 +467,7 @@ function EpisodeGridModal({
                         position: 'absolute', inset: 0,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         background: 'rgba(0,0,0,0.4)',
-                        opacity: 0, transition: 'opacity 0.2s ease', cursor: 'pointer',
+                        opacity: 0, transition: 'opacity var(--m-dur-hover) var(--m-ease-standard)', cursor: 'pointer',
                       }}
                       onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
                       onMouseLeave={(e) => { e.currentTarget.style.opacity = '0'; }}
@@ -585,7 +584,7 @@ function SeasonGridModal({
         position: 'fixed', inset: 0, zIndex: 200,
         background: OVERLAY_SURFACE,
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        animation: 'tvSeasonGridFadeIn 0.25s ease',
+        animation: 'tvSeasonGridFadeIn var(--m-dur-selected) var(--m-ease-standard)',
         overflowY: 'auto',
       }}
     >
@@ -634,7 +633,7 @@ function SeasonGridModal({
                 style={{
                   ...CARD_GLASS,
                   width: `${posterW + 20}px`, boxSizing: 'border-box', cursor: 'pointer',
-                  transition: 'transform 0.2s ease',
+                  transition: 'transform var(--m-dur-hover) var(--m-ease-standard)',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.05)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
@@ -848,7 +847,7 @@ function SeasonDetailModal({
             minWidth: '44px', minHeight: '44px',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: '#fff', cursor: 'pointer', opacity: 0.85,
-            transition: 'opacity 0.2s ease, background 0.2s ease',
+            transition: 'opacity var(--m-dur-hover) var(--m-ease-standard), background var(--m-dur-hover) var(--m-ease-standard)',
             filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.6))',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(0,0,0,0.45)'; }}
@@ -867,7 +866,7 @@ function SeasonDetailModal({
             position: 'absolute', inset: 0, zIndex: 0, overflow: 'hidden',
             borderRadius: t.card.borderRadius,
             opacity: phase === 'visible' ? 1 : 0,
-            transition: 'opacity 0.4s ease-out',
+            transition: 'opacity var(--m-dur-reveal) var(--m-ease-reveal)',
           }}>
             <img
               src={showBackdropUrl}
@@ -917,7 +916,7 @@ function SeasonDetailModal({
             <div style={{
               maxWidth: t.logo.maxWidth,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
+              transition: 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
               transform: shelfOpen ? 'translateY(-15vh)' : 'translateY(0)',
             }}>
               {titleState === 'logo' && show.clearLogoUrl ? (
@@ -947,7 +946,7 @@ function SeasonDetailModal({
           {/* === Bottom content — meta + plot + pills === */}
           <div style={{
             opacity: shelfOpen ? 0 : (phase === 'visible' ? 1 : 0),
-            transition: shelfOpen ? 'none' : 'opacity 1s ease-in-out 0.8s',
+            transition: shelfOpen ? 'none' : 'opacity var(--m-dur-reveal) var(--m-ease-reveal)',
             willChange: 'opacity',
             display: 'flex', flexDirection: 'column', height: '100%',
             padding: t.contentPadding, textAlign: 'center',
@@ -1223,9 +1222,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // The card's own enter motion (scale 0.96 -> rest, 320 ms) runs first: a warm open revealed inside it, so the
   // buttons crept 1-3 px as the scale finished (N1440 Tulsa). The reveal waits for the card to rest.
   const cardRef = useRef<HTMLDivElement>(null);
-  const showSheet = detailSheetReady(loading, !!error, !!liveShow, liveShow?.title, sheetHero.state, true);
-  useUnopenedClose(props.openKey, showSheet || phase === 'exiting' || phase === 'gone', onClose);
-  const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', showSheet && phase !== 'gone');
+  const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', phase !== 'gone');
   const reveal = useOneReveal(props.openKey, !loading && !!liveShow, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
@@ -1321,25 +1318,24 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // Lock body scroll
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!showSheet) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prev; };
-  }, [showSheet]);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Overlay click closes
   // ---------------------------------------------------------------------------
   const handleOverlayClick = useCallback(
-    (e: React.MouseEvent) => { if (e.target === overlayRef.current) onClose(); },
-    [onClose],
+    (e: React.MouseEvent) => { if (e.target === overlayRef.current && !modalEntering) onClose(); },
+    [onClose, modalEntering],
   );
 
   // ---------------------------------------------------------------------------
   // Animation
   // ---------------------------------------------------------------------------
 
-  if (phase === 'gone' || !showSheet) return null;
+  if (phase === 'gone') return null;
 
   return (
     <Hold hold={modalEntering}>
@@ -1350,11 +1346,13 @@ export function ExpandedLayout(props: TvModalViewProps) {
         data-modal="TvDetailModal"
         data-variant="web-cinema"
         ref={overlayRef}
+        data-phase={phase}
         onClick={handleOverlayClick}
         style={{
           position: 'fixed',
           inset: 0,
           zIndex: 100,
+          pointerEvents: phase === 'exiting' ? 'none' : undefined,
           display: 'flex',
           alignItems: t.overlay.alignItems,
           justifyContent: 'center',
@@ -1399,7 +1397,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
               cursor: 'pointer',
               lineHeight: 1,
               opacity: 0.85,
-              transition: 'opacity 0.2s ease, background 0.2s ease',
+              transition: 'opacity var(--m-dur-hover) var(--m-ease-standard), background var(--m-dur-hover) var(--m-ease-standard)',
               filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.6))',
             }}
             onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(0,0,0,0.45)'; }}
@@ -1422,7 +1420,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                 overflow: 'hidden',
                 borderRadius: t.card.borderRadius,
                 opacity: phase === 'visible' ? 1 : 0,
-                transition: 'opacity 0.4s ease-out',
+                transition: 'opacity var(--m-dur-reveal) var(--m-ease-reveal)',
               }}
             >
               {artEl ? (
@@ -1442,7 +1440,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                   }}
                 />
               ) : !show.backdropUrl && show.posterUrl ? (
-                <img key={show.posterUrl} src={show.posterUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: titleState === 'hold' ? 0 : 0.6, transition: 'opacity 0.45s ease-out' }} />
+                <img key={show.posterUrl} src={show.posterUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: titleState === 'hold' ? 0 : 0.6, transition: 'opacity var(--m-dur-reveal) var(--m-ease-reveal)' }} />
               ) : null}
               {show.backdropUrl && (
                 <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 30%, transparent 40%, rgba(0,0,0,0.2) 100%)', pointerEvents: 'none' }} />
@@ -1535,7 +1533,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     justifyContent: 'center',
                     opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1,
                     // v341l: the backdrop's HERO_ANIM in the reveal commit (as the movie sheet); transform keeps its transition.
-                    transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
+                    transition: 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
                     // v341m: no fade of its own: the row sits in the content layer and rides its CONTENT_WITH_HERO fade (one
                     // compositor start for title and content; its own animation/transition started a frame or two late, B3/I1440).
                     animation: 'none',
@@ -1578,7 +1576,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                 {/* === CONTENT — meta+plot+pills at bottom === */}
                 <div style={{
                   opacity: shelfOpen ? 0 : 1, // the one reveal fades it (a warm open mounts it before `phase`: no second fade)
-                  transition: shelfOpen ? 'none' : 'opacity 1s ease-in-out 0.8s',
+                  transition: shelfOpen ? 'none' : 'opacity var(--m-dur-reveal) var(--m-ease-reveal)',
                   willChange: 'opacity',
                   display: 'flex',
                   flexDirection: 'column',
@@ -1897,7 +1895,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
               background: 'rgba(34,197,94,0.95)', color: '#fff',
               padding: '12px 28px', borderRadius: '12px', fontSize: '16px', fontWeight: 600,
               boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
-              animation: 'tvToastIn 0.25s ease', whiteSpace: 'nowrap', zIndex: 100,
+              animation: 'tvToastIn var(--m-dur-selected) var(--m-ease-standard)', whiteSpace: 'nowrap', zIndex: 100,
             }}>
               Added to Download Client!
             </div>
@@ -1910,7 +1908,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
               background: 'rgba(34,197,94,0.95)', color: '#fff',
               padding: '12px 28px', borderRadius: '12px', fontSize: '16px', fontWeight: 600,
               boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
-              animation: 'tvToastIn 0.25s ease', whiteSpace: 'nowrap', zIndex: 100,
+              animation: 'tvToastIn var(--m-dur-selected) var(--m-ease-standard)', whiteSpace: 'nowrap', zIndex: 100,
             }}>
               Added to Sonarr!
             </div>

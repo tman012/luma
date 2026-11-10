@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { SHEET_EXIT_MS, useCloseOnce } from '@/components/layout/SheetFrame';
+import { useSurfacePresence } from '@/components/motion/useSurfacePresence';
+import { useDetailMounted } from '@/loading/sheetOpenGate';
 import { useTvDetail } from '@/hooks/useTvDetail';
 import { useEpisodeData } from '@/hooks/useEpisodeData';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
@@ -18,6 +19,8 @@ export function TvDetailModal({
   ratingKey,
   tmdbId,
   onClose,
+  active = true,
+  onLeave,
   origin,
   onPersonSearch,
   episodeContext,
@@ -70,7 +73,6 @@ export function TvDetailModal({
   // UI-only state
   const [selectedSeason, setSelectedSeason] = useState<number>(-1);
   const [showFullShow, setShowFullShow] = useState(false);
-  const [phase, setPhase] = useState<'entering' | 'visible' | 'exiting' | 'gone'>('entering');
 
   // Auto-select season from episodeContext once seasons are loaded
   // (suppressed when user navigated to full show view via clearlogo)
@@ -108,15 +110,6 @@ export function TvDetailModal({
   const [plexSeasons, setPlexSeasons] = useState<PlexSeason[]>([]);
   const [shuffleTarget, setShuffleTarget] = useState<{ ratingKey: number; label: string } | null>(null);
 
-  // Animate open on the very next frame — deliberately NOT gated on `loading`.
-  // Holding the card at opacity 0 until data arrived also hid the layouts' own
-  // loading spinner, so the tap read as dead. Shell first, content as it lands.
-  // Mirrors MovieDetailModal.
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setPhase('visible'));
-    return () => cancelAnimationFrame(frame);
-  }, []);
-
   // Fetch Plex season children when show is owned (for season grid + shuffle)
   useEffect(() => {
     if (!showOwned || !show?.ratingKey) return;
@@ -127,44 +120,14 @@ export function TvDetailModal({
     return () => { cancelled = true; };
   }, [showOwned, show?.ratingKey]);
 
-  const { mode, isTablet } = useLayoutMode();
-
-  // Animated close — compact: SheetFrame's exit (--m-dur-sheet-exit), tablet 200ms, expanded 300ms
-  const closeOnce = useCloseOnce();
-  const handleClose = useCallback(() => {
-    if (!closeOnce()) return;
-    setShowSources(null);
-    setShowOngoingPrompt(false);
-    setShowAddToSonarr(false);
-    setShowFullPlot(false);
-    setPhase('exiting');
-    const duration = mode === 'compact' ? SHEET_EXIT_MS : isTablet ? 200 : 300;
-    setTimeout(() => {
-      setPhase('gone');
-      onClose();
-    }, duration);
-  }, [onClose, mode, isTablet, closeOnce]);
-
-
-  // MOTION.md §1.6: back (AppModalHost popstate) plays the exit from wherever the sheet is, then the host unmounts it.
-  useEffect(() => {
-    const onDismiss = (e: Event) => { e.preventDefault(); if (closeOnce()) setPhase('exiting'); };
-    window.addEventListener('luma:modal-dismiss', onDismiss);
-    return () => window.removeEventListener('luma:modal-dismiss', onDismiss);
-  }, [closeOnce]);
-
-  // Escape key
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        if (!showSources && !showOngoingPrompt && !showAddToSonarr && !showFullPlot && !showPlayback) {
-          handleClose();
-        }
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleClose, showSources, showOngoingPrompt, showAddToSonarr, showFullPlot, showPlayback]);
+  // One lifecycle for the sheet (useSurfacePresence): enter phase, a single close, the exit timer owned by this
+  // mounted sheet, and Escape / Back only while this sheet is the top one.
+  const { mode } = useLayoutMode();
+  const nestedOpen = !!showSources || showOngoingPrompt || showAddToSonarr || showFullPlot || showPlayback;
+  const { phase, requestClose: handleClose } = useSurfacePresence({
+    kind: mode === 'compact' ? 'sheet' : 'modal', onExited: onClose, active, escapeBlocked: nestedOpen,
+    onClosing: () => { setShowSources(null); setShowOngoingPrompt(false); setShowAddToSonarr(false); setShowFullPlot(false); onLeave?.(); },
+  });
 
   // Navigate to episode detail view from an episode row click
   const handleEpisodeClick = useCallback((seasonNumber: number, episodeNumber: number) => {
@@ -232,6 +195,7 @@ export function TvDetailModal({
     selectedSeason,
     setSelectedSeason,
     phase,
+    active,
     showSources,
     showAddToSonarr,
     showFullPlot,
@@ -298,10 +262,7 @@ export function TvDetailModal({
   };
 
   const { isTvMode } = useTVMode();
-  useEffect(() => {
-    document.documentElement.dataset.detailMounted = '1';
-    return () => { delete document.documentElement.dataset.detailMounted; };
-  }, []);
+  useDetailMounted();
 
   if (phase === 'gone') return null;
 

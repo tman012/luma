@@ -69,9 +69,11 @@ describe('phone logo size', () => {
   it('uses w300 for TMDb and a 300px transcode for Plex logos on phones', () => {
     (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = true;
     Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true });
+    window.dispatchEvent(new Event('resize'));
     expect(logoImg('https://image.tmdb.org/t/p/original/a.png')).toContain('w300');
     expect(logoImg('/api/img/plex?url=/library/metadata/1/clearLogo')).toContain('w=300');
     Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true });
+    window.dispatchEvent(new Event('resize'));
     expect(logoImg('/api/img/plex?url=/library/metadata/1/clearLogo')).not.toContain('w=300');
   });
 });

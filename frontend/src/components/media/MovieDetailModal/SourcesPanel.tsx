@@ -70,7 +70,7 @@ function SourcesBackButton({ onClick, large, focusKey, zoneId }: {
         background: 'transparent', border: 'none', padding: '8px',
         color: 'white', cursor: 'pointer',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'opacity 0.15s ease',
+        transition: 'opacity var(--m-dur-hover) var(--m-ease-standard)',
       }}
       onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.7'; }}
       onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
@@ -256,7 +256,7 @@ function FocusableReleaseRow({ release, onClick, index, zoneId, isWeb, recommend
         border: `2px solid ${recommended ? 'rgba(74, 222, 128, 0.45)' : (release.rejected ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.15)')}`,
         borderLeft: `3px solid ${recommended ? '#4ade80' : (release.rejected ? 'rgba(245, 158, 11, 0.5)' : 'rgba(255,255,255,0.15)')}`,
         borderRadius: '16px',
-        cursor: 'pointer', minHeight: '72px', transition: 'background 0.2s ease, border-color 0.2s ease',
+        cursor: 'pointer', minHeight: '72px', transition: 'background var(--m-dur-hover) var(--m-ease-standard), border-color var(--m-dur-hover) var(--m-ease-standard)',
         position: 'relative', zIndex: 1, outline: 'none',
         WebkitTapHighlightColor: 'transparent',
       }}
@@ -377,7 +377,7 @@ function ConfirmPanel({ target, confirmLoading, onCancel, onDownload, zoneId, er
               padding: '16px 36px', borderRadius: '50px',
               ...srcCancelBtn,
               color: '#fff', fontSize: '18px', fontWeight: 600, minHeight: '56px',
-              cursor: confirmLoading ? 'default' : 'pointer', transition: 'background 0.2s ease, border-color 0.2s ease',
+              cursor: confirmLoading ? 'default' : 'pointer', transition: 'background var(--m-dur-hover) var(--m-ease-standard), border-color var(--m-dur-hover) var(--m-ease-standard)',
             }}
           >
             Cancel
@@ -390,7 +390,7 @@ function ConfirmPanel({ target, confirmLoading, onCancel, onDownload, zoneId, er
               padding: '16px 40px', borderRadius: '50px',
               ...srcPrimaryBtn,
               color: '#fff', fontSize: '18px', fontWeight: 600, minHeight: '56px',
-              cursor: (confirmLoading || disabledReason) ? 'default' : 'pointer', transition: 'background 0.2s ease, border-color 0.2s ease',
+              cursor: (confirmLoading || disabledReason) ? 'default' : 'pointer', transition: 'background var(--m-dur-hover) var(--m-ease-standard), border-color var(--m-dur-hover) var(--m-ease-standard)',
               opacity: (confirmLoading || disabledReason) ? 0.5 : 1,
             }}
           >
@@ -569,7 +569,7 @@ function ExpandedSourcesView({
     background: 'rgba(255,255,255,0.04)',
     color: '#fff', cursor: 'pointer',
     display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center',
-    gap: '12px', transition: 'background 0.2s ease, border-color 0.2s ease',
+    gap: '12px', transition: 'background var(--m-dur-hover) var(--m-ease-standard), border-color var(--m-dur-hover) var(--m-ease-standard)',
     position: 'relative', zIndex: 1, outline: 'none',
     WebkitTapHighlightColor: 'transparent',
   };
@@ -802,8 +802,8 @@ function ReleaseCard({
         cursor: 'pointer',
         border: `1px solid ${recommended ? 'rgba(74, 222, 128, 0.45)' : (expanded ? badge.border : 'rgba(255,255,255,0.06)')}`,
         borderLeft: `3px solid ${recommended ? '#4ade80' : 'rgba(255,255,255,0.18)'}`,
-        transition: 'background 0.15s, border-color 0.15s',
-        animation: `srcCardEnter 250ms ease-out ${staggerDelay}ms both`,
+        transition: 'background var(--m-dur-hover) var(--m-ease-standard), border-color var(--m-dur-hover) var(--m-ease-standard)',
+        animation: `srcCardEnter var(--m-dur-standard) var(--m-ease-standard) ${staggerDelay}ms both`,
       }}
     >
       {/* Row 0: tracker name + rejection badge (name always shown) */}
@@ -891,7 +891,7 @@ function ReleaseCard({
               fontSize: '15px',
               fontWeight: 600,
               cursor: grabbing || grabbed || disabledReason ? 'default' : 'pointer',
-              transition: 'all 0.2s',
+              transition: 'all var(--m-dur-hover) var(--m-ease-standard)',
               border: 'none',
               background: grabbed
                 ? '#166534'
@@ -1319,7 +1319,7 @@ function CompactSourcesView({
         flexDirection: 'column',
         justifyContent: 'flex-end',
         background: entered && !dismissing ? 'rgba(0,0,0,0.4)' : 'transparent',
-        transition: 'background 0.25s ease',
+        transition: 'background var(--m-dur-standard) var(--m-ease-standard)',
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) handleDismiss();
@@ -1340,7 +1340,7 @@ function CompactSourcesView({
           borderRadius: '20px 20px 0 0',
           overflow: 'hidden',
           transform: `translateY(${sheetTranslate})`,
-          transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: dragOffset > 0 ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           willChange: 'transform',
         }}
       >

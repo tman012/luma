@@ -220,7 +220,7 @@ function PathCard({ path }: { path: string }) {
           alignItems: 'center',
           justifyContent: 'center',
           cursor: 'pointer',
-          transition: 'background 0.15s, color 0.15s',
+          transition: 'background var(--m-dur-hover) var(--m-ease-standard), color var(--m-dur-hover) var(--m-ease-standard)',
         }}
       >
         {copied ? (
@@ -594,7 +594,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
         flexDirection: 'column',
         justifyContent: 'flex-end',
         background: scrimVisible ? 'rgba(0,0,0,0.45)' : 'transparent',
-        transition: 'background 0.25s ease',
+        transition: 'background var(--m-dur-standard) var(--m-ease-standard)',
       }}
     >
       <div className="luma-bleed-panel"
@@ -610,7 +610,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
           boxShadow: '0 -12px 40px rgba(0,0,0,0.45), var(--luma-bleed-shadow)',
           overflow: 'hidden',
           transform: `translateY(${dismissing ? '100%' : entered ? `${dragOffset}px` : '100%'})`,
-          transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: dragOffset > 0 ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
           willChange: 'transform',
         }}
       >
@@ -641,7 +641,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
         justifyContent: 'center',
         padding: 24,
         background: scrimVisible ? 'rgba(0,0,0,0.6)' : 'transparent',
-        transition: 'background 0.2s ease',
+        transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
       }}
     >
       <div
@@ -658,7 +658,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
           overflow: 'hidden',
           opacity: scrimVisible ? 1 : 0,
           transform: scrimVisible ? 'scale(1)' : 'scale(0.97)',
-          transition: 'opacity 0.2s ease, transform 0.2s ease',
+          transition: 'opacity var(--m-dur-hover) var(--m-ease-standard), transform var(--m-dur-hover) var(--m-ease-standard)',
         }}
       >
         {header}

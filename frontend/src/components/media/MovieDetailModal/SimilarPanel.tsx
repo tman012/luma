@@ -61,7 +61,7 @@ function SimilarTile({
         cursor: 'pointer', touchAction: 'manipulation', flexShrink: 0,
         textAlign: 'left',
         transform: pressed ? 'scale(0.93)' : 'scale(1)',
-        transition: pressed ? 'transform 0.1s ease-out' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        transition: pressed ? 'transform var(--m-dur-hover) var(--m-ease-standard)' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
       }}
     >
       <div
@@ -80,7 +80,7 @@ function SimilarTile({
             onError={() => setImgError(true)}
             style={{
               width: '100%', height: '100%', objectFit: 'cover', display: 'block',
-              opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.3s ease',
+              opacity: imgLoaded ? 1 : 0, transition: 'opacity var(--m-dur-standard) var(--m-ease-standard)',
             }}
           />
         ) : (
@@ -340,7 +340,7 @@ export function SimilarPanel({ tmdbId, ratingKey, title, onClose }: SimilarPanel
           position: 'fixed', inset: 0, zIndex: 200,
           display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
           background: entered && !dismissing ? 'rgba(0,0,0,0.4)' : 'transparent',
-          transition: 'background 0.25s ease',
+          transition: 'background var(--m-dur-standard) var(--m-ease-standard)',
         }}
         onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
       >
@@ -355,7 +355,7 @@ export function SimilarPanel({ tmdbId, ratingKey, title, onClose }: SimilarPanel
             borderRadius: '20px 20px 0 0',
             overflow: 'hidden',
             transform: `translateY(${sheetTranslate})`,
-            transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
+            transition: dragOffset > 0 ? 'none' : 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
             willChange: 'transform',
           }}
         >

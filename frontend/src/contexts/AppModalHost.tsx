@@ -1,9 +1,8 @@
-import { useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { ModalHostContext, type ModalOpenOptions } from './ModalHostContext';
+import { ModalHostContext, type ModalHostContextValue, type ModalOpenOptions } from './ModalHostContext';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { MOTION } from '@/theme/motion';
-import { detailSurfaceOpen } from '@/loading/sheetOpenGate';
 import { MovieDetailModal } from '@/components/media/MovieDetailModal';
 import { TvDetailModal } from '@/components/media/TvDetailModal';
 import { PersonDetailModal } from '@/components/media/PersonDetailModal';
@@ -21,10 +20,23 @@ interface PersonTarget {
   name: string;
 }
 
-interface StackEntry {
-  target: ModalTarget | null;
-  personTarget: PersonTarget | null;
+/** One open surface. Layers are kept in open order and every one stays mounted while another sits on top of it
+ *  (a parent sheet keeps its scroll and state under a child); only the last live layer is `active` (Escape, Back,
+ *  swipe). A layer that is closing is `leaving`: it plays its exit, no longer counts as the stack, and is removed
+ *  when it reports the exit done. Layer ids are never reused, so a late callback from a layer that is already
+ *  gone (or replaced) changes nothing. */
+interface Layer {
+  uid: number;
+  kind: 'movie' | 'tv' | 'person';
+  target?: ModalTarget;
+  person?: PersonTarget;
+  leaving: boolean;
 }
+
+const sameTitle = (a: Layer, b: Pick<Layer, 'kind' | 'target' | 'person'>) =>
+  a.kind === b.kind && (a.kind === 'person'
+    ? a.person?.id === b.person?.id
+    : (a.target?.ratingKey ?? null) === (b.target?.ratingKey ?? null) && (a.target?.tmdbId ?? null) === (b.target?.tmdbId ?? null));
 
 /** Back (popstate) dismissal: the longest sheet exit (desktop 300ms owner timers, phone --m-dur-sheet-exit 260ms). */
 const DISMISS_EXIT_MS = MOTION.dur.dismissExit;
@@ -32,10 +44,18 @@ export function AppModalHost({ children }: { children: ReactNode }) {
   const { mode } = useLayoutMode();
   const location = useLocation();
   const navigate = useNavigate();
-  const [target, setTarget] = useState<ModalTarget | null>(null);
-  const [personTarget, setPersonTarget] = useState<PersonTarget | null>(null);
-  const [stack, setStack] = useState<StackEntry[]>([]);
+  const [layers, setLayersState] = useState<Layer[]>([]);
   const [vibeEngineOpen, setVibeEngineOpen] = useState(false);
+  // Always the latest layers, also between a state update and its render: every change goes through `commit`.
+  const layersRef = useRef<Layer[]>([]);
+  const uidRef = useRef(0);
+  const commit = useCallback((fn: (prev: Layer[]) => Layer[]) => {
+    const next = fn(layersRef.current);
+    if (next === layersRef.current) return next;
+    layersRef.current = next;
+    setLayersState(next);
+    return next;
+  }, []);
   // Set when the modal history entry is being disposed of by something other
   // than a back-nav, so the effect below doesn't also compensate with back().
   const popClosingRef = useRef(false);
@@ -47,90 +67,81 @@ export function AppModalHost({ children }: { children: ReactNode }) {
   // Mirror of "is anything showing", kept in sync on every render so callbacks
   // can read it without taking the state as a dependency.
   const openRef = useRef(false);
-  openRef.current = !!target || !!personTarget || vibeEngineOpen;
-  // Modal stack mirror for the popstate handler (avoids stale closures).
-  const stackRef = useRef(stack);
-  stackRef.current = stack;
-  useEffect(() => {
-    const onReplace = () => { if (!detailSurfaceOpen()) setTarget(null); };
-    window.addEventListener('luma:replace-pending-modal', onReplace);
-    return () => window.removeEventListener('luma:replace-pending-modal', onReplace);
+  openRef.current = layers.length > 0 || vibeEngineOpen;
+  // Nested UI (Sources sheet, etc.) can consume system/gesture back first: one handler per layer, and only the
+  // top live layer's is asked.
+  const backHandlersRef = useRef(new Map<number, () => boolean>());
+  const topLive = (list: Layer[] = layersRef.current) => {
+    for (let i = list.length - 1; i >= 0; i--) if (!list[i]!.leaving) return list[i]!;
+    return undefined;
+  };
+
+  const announceClosedIfEmpty = useCallback((next: Layer[]) => {
+    if (next.length === 0) window.dispatchEvent(new Event('modal-closed'));
   }, []);
-  // Nested UI (Sources sheet, etc.) can consume system/gesture back first.
-  const nestedBackHandlerRef = useRef<(() => boolean) | null>(null);
-  const registerBackHandler = useCallback((handler: (() => boolean) | null) => {
-    nestedBackHandlerRef.current = handler;
+
+  /** A layer finished its exit (or was removed outright): drop it. Unknown ids (already gone) are ignored. */
+  const removeLayer = useCallback((uid: number) => {
+    if (!layersRef.current.some((l) => l.uid === uid)) return;
+    backHandlersRef.current.delete(uid);
+    announceClosedIfEmpty(commit((prev) => prev.filter((l) => l.uid !== uid)));
+  }, [commit, announceClosedIfEmpty]);
+
+  const markLeaving = useCallback((uid: number) => {
+    if (!layersRef.current.some((l) => l.uid === uid && !l.leaving)) return;
+    commit((prev) => prev.map((l) => (l.uid === uid ? { ...l, leaving: true } : l)));
+  }, [commit]);
+
+  const pushLayer = useCallback((layer: Pick<Layer, 'kind' | 'target' | 'person'>, replaceStack?: boolean) => {
+    const cur = layersRef.current;
+    const top = topLive(cur);
+    // The same title opened again while it is the top sheet (a double tap, a second Enter) is the same open.
+    if (!replaceStack && top && sameTitle(top, layer)) return;
+    commit((prev) => {
+      const entry: Layer = { ...layer, uid: ++uidRef.current, leaving: false };
+      if (replaceStack) { backHandlersRef.current.clear(); return [entry]; }
+      // A person opened over a person replaces it; everything else stacks on what is open.
+      const replacedPerson = layer.kind === 'person' && top?.kind === 'person' ? top.uid : null;
+      return [...prev.filter((l) => l.uid !== replacedPerson), entry];
+    });
+    window.dispatchEvent(new Event('modal-opened'));
+  }, [commit]);
+
+  const registerBackHandler = useCallback((uid: number, handler: (() => boolean) | null) => {
+    if (handler) backHandlersRef.current.set(uid, handler); else backHandlersRef.current.delete(uid);
   }, []);
 
   const openMovie = useCallback((opts: ModalOpenOptions) => {
     console.log('[MODAL OPEN]', { mode, source: opts.origin ?? 'unknown', mediaType: 'movie', tmdbId: opts.tmdbId, ratingKey: opts.ratingKey });
-    // If a detail OR person modal is already open, push it onto the stack so
-    // closing the new modal restores the previous one (incl. a standalone
-    // person modal — otherwise opening a credit would drop the filmography).
-    // Unless this is an arrival from outside the app, which replaces.
-    if (opts.replaceStack) {
-      setStack([]);
-    } else if ((target && detailSurfaceOpen()) || (personTarget && detailSurfaceOpen('person'))) {
-      // Drilling from More Like This: remember to reopen Similar when this
-      // movie is restored from the stack. A modal that has not portaled its
-      // sheet yet is replaced, not nested.
-      const stackedTarget = target && opts.origin === 'similar_movies'
-        ? { ...target, restoreSimilar: true }
-        : target;
-      setStack(s => [...s, { target: stackedTarget, personTarget }]);
-    }
-    setTarget({ ...opts, mediaType: 'movie' });
-    setPersonTarget(null);
-    window.dispatchEvent(new Event('modal-opened'));
-  }, [mode, target, personTarget]);
+    pushLayer({ kind: 'movie', target: { ...opts, mediaType: 'movie' } }, opts.replaceStack);
+  }, [mode, pushLayer]);
 
   const openTv = useCallback((opts: ModalOpenOptions) => {
     console.log('[MODAL OPEN]', { mode, source: opts.origin ?? 'unknown', mediaType: 'tv', tmdbId: opts.tmdbId, ratingKey: opts.ratingKey });
-    if (opts.replaceStack) {
-      setStack([]);
-    } else if ((target && detailSurfaceOpen()) || (personTarget && detailSurfaceOpen('person'))) {
-      setStack(s => [...s, { target, personTarget }]);
-    }
-    setTarget({ ...opts, mediaType: 'tv' });
-    setPersonTarget(null);
-    window.dispatchEvent(new Event('modal-opened'));
-  }, [mode, target, personTarget]);
+    pushLayer({ kind: 'tv', target: { ...opts, mediaType: 'tv' } }, opts.replaceStack);
+  }, [mode, pushLayer]);
 
   const openPerson = useCallback((opts: { personId: number; personName: string }) => {
-    setPersonTarget({ id: opts.personId, name: opts.personName });
-  }, []);
+    pushLayer({ kind: 'person', person: { id: opts.personId, name: opts.personName } });
+  }, [pushLayer]);
 
   const openVibeEngine = useCallback(() => {
     setVibeEngineOpen(true);
   }, []);
 
-  const closeDetail = useCallback(() => {
-    setTarget(null);
-    setPersonTarget(null);
-    setStack([]);
-    window.dispatchEvent(new Event('modal-closed'));
-  }, []);
-
+  /** Back out of the one surface that is on top (no exit animation; the owner of the exit calls removeLayer). */
   const close = useCallback(() => {
-    // If we have a stacked modal, pop back to it instead of dismissing entirely.
-    const next = stack.length > 0 ? stack[stack.length - 1] : undefined;
-    if (next) {
-      setTarget(next.target);
-      setPersonTarget(next.personTarget);
-      setStack(s => s.slice(0, -1));
-      // History depth is synced by the anyOpen/stackLen effect below (it will
-      // history.back() to drop the nest entry without dismissing the parent).
+    const top = topLive();
+    if (top && layersRef.current.filter((l) => !l.leaving).length > 1) {
+      backHandlersRef.current.delete(top.uid);
+      commit((prev) => prev.filter((l) => l.uid !== top.uid));
       return;
     }
-    setTarget(null);
-    setPersonTarget(null);
+    backHandlersRef.current.clear();
+    commit(() => []);
     setVibeEngineOpen(false);
     window.dispatchEvent(new Event('modal-closed'));
-  }, [stack]);
-
-  const closePerson = useCallback(() => {
-    setPersonTarget(null);
-  }, []);
+  }, [commit]);
 
   const closeVibeEngine = useCallback(() => {
     setVibeEngineOpen(false);
@@ -142,16 +153,15 @@ export function AppModalHost({ children }: { children: ReactNode }) {
    *  must not re-subscribe every time a modal opens. */
   const dismissAll = useCallback(() => {
     const was = openRef.current;
-    setTarget(null);
-    setPersonTarget(null);
+    backHandlersRef.current.clear();
+    commit(() => []);
     setVibeEngineOpen(false);
-    setStack([]);
     if (was) {
       popClosingRef.current = true;
       window.dispatchEvent(new Event('modal-closed'));
     }
     return was;
-  }, []);
+  }, [commit]);
 
   // Parse modal deep-link params from a URL string and open the modal
   const handleDeepLink = useCallback((urlStr: string) => {
@@ -342,22 +352,21 @@ export function AppModalHost({ children }: { children: ReactNode }) {
   // Elevate detail modals above the carousel (z-9999) when opened from vibe engine
   // or the /describe-it route (DescribeItPage with carousel).
   const isVibeRoute = location.pathname === '/describe-it';
+  const hasDetail = layers.some((l) => l.kind !== 'person');
   useEffect(() => {
-    if (!((vibeEngineOpen || isVibeRoute) && target)) return;
+    if (!((vibeEngineOpen || isVibeRoute) && hasDetail)) return;
     const style = document.createElement('style');
     style.textContent = '[data-modal="MovieDetailModal"], [data-modal="TvDetailModal"] { z-index: 10000 !important; }';
     document.head.appendChild(style);
     return () => { document.head.removeChild(style); };
-  }, [vibeEngineOpen, isVibeRoute, target]);
+  }, [vibeEngineOpen, isVibeRoute, hasDetail]);
 
   // Android/PWA hardware & gesture back should close/pop an open modal instead of
   // navigating the route away (or exiting the PWA). Maintain one history entry
-  // per modal stack level (1 + stack.length) so back pops one level at a time —
-  // restoring the parent with restoreSimilar when drilled from More Like This.
-  const anyOpen = !!target || vibeEngineOpen || !!personTarget;
-  const stackLen = stack.length;
+  // per open layer so back pops one level at a time.
+  const depth = layers.length > 0 ? layers.length : vibeEngineOpen ? 1 : 0;
   useEffect(() => {
-    const desired = anyOpen ? 1 + stackLen : 0;
+    const desired = depth;
 
     const onPop = () => {
       if (syncingHistoryRef.current > 0) {
@@ -366,35 +375,40 @@ export function AppModalHost({ children }: { children: ReactNode }) {
       }
       historyDepthRef.current = Math.max(0, historyDepthRef.current - 1);
 
-      // Nested sheet (e.g. Sources) consumes back → parent detail modal stays.
-      if (nestedBackHandlerRef.current?.()) {
+      // Nested sheet (e.g. Sources) consumes back → the detail sheet under it stays.
+      const top = topLive();
+      if (top && backHandlersRef.current.get(top.uid)?.()) {
         window.history.pushState({ __modal: true }, '');
         historyDepthRef.current += 1;
         return;
       }
 
-      const s = stackRef.current;
-      if (s.length > 0) {
-        // Pop one nest level — same as close() — so Similar restore works on back.
-        const next = s[s.length - 1]!;
-        setTarget(next.target);
-        setPersonTarget(next.personTarget);
-        setStack(prev => prev.slice(0, -1));
+      const all = layersRef.current;
+      const live = all.filter((l) => !l.leaving);
+      // Everything that is open is already closing: let it finish.
+      if (all.length > 0 && live.length === 0) return;
+
+      // MOTION.md §1.6: back runs the top sheet's exit animation first (the sheet claims the dismissal with
+      // preventDefault on 'luma:modal-dismiss'), then the host removes it.
+      if (live.length > 1 && top) {
+        const claimed = !window.dispatchEvent(new CustomEvent('luma:modal-dismiss', { cancelable: true }));
+        if (claimed) { markLeaving(top.uid); window.setTimeout(() => removeLayer(top.uid), DISMISS_EXIT_MS); } else removeLayer(top.uid);
         return;
       }
 
-      // No stacked parent: dismiss everything. MOTION.md §1.6: back runs the open sheet's exit animation first
-      // (the sheet claims the dismissal with preventDefault on 'luma:modal-dismiss'), then unmounts.
+      // No stacked parent: dismiss everything.
       popClosingRef.current = true;
       const clear = () => {
-        setTarget(null);
-        setPersonTarget(null);
-        setStack([]);
+        backHandlersRef.current.clear();
+        commit(() => []);
         setVibeEngineOpen(false);
         window.dispatchEvent(new Event('modal-closed'));
       };
       const claimed = !window.dispatchEvent(new CustomEvent('luma:modal-dismiss', { cancelable: true }));
-      if (claimed) window.setTimeout(clear, DISMISS_EXIT_MS); else clear();
+      if (claimed) {
+        live.forEach((l) => markLeaving(l.uid));
+        window.setTimeout(clear, DISMISS_EXIT_MS);
+      } else clear();
     };
 
     window.addEventListener('popstate', onPop);
@@ -404,8 +418,7 @@ export function AppModalHost({ children }: { children: ReactNode }) {
       window.history.pushState({ __modal: true }, '');
       historyDepthRef.current += 1;
     }
-    // UI close of a nest level already calls history.back() in close(); if we
-    // still have excess (e.g. dismissAll), consume without re-entering onPop logic.
+    // A layer that closed from the UI leaves an extra entry: consume it without re-entering onPop logic.
     if (historyDepthRef.current > desired) {
       const drop = historyDepthRef.current - desired;
       syncingHistoryRef.current += drop;
@@ -417,10 +430,10 @@ export function AppModalHost({ children }: { children: ReactNode }) {
       window.removeEventListener('popstate', onPop);
       popClosingRef.current = false;
     };
-  }, [anyOpen, stackLen]);
+  }, [depth, commit, markLeaving, removeLayer]);
 
   // When modal is open, mark app content as inert for focus trapping
-  const anyModalOpen = !!target || vibeEngineOpen;
+  const anyModalOpen = hasDetail || vibeEngineOpen;
   useEffect(() => {
     const appRoot = document.getElementById('root');
     if (!appRoot) return;
@@ -431,46 +444,66 @@ export function AppModalHost({ children }: { children: ReactNode }) {
     }
   }, [anyModalOpen]);
 
+  const hostValue = useMemo<ModalHostContextValue>(() => ({
+    openMovie, openTv, openPerson, openVibeEngine, close, registerBackHandler: (h) => registerBackHandler(0, h),
+  }), [openMovie, openTv, openPerson, openVibeEngine, close, registerBackHandler]);
+  // Each layer reads the same host with its own back handler slot (one stable value per layer and host).
+  const layerValues = useRef(new Map<number, { host: ModalHostContextValue; value: ModalHostContextValue }>());
+  const valueFor = (uid: number): ModalHostContextValue => {
+    const hit = layerValues.current.get(uid);
+    if (hit && hit.host === hostValue) return hit.value;
+    const value = { ...hostValue, registerBackHandler: (h: (() => boolean) | null) => registerBackHandler(uid, h) };
+    layerValues.current.set(uid, { host: hostValue, value });
+    return value;
+  };
+  for (const uid of layerValues.current.keys()) if (!layers.some((l) => l.uid === uid)) layerValues.current.delete(uid);
+  const topUid = topLive(layers)?.uid;
+
   return (
-    <ModalHostContext.Provider value={{ openMovie, openTv, openPerson, openVibeEngine, close, registerBackHandler }}>
+    <ModalHostContext.Provider value={hostValue}>
       {children}
       {vibeEngineOpen && (
         <Suspense fallback={null}>
           <VibeEngineModal onClose={closeVibeEngine} />
         </Suspense>
       )}
-      {target && target.mediaType === 'tv' ? (
-        <TvDetailModal
-          key={`tv-${target.tmdbId ?? target.ratingKey ?? 'x'}-${stack.length}`}
-          ratingKey={target.ratingKey}
-          tmdbId={target.tmdbId}
-          origin={target.origin}
-          onClose={vibeEngineOpen ? closeDetail : close}
-          onPersonSearch={target.onPersonSearch}
-          episodeContext={target.episodeContext}
-          initialSeason={target.initialSeason}
-          searchQuery={target.searchQuery}
-        />
-      ) : target ? (
-        <MovieDetailModal
-          key={`movie-${target.tmdbId ?? target.ratingKey ?? 'x'}-${stack.length}`}
-          ratingKey={target.ratingKey}
-          tmdbId={target.tmdbId}
-          origin={target.origin}
-          onClose={vibeEngineOpen ? closeDetail : close}
-          onPersonSearch={target.onPersonSearch}
-          restoreSimilar={target.restoreSimilar}
-          searchQuery={target.searchQuery}
-        />
-      ) : null}
-      {personTarget && (
-        <PersonDetailModal
-          key={`person-${personTarget.id}`}
-          personId={personTarget.id}
-          personName={personTarget.name}
-          onClose={closePerson}
-        />
-      )}
+      {layers.map((l) => {
+        const done = () => removeLayer(l.uid);
+        const leave = () => markLeaving(l.uid);
+        const active = l.uid === topUid;
+        return (
+          <ModalHostContext.Provider key={l.uid} value={valueFor(l.uid)}>
+            {l.kind === 'person' && l.person ? (
+              <PersonDetailModal personId={l.person.id} personName={l.person.name} onClose={done} onLeave={leave} active={active} />
+            ) : l.kind === 'tv' && l.target ? (
+              <TvDetailModal
+                ratingKey={l.target.ratingKey}
+                tmdbId={l.target.tmdbId}
+                origin={l.target.origin}
+                onClose={done}
+                onLeave={leave}
+                active={active}
+                onPersonSearch={l.target.onPersonSearch}
+                episodeContext={l.target.episodeContext}
+                initialSeason={l.target.initialSeason}
+                searchQuery={l.target.searchQuery}
+              />
+            ) : l.target ? (
+              <MovieDetailModal
+                ratingKey={l.target.ratingKey}
+                tmdbId={l.target.tmdbId}
+                origin={l.target.origin}
+                onClose={done}
+                onLeave={leave}
+                active={active}
+                onPersonSearch={l.target.onPersonSearch}
+                restoreSimilar={l.target.restoreSimilar}
+                searchQuery={l.target.searchQuery}
+              />
+            ) : null}
+          </ModalHostContext.Provider>
+        );
+      })}
     </ModalHostContext.Provider>
   );
 }

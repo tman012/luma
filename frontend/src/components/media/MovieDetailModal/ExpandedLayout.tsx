@@ -6,7 +6,6 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatRuntime, finalBackdropUrl } from '@/utils/image';
 import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO } from '@/hooks/useSheetBackdrop';
-import { detailSheetReady, useUnopenedClose } from '@/loading/sheetOpenGate';
 import {
   CARD_BG,
   PERSON_FALLBACK_SVG,
@@ -119,7 +118,7 @@ function CastShelf({
             ? 'linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0) 100%)'
             : 'transparent',
           padding: isTablet ? '40px 0 32px' : '48px 0 48px',
-          animation: imagesReady ? 'castShelfBounce 0.55s cubic-bezier(0.34, 1.56, 0.64, 1)' : 'none',
+          animation: imagesReady ? 'castShelfBounce var(--m-dur-modal-enter) var(--m-ease-modal-enter)' : 'none',
           transform: imagesReady ? 'translateY(0)' : 'translateY(100%)',
         }}
       >
@@ -257,7 +256,7 @@ function PillButton({
         fontSize,
         fontWeight: 600,
         cursor: 'pointer',
-        transition: 'background 0.15s ease',
+        transition: 'background var(--m-dur-hover) var(--m-ease-standard)',
         backdropFilter: primary ? 'none' : 'blur(12px)',
         WebkitBackdropFilter: primary ? 'none' : 'blur(12px)',
       }}
@@ -302,7 +301,7 @@ function FileInfoButton({ onClick, top, right, svgSize }: { onClick: () => void;
         cursor: 'pointer',
         lineHeight: 1,
         opacity: 0.85,
-        transition: 'opacity 0.2s ease, background 0.2s ease',
+        transition: 'opacity var(--m-dur-hover) var(--m-ease-standard), background var(--m-dur-hover) var(--m-ease-standard)',
         filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.6))',
       }}
       onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(0,0,0,0.45)'; }}
@@ -420,9 +419,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // buttons crept 1-3 px as the scale finished (N1440 Tulsa). The reveal waits for the card to rest.
   const cardRef = useRef<HTMLDivElement>(null);
   const ownedKnown = !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey);
-  const showSheet = detailSheetReady(loading, !!error, !!liveDetail, liveDetail?.title, sheetHero.state, ownedKnown);
-  useUnopenedClose(props.openKey, showSheet || phase === 'exiting' || phase === 'gone', onClose);
-  const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', showSheet && phase !== 'gone');
+  const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', phase !== 'gone');
   const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
     sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, ownedKnown, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
@@ -616,19 +613,18 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // Lock body scroll
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!showSheet) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [showSheet]);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Overlay click closes
   // ---------------------------------------------------------------------------
   const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === overlayRef.current) onClose();
+    if (e.target === overlayRef.current && !modalEntering) onClose();
   };
 
   // ---------------------------------------------------------------------------
@@ -670,7 +666,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // Animation — tablet: opacity-only (skip scale/transform for GPU savings)
   // ---------------------------------------------------------------------------
 
-  if (phase === 'gone' || !showSheet) return null;
+  if (phase === 'gone') return null;
 
   return (
     <Hold hold={modalEntering}>
@@ -679,11 +675,13 @@ export function ExpandedLayout(props: MovieModalViewProps) {
       data-modal="MovieDetailModal"
       data-variant="web-v2"
       ref={overlayRef}
+      data-phase={phase}
       onClick={handleOverlayClick}
       style={{
         position: 'fixed',
         inset: 0,
         zIndex: 100,
+        pointerEvents: phase === 'exiting' ? 'none' : undefined,
         display: 'flex',
         alignItems: t.overlay.alignItems,
         justifyContent: 'center',
@@ -739,7 +737,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
             cursor: 'pointer',
             lineHeight: 1,
             opacity: 0.85,
-            transition: 'opacity 0.2s ease, background 0.2s ease',
+            transition: 'opacity var(--m-dur-hover) var(--m-ease-standard), background var(--m-dur-hover) var(--m-ease-standard)',
             filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.6))',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(0,0,0,0.45)'; }}
@@ -772,7 +770,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               overflow: 'hidden',
               borderRadius: t.card.borderRadius,
               opacity: phase === 'visible' ? 1 : 0,
-              transition: 'opacity 0.4s ease-out',
+              transition: 'opacity var(--m-dur-reveal) var(--m-ease-reveal)',
             }}
           >
             {artEl ? (
@@ -794,7 +792,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 key={detail.posterUrl}
                 src={detail.posterUrl}
                 alt=""
-                style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: titleState === 'hold' ? 0 : 0.6, transition: 'opacity 0.45s ease-out' }}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: titleState === 'hold' ? 0 : 0.6, transition: 'opacity var(--m-dur-reveal) var(--m-ease-reveal)' }}
               />
             ) : null}
             {/* Vignette */}
@@ -934,7 +932,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 opacity: sheetHero.state === 'hold' || !reveal.revealed ? 0 : 1,
                 // v341l: the title/logo runs the backdrop's own HERO_ANIM in the reveal commit (a transition started a
                 // frame after the content's animation: title +20-30 ms); the cast-shelf transform keeps its transition.
-                transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
+                transition: 'transform var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
                 // v341m: no fade of its own: the row sits in the content layer and rides its CONTENT_WITH_HERO fade (one
                 // compositor start for title and content; its own animation/transition started a frame or two late, B3/I1440).
                 animation: 'none',
@@ -981,7 +979,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
             {/* === CONTENT — meta+plot+pills at bottom === */}
             <div style={{
               opacity: (showSourcesShelf || showCastShelf) ? 0 : 1, // the one reveal fades it (a warm open mounts it before `phase`: no second fade)
-              transition: (showSourcesShelf || showCastShelf) ? 'none' : 'opacity 1s ease-in-out 0.8s',
+              transition: (showSourcesShelf || showCastShelf) ? 'none' : 'opacity var(--m-dur-reveal) var(--m-ease-reveal)',
               willChange: 'opacity',
               display: 'flex',
               flexDirection: 'column',
@@ -1248,7 +1246,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 WebkitBackdropFilter: 'blur(12px)',
                 borderRadius: '20px 20px 0 0',
                 padding: t.upgrade.padding,
-                animation: 'infoShelfSlideUp 0.45s ease-out',
+                animation: 'infoShelfSlideUp var(--m-dur-modal-enter) var(--m-ease-modal-enter)',
                 WebkitMaskImage: t.upgrade.mask,
                 maskImage: t.upgrade.mask,
               }}
@@ -1333,7 +1331,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           borderRadius: '16px',
                           padding: t.upgrade.optPadding,
                           cursor: upgradeAdding ? 'default' : 'pointer',
-                          transition: 'all 0.2s',
+                          transition: 'all var(--m-dur-hover) var(--m-ease-standard)',
                           textAlign: 'center',
                         }}
                       >
@@ -1556,7 +1554,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                             const ageDays = release.age != null ? Math.round(release.age) : null;
                             return (
                               <div key={release.guid || i} role="button" data-source-row="" onClick={() => { setSrcConfirmTarget(release); setSrcGrabError(null); }}
-                                style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '18px 24px', background: SRC_ROW_BG, border: '1px solid rgba(255,255,255,0.08)', borderRadius: '14px', cursor: 'pointer', transition: 'background 0.2s ease', ...srcAbove }}>
+                                style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '18px 24px', background: SRC_ROW_BG, border: '1px solid rgba(255,255,255,0.08)', borderRadius: '14px', cursor: 'pointer', transition: 'background var(--m-dur-hover) var(--m-ease-standard)', ...srcAbove }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                   <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, alignSelf: 'flex-start', background: rBadge.bg, color: rBadge.fg, border: `1px solid ${rBadge.border}` }}>
                                     {release.indexer}
@@ -1836,7 +1834,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               fontSize: '16px',
               fontWeight: 600,
               boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
-              animation: 'webToastIn 0.25s ease',
+              animation: 'webToastIn var(--m-dur-selected) var(--m-ease-standard)',
               whiteSpace: 'nowrap',
               zIndex: 100,
             }}

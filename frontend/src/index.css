@@ -1491,13 +1491,18 @@ html.luma-minimal [data-search-panel] { z-index: 70; }
 @keyframes lumaTitleIn { from { opacity: 0; } to { opacity: 1; } }
 
 /* Phone: the tapped poster or row while its popup gets ready. */
-/* Pressed from pointerdown (that frame: no transition in) until its sheet starts moving; eases back out. */
-.luma-pressable{transition:transform 120ms ease,opacity 120ms ease}
-.luma-pressable[data-pressed="true"]{transform:scale(.98);transition:none}
-@media (prefers-reduced-motion: reduce){.luma-pressable[data-pressed="true"]{transform:none;opacity:.8}}
+/* Shared interaction states (theme/motion.ts STATE_MOTION). Pressed: from pointerdown, that frame (no transition in),
+   until the sheet starts moving; eases back out. Hover: pointer devices only. Focus: keyboard only. Selected: stays
+   at rest. Transform and opacity only. */
+.luma-pressable,.m-interactive{transition:transform var(--m-dur-press) var(--m-ease-standard),opacity var(--m-dur-hover) var(--m-ease-standard)}
+.luma-pressable[data-pressed="true"],.m-interactive[data-pressed="true"],.m-interactive:active{transform:scale(var(--m-press-scale));transition:none}
+@media (hover:hover){.m-interactive:hover{opacity:.88}}
+.m-interactive:focus-visible{outline:2px solid rgb(255 255 255 / .85);outline-offset:2px}
+.m-interactive[aria-selected="true"],.m-interactive[aria-pressed="true"],.m-interactive[data-selected="true"]{opacity:1}
+@media (prefers-reduced-motion: reduce){.luma-pressable[data-pressed="true"],.m-interactive[data-pressed="true"],.m-interactive:active{transform:none;opacity:.8}}
 /* Seeded phone hero: the details' boxes fade in; the hero (wash, title) is already final. */
 [data-details-fade] > :not([data-hero-keep]){animation:m-crossfade var(--m-dur-crossfade) var(--m-ease-standard) both}
 /* The sheet's ONE reveal (useOneReveal): the details hold until the hero latches, then fade with it (HERO_FADE). */
-[data-reveal-gate] > :not([data-hero-keep]){transition:opacity 0.45s ease-out}
+[data-reveal-gate] > :not([data-hero-keep]){transition:opacity var(--m-dur-reveal) var(--m-ease-reveal)}
 [data-reveal-gate="hold"] > :not([data-hero-keep]){opacity:0}
 @media (prefers-reduced-motion: reduce){[data-reveal-gate] > :not([data-hero-keep]){transition:none}}

@@ -215,7 +215,7 @@ export function OngoingShowPrompt({
               fontSize: '15px',
               fontWeight: 700,
               cursor: adding || added ? 'default' : 'pointer',
-              transition: 'all 0.2s',
+              transition: 'all var(--m-dur-hover) var(--m-ease-standard)',
               opacity: adding ? 0.7 : 1,
             }}
           >

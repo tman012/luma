@@ -388,10 +388,9 @@ export function scheduleWarm(key: string, run: () => Promise<void>, group?: stri
 }
 
 // ---------------------------------------------------------------------------
-// Phone: a tap mounts the detail modal, but the sheet stays closed until the real
-// title and artwork are ready (detailSheetReady). OPEN_CAP_MS no longer forces a
-// partly-ready sheet onto the screen. The tapped poster's pixels still seed colors
-// for the composed frame. Past SHEET_OPEN_BOUND_MS an unopened sheet is abandoned.
+// A tap opens the detail sheet in the same task, into its final frame; the title, logo and artwork reveal into it
+// once they are ready (useOneReveal), never held for the network. The tapped poster's pixels seed the colors and
+// the title for that first frame.
 // ---------------------------------------------------------------------------
 
 export const OPEN_CAP_MS = 600;
@@ -401,6 +400,9 @@ let tapAt = 0;
 /** Bumped by every open attempt. A newer tap supersedes one whose sheet is not on screen yet. */
 let openGen = 0;
 let stopWatch: (() => void) | null = null;
+/** The title this module just asked the host to open, until its sheet is on screen: the same title tapped again in
+ *  that window is the same open (a double tap), not a second one. */
+let opened: { key: string; at: number } | null = null;
 const now = () => Date.now();
 
 /** ms since the tap that opened the popup (null when it wasn't opened through openWhenReady just now). */
@@ -445,6 +447,8 @@ export function tapShell(): TapShell | null {
 }
 
 const SHEET_SEL = '[data-modal="MovieDetailModal"],[data-modal="TvDetailModal"]';
+/** A sheet that is on screen and not on its way out. One that is exiting no longer swallows a tap. */
+const LIVE_SHEET_SEL = '[data-modal="MovieDetailModal"]:not([data-phase="exiting"]),[data-modal="TvDetailModal"]:not([data-phase="exiting"])';
 /** How long a tap waits for a detail sheet to mount before giving up on it (no sheet: release). */
 export const SHEET_MOUNT_WAIT_MS = 1500;
 
@@ -516,10 +520,10 @@ export async function openWhenReady(
   card: HTMLElement | null, open: () => void, onClosed?: () => void, art?: (string | null | undefined)[],
   logo?: KnownLogo,
 ): Promise<void> {
-  // A sheet already on screen ignores further taps. One that has not appeared yet is replaced:
-  // A→B→C must not let an older title reveal.
-  if (pending && !!document.querySelector(SHEET_SEL)) return;
-  const replacing = pending;
+  // A sheet already on screen ignores further taps. One that is closing does not: its exit plays on while this
+  // tap opens the next title (A→B→C must not let an older title reveal: each open supersedes the last).
+  const openKey = `${kind}:${ratingKey ?? ''}:${tmdbId ?? ''}`;
+  if (pending && (!!document.querySelector(LIVE_SHEET_SEL) || (opened?.key === openKey && now() - opened.at < SHEET_MOUNT_WAIT_MS && !document.querySelector(SHEET_SEL)))) return;
   const mine = ++openGen;
   stopWatch?.();
   stopWatch = null;
@@ -538,24 +542,13 @@ export async function openWhenReady(
   const seed = colorsFromImage(img);
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);
   shell = card ? { title: tapTitle(card), year: tapYear(card), poster: img?.currentSrc || img?.src || null, at: now(), owned: tapOwned(card, ratingKey), plex: !!ratingKey } : null;
-  // Drop a modal that is mounted but not on screen before this open waits a tick, so the
-  // hidden title cannot latch and the host cannot stack it under the new one.
-  if (replacing) window.dispatchEvent(new Event('luma:replace-pending-modal'));
   const cardWasConnected = !!card?.isConnected;
   if (card) { if (pressed && pressed !== card) release(); pressed = card; card.setAttribute('data-pressed', 'true'); holdFor(card, SHEET_OPEN_BOUND_MS); }
   // The art first (v341l): its request is queued before this open's detail calls, so a slow TMDb holding the
   // other connections never leaves it waiting for a socket (Tester I1440: art at +3.7 s behind TMDb calls).
-  const first = (art ?? []).filter((u): u is string => !!u);
-  if (first.length) { for (const u of first) void preloadImage(u, 'high'); await new Promise<void>((r) => window.setTimeout(r, 0)); }
-  let timer = 0;
-  try {
-    await Promise.race([
-      warmDetail(kind, ratingKey, tmdbId, { open: true, art, logo }).catch(() => {}),
-      new Promise<void>((res) => { timer = window.setTimeout(res, OPEN_WAIT_MS); }),
-    ]);
-  } finally {
-    window.clearTimeout(timer);
-  }
+  // The sheet then opens in this same task: nothing here waits on the network or on a timer.
+  for (const u of (art ?? [])) if (u) void preloadImage(u, 'high');
+  void warmDetail(kind, ratingKey, tmdbId, { open: true, art, logo }).catch(() => {});
   if (mine !== openGen) return;
   // The tapped row left the page (back, unmount) during the art tick: do not open it later.
   if (card && cardWasConnected && !card.isConnected) {
@@ -563,15 +556,16 @@ export async function openWhenReady(
     return;
   }
   try {
+    opened = { key: openKey, at: now() };
     open();
   } catch (e) {
+    opened = null;
     if (mine === openGen) { pending = false; release(card); }
     throw e;
   }
   if (mine !== openGen) return;
   // The press is released by the sheet's first moving frame (SHEET_MOVING_EVENT); holdFor is the fallback.
-  // The sheet itself stays unmounted until its title and artwork are ready (useSheetGo).
-  stopWatch = watchSheet(() => { if (mine !== openGen) return; pending = false; onClosed?.(); });
+  stopWatch = watchSheet(() => { if (mine !== openGen) return; pending = false; opened = null; onClosed?.(); });
 }
 
 export function _resetModalPrefetch(): void {
@@ -589,6 +583,7 @@ export function _resetModalPrefetch(): void {
   gen += 1;
   active = 0;
   pending = false;
+  opened = null;
   tapAt = 0;
   shell = null;
   openGen += 1;

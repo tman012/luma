@@ -48,7 +48,7 @@ describe('v340: search opens a title exactly like Home', () => {
     const a = render(<BackdropHero backdropUrl="/bd.jpg" effects={fx} phase="visible" instant />);
     const img = a.container.querySelector('img')!;
     expect(img.style.opacity).toBe('0');
-    expect(img.style.transition).toMatch(/opacity 0\.45s/);
+    expect(img.style.transition).toMatch(/opacity var\(--m-dur-reveal\)/);
     fireEvent.load(img);
     expect(img.style.opacity).toBe('1');
     expect(a.container.querySelectorAll('img')).toHaveLength(1);

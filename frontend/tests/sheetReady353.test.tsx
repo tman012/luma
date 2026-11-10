@@ -1,6 +1,7 @@
-/** Sheets stay closed until a real title and the visible art decision are ready.
- *  A timer does not open a color wash. Startup / full refresh is the navy Loading…
- *  screen; a later refetch does not blank rows that are already on screen. */
+/** Movie and TV sheets open on the tap into a layout-stable frame and reveal the title and artwork into it once
+ *  they are decoded; they are never held for the network and never abandoned by a timer. A timer does not open a
+ *  color wash. Startup / full refresh is the navy Loading… screen; a later refetch does not blank rows that are
+ *  already on screen. */
 import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { readFileSync } from 'node:fs';
@@ -27,7 +28,7 @@ vi.mock('@/contexts/ModalHostContext', async (orig) => ({
 
 import { MovieDetailModal } from '@/components/media/MovieDetailModal';
 import { MinimalHomePage } from '@/pages/MinimalHomePage';
-import { detailSheetReady, SHEET_OPEN_BOUND_MS, useUnopenedClose } from '@/loading/sheetOpenGate';
+import { detailSheetReady, SHEET_OPEN_BOUND_MS } from '@/loading/sheetOpenGate';
 import { SHEET_EXIT_MS } from '@/components/layout/SheetFrame';
 import { _resetImageLoader } from '@/loading/imageLoader';
 import { _resetModalPrefetch } from '@/services/modalPrefetch';
@@ -97,44 +98,41 @@ describe('detail sheet readiness boundaries', () => {
     expect(detailSheetReady(false, true, false, null, 'hold', false)).toBe(true);
   });
 
-  it('does not open on the old art deadline, and closes without a sheet when the bound passes', async () => {
+  const gate = () => document.querySelector('[data-reveal-gate]')?.getAttribute('data-reveal-gate');
+
+  it('opens before any data and is not abandoned when the open bound passes', async () => {
     vi.useFakeTimers();
     installFetch(() => new Promise<Response>(() => {}));
     const onClose = vi.fn();
     render(<MovieDetailModal tmdbId={603} onClose={onClose} />);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
-    expect(sheet()).toBeNull();
+    expect(sheet()).not.toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(SHEET_OPEN_BOUND_MS + SHEET_EXIT_MS + 200); });
+    expect(sheet()).not.toBeNull();
     expect(onClose).not.toHaveBeenCalled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(SHEET_OPEN_BOUND_MS - 1600); });
-    expect(sheet()).toBeNull();
-    await act(async () => { await vi.advanceTimersByTimeAsync(SHEET_EXIT_MS + 50); });
-    expect(onClose).toHaveBeenCalledTimes(1);
-    expect(sheet()).toBeNull();
   });
 
-  it('stays closed while the backdrop is undecoded, then opens on the decoded title', async () => {
+  it('shows the frame at once, reveals the decoded title into it, and holds no color wash before that', async () => {
     installFetch();
     render(<MovieDetailModal tmdbId={603} onClose={() => {}} />);
-    await act(async () => { await Promise.resolve(); });
+    expect(sheet()).not.toBeNull();
     await waitFor(() => expect(held.length).toBeGreaterThan(0));
-    expect(sheet()).toBeNull();
-    expect(screen.queryByText('The Matrix')).toBeNull();
+    expect(gate()).not.toBe('shown');
     await release(true);
-    await waitFor(() => expect(sheet()).not.toBeNull());
+    await waitFor(() => expect(gate()).toBe('shown'));
     expect(screen.getByText('The Matrix')).toBeTruthy();
   });
 
-  it('a failed backdrop still opens once, on the text title, with no color-wash preview', async () => {
+  it('a failed backdrop still reveals once, on the text title', async () => {
     installFetch();
     render(<MovieDetailModal tmdbId={603} onClose={() => {}} />);
     await waitFor(() => expect(held.length).toBeGreaterThan(0));
-    expect(sheet()).toBeNull();
+    expect(gate()).not.toBe('shown');
     await release(false);
-    await waitFor(() => expect(sheet()).not.toBeNull());
+    await waitFor(() => expect(gate()).toBe('shown'));
     expect(screen.getByText('The Matrix')).toBeTruthy();
   });
 
-  it('a failed detail request opens the existing error panel, not a partial sheet', async () => {
+  it('a failed detail request shows the existing error panel in the open sheet', async () => {
     installFetch(() => json({ detail: 'nope' }, 500));
     render(<MovieDetailModal tmdbId={603} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('Couldn’t load details')).toBeTruthy());
@@ -142,7 +140,7 @@ describe('detail sheet readiness boundaries', () => {
     expect(screen.queryByText('The Matrix')).toBeNull();
   });
 
-  it('unmount cancels a pending open so a late answer cannot paint', async () => {
+  it('unmount cancels the load so a late answer cannot paint', async () => {
     let resolveMovie: (r: Response) => void = () => {};
     installFetch(() => new Promise<Response>((res) => { resolveMovie = res; }));
     const view = render(<MovieDetailModal tmdbId={603} onClose={() => {}} />);
@@ -156,48 +154,38 @@ describe('detail sheet readiness boundaries', () => {
     installFetch();
     const first = render(<MovieDetailModal tmdbId={603} onClose={() => {}} />);
     await waitFor(() => expect(held.length).toBeGreaterThan(0));
-    expect(sheet()).toBeNull();
     first.unmount();
     const pending = held.length;
     render(<MovieDetailModal tmdbId={680} onClose={() => {}} />);
+    expect(sheet()).not.toBeNull();
     await waitFor(() => expect(held.length).toBeGreaterThan(pending));
     await release(true);
-    await waitFor(() => expect(sheet()).not.toBeNull());
+    await waitFor(() => expect(gate()).toBe('shown'));
     expect(screen.queryByText('The Matrix')).toBeNull();
     expect(screen.getByText('Pulp Fiction')).toBeTruthy();
   });
 
-  it('close then reopen waits for the new art instead of replaying a ready sheet', async () => {
+  it('close then reopen opens the frame at once and reveals only when the new art is decoded', async () => {
     installFetch();
     const first = render(<MovieDetailModal tmdbId={603} onClose={() => {}} />);
     await waitFor(() => expect(held.length).toBeGreaterThan(0));
     await release(true);
-    await waitFor(() => expect(screen.getByText('The Matrix')).toBeTruthy());
+    await waitFor(() => expect(gate()).toBe('shown'));
     first.unmount();
     expect(sheet()).toBeNull();
     _resetImageLoader();
     held.length = 0;
     render(<MovieDetailModal tmdbId={603} onClose={() => {}} />);
+    expect(sheet()).not.toBeNull();
     await waitFor(() => expect(held.length).toBeGreaterThan(0));
-    expect(sheet()).toBeNull();
-    expect(screen.queryByText('The Matrix')).toBeNull();
+    expect(gate()).not.toBe('shown');
     await release(true);
-    await waitFor(() => expect(screen.getByText('The Matrix')).toBeTruthy());
-  });
-
-  it('useUnopenedClose fires once and not after the sheet becomes showable', async () => {
-    vi.useFakeTimers();
-    const onClose = vi.fn();
-    const h = renderHook(({ show }: { show: boolean }) => useUnopenedClose('a', show, onClose), { initialProps: { show: false } });
-    await act(async () => { await vi.advanceTimersByTimeAsync(SHEET_OPEN_BOUND_MS - 1); });
-    expect(onClose).not.toHaveBeenCalled();
-    h.rerender({ show: true });
-    await act(async () => { await vi.advanceTimersByTimeAsync(SHEET_OPEN_BOUND_MS); });
-    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(gate()).toBe('shown'));
+    expect(screen.getByText('The Matrix')).toBeTruthy();
   });
 });
 
-describe('entry paths still reach the gated sheet', () => {
+describe('entry paths still reach the sheet', () => {
   it('home, continue watching and search open through openWhenReady; the library calendar opens the TV sheet', () => {
     const home = src('pages/MinimalHomePage.tsx');
     expect(home).toContain('openWhenReady');
@@ -207,8 +195,8 @@ describe('entry paths still reach the gated sheet', () => {
     expect(src('components/mobile/MobileSearchOverlay.tsx')).toContain('openWhenReady');
     expect(src('components/library/TvCalendar.tsx')).toContain('host.openTv(');
     for (const f of ['components/media/MovieDetailModal/CompactLayout.tsx', 'components/media/MovieDetailModal/ExpandedLayout.tsx', 'components/media/TvDetailModal/CompactLayout.tsx', 'components/media/TvDetailModal/ExpandedLayout.tsx']) {
-      expect(src(f), f).toContain('detailSheetReady');
-      expect(src(f), f).toContain('useUnopenedClose');
+      if (f.includes('Compact')) expect(src(f), f).toContain('detailSheetReady');
+      expect(src(f), f).not.toContain('useUnopenedClose');
     }
   });
 });
