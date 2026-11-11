@@ -14,6 +14,11 @@ export const BUILD_FOCUS_GAP_MS = 30_000;
 const ENTRY = /\/assets\/index-[A-Za-z0-9_-]+\.js/;
 const SEEN_KEY = 'luma-build-reloaded-for';
 
+/** A reload for a build blocks another reload for the same build this long: enough to stop a loop, short enough
+ * that a tab whose reload did not land on the new bundle (a stale copy answered) tries again on a later resume
+ * instead of staying on the old build for the rest of the session. */
+export const BUILD_RELOAD_GUARD_MS = 10 * 60_000;
+
 /** The entry bundle path a page's HTML loads, or null. */
 export function entryOf(html: string): string | null {
   return html.match(ENTRY)?.[0] ?? null;
@@ -40,10 +45,13 @@ export interface BuildWatchDeps {
   doc?: Document;
   reload?: () => void;
   storage?: Pick<Storage, 'getItem' | 'setItem'>;
+  now?: () => number;
+  /** Runs with every check of the watch (resume, focus, the 5 minute tick): the service worker update ask. */
+  onCheck?: () => void;
 }
 
 export async function checkBuild({ base, fetchImpl = fetch, doc = document, reload = () => window.location.reload(),
-  storage = window.sessionStorage }: BuildWatchDeps): Promise<BuildCheck> {
+  storage = window.sessionStorage, now = Date.now }: BuildWatchDeps): Promise<BuildCheck> {
   const mine = runningEntry(doc);
   if (!mine) return 'skipped';
   let html: string;
@@ -58,15 +66,16 @@ export async function checkBuild({ base, fetchImpl = fetch, doc = document, relo
   if (!live || live === mine) return live ? 'same' : 'skipped';
   if (editing(doc)) return 'deferred';                                           // the next check tries again
   try {
-    if (storage.getItem(SEEN_KEY) === live) return 'skipped';                    // reloaded for it once already
-    storage.setItem(SEEN_KEY, live);
+    const [seen, at] = (storage.getItem(SEEN_KEY) || '').split('@');
+    if (seen === live && now() - Number(at || 0) < BUILD_RELOAD_GUARD_MS) return 'skipped';   // just reloaded for it
+    storage.setItem(SEEN_KEY, `${live}@${now()}`);
   } catch { /* storage blocked: reload anyway */ }
   reload();
   return 'reloaded';
 }
 
 /** Starts the watch; returns a stop function. */
-export function watchBuild(deps: BuildWatchDeps & { now?: () => number }): () => void {
+export function watchBuild(deps: BuildWatchDeps): () => void {
   const doc = deps.doc || document;
   const now = deps.now || Date.now;
   let last = now();
@@ -75,6 +84,7 @@ export function watchBuild(deps: BuildWatchDeps & { now?: () => number }): () =>
     if (busy || doc.visibilityState !== 'visible') return;
     if (!force && now() - last < BUILD_FOCUS_GAP_MS) return;
     busy = true; last = now();
+    try { deps.onCheck?.(); } catch { /* an update ask never blocks the bundle check */ }
     void checkBuild(deps).finally(() => { busy = false; });
   };
   const onVis = () => run();

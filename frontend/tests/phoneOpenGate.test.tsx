@@ -97,7 +97,7 @@ describe('phone sheet markup', () => {
       const s = read(f);
       expect(s).toContain('<SheetFrame');
       expect(s).toContain('composed={composed}');
-      expect(s).toContain('<SeedLayer show={shellShown.current} ready={hero.seeded ? detailsIn : composed}');
+      expect(s).toContain('<SeedLayer show={shellShown.current} ready={hero.seeded ? seedDone : composed}');
       // No invisible-until-composed sheet; only the title holds for the logo.
       expect(s).not.toContain('cardOpacity');
       expect(s).not.toContain("opacity: titleState === 'hold' ? 0 : 1");

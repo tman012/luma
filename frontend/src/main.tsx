@@ -16,6 +16,8 @@ import { stylesReady } from '@/startup/styles';
 
 installConnectServiceFetchHook();
 
+let swRegistration: ServiceWorkerRegistration | null = null;
+
 // index.html already painted the startup splash. Its hard cap starts now; each screen releases it when ready.
 armSplash();
 
@@ -59,6 +61,7 @@ if (new URLSearchParams(window.location.search).has('sw_reset')) {
   const swScope = urlBase ? `${urlBase}/` : '/';
   
   navigator.serviceWorker.register(swUrl, { scope: swScope }).then((reg) => {
+    swRegistration = reg;
     // Force check for update on every page load
     reg.update().catch(() => {});
 
@@ -99,7 +102,10 @@ if (new URLSearchParams(window.location.search).has('sw_reset')) {
 
 // v179: a tab left open across a deploy reloads into the new build (with or without a service worker:
 // a plain-HTTP LAN address has none). See utils/buildWatch.ts.
-watchBuild({ base: getUrlBase() });
+// An installed iOS app that is resumed rather than reloaded never re-reads its page, so the service worker is
+// asked for an update on every resume check too (not only on a page load): sw.js skipWaiting()s and claims,
+// controllerchange reloads, and the bundle check above covers a worker that is slow to arrive.
+watchBuild({ base: getUrlBase(), onCheck: () => { swRegistration?.update().catch(() => {}); } });
 
 // =============================================================================
 // Update toast — lightweight, no React dependency (runs before/outside React)
