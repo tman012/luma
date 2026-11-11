@@ -87,6 +87,10 @@ export const SPLASH_MOTION = {
 /** The app background behind every screen and sheet (MOTION.md §7 check 12). */
 export const APP_BG = '#111318';
 
+/** The phone detail sheet's own color before its palette is here: the splash and Home background. The palette then
+ *  fades in over it once, inside the sheet. */
+export const SHEET_NEUTRAL = '#15102a';
+
 export const reducedMotion = (): boolean =>
   typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 

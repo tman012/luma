@@ -1,8 +1,8 @@
 import { StagedBox, StagedProvider } from '@/components/motion/useStagedMount';
 import { sheetBase } from '@/utils/posterColors';
 import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows, ratingsExpectedAtTap } from '../sheetRows';
-import { APP_BG } from '@/theme/motion';
-import { SheetFrame, SheetCard, SeedLayer, useSeededHero, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { SHEET_NEUTRAL } from '@/theme/motion';
+import { SheetFrame, SheetCard, SeedLayer, useSeededHero, useSheetPaletteAt, PaletteFade, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { detailSheetReady } from '@/loading/sheetOpenGate';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT, tapShell } from '@/services/modalPrefetch';
@@ -174,7 +174,7 @@ export function CompactLayout(props: TvModalViewProps) {
     sonarrStatus,
     loading,
     error,
-    ultraBlurColors: detailColors,
+    sheetColors: detailColors = null,
     selectedSeason,
     setSelectedSeason,
     phase,
@@ -220,6 +220,7 @@ export function CompactLayout(props: TvModalViewProps) {
   const hero = useSeededHero(composed, detailColors);
   const heroHold = hero.seeded ? false : titleState === 'hold';
   const ultraBlurColors = hero.colors;
+  const paletteAt = useSheetPaletteAt(ultraBlurColors);
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
   }, [composed]);
@@ -474,7 +475,7 @@ export function CompactLayout(props: TvModalViewProps) {
                       ...(hero.seeded ? SEEDED_WASH : {}),
                     }}
                   >
-                    <UltraBlurOverlay hold={heroHold} instant colors={ultraBlurColors} variant="mobile" animationDelay={300} />
+                    <PaletteFade colors={ultraBlurColors} at={paletteAt}><UltraBlurOverlay hold={heroHold} instant colors={ultraBlurColors} variant="mobile" /></PaletteFade>
                   </div>
                 )}</>
   );
@@ -525,7 +526,7 @@ export function CompactLayout(props: TvModalViewProps) {
 
   return (
     <SheetFrame name="TvDetailModal" phase={phase} composed={composed} go={go} onScrimClick={onClose}>
-      <SheetCard background={APP_BG} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>
+      <SheetCard background={SHEET_NEUTRAL} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>
         {/* No sheet spinner past the deadline (Taylor 2026-11-02): the pre-reveal surface stays as is. */}
         {/* Scrollable content */}
         <StagedProvider total={1} enabled={detailsIn && reveal.revealed} resetKey={props.openKey}>

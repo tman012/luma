@@ -223,15 +223,15 @@ describe('v364: the mobile and TV sheets are unchanged', () => {
   const sha = (p: string) => createHash('sha256').update(readFileSync(resolve(SRC, p))).digest('hex');
   // SHA-256 of each file as it shipped in SW 363 (5678619).
   const PINNED: Record<string, string> = {
-    'components/media/MovieDetailModal/CompactLayout.tsx': '0c0e01780bdb66ba6686d358f9cd055de0fdedbeeeab21415a477ac58d92680e',
+    'components/media/MovieDetailModal/CompactLayout.tsx': 'bdfb0d891ef536a2c67825d760557af0c0563545165c575b20a47153cda600cd',
     'components/media/MovieDetailModal/SimilarPanel.tsx': '0b6acd98f4510146457337e974635c9a341369ea935a586dac2b9fd4d80ea582',
     'components/media/MovieDetailModal/MobileUpgradeSheet.tsx': 'a175a6f84de94419051b878cf5152e840ea596eb44622c1391211f3af6e2ab11',
-    'components/media/MovieDetailModal/index.tsx': 'fbaec19789db9cdf1b4b9ab6b82d00d54fce2b22c2e7d757abf8eb750be26032',
-    'components/media/MovieDetailModal/types.ts': 'd563329bb49b44aff52f5d2e9e0716bc6c0536f8268b9424ff3ea2d36d3110be',
+    'components/media/MovieDetailModal/index.tsx': '6a51154c8cb2deafd0d8499b8903d695b902387e5e8cf43de5017d0e59aa071d',
+    'components/media/MovieDetailModal/types.ts': '41ac13b5bc43f2f740c198ed9bfcd4a90bc53c6e0c52e992f443cbbbbbca526d',
     'components/collections/CollectionsSheet.tsx': 'c25377c101f0aea8771da402cbefbadcdd227ef4d70d5899fd7a46d7ce083e15',
     'hooks/useSimilarMovies.ts': '298b40c12ea1fb3ba767bfa84b12ecfa0f49b3b76349bb926d7dd2c83cf7ca88',
     'components/media/TvDetailModal/AddToSonarrModal.tsx': '2ccd05f06723398003a484561dce1262ad1cbffe3057dc4cc328f3c38db39a1b',
-    'components/media/TvDetailModal/CompactLayout.tsx': '31f41854ba83409c289f11940930ff69da4df7bec96ccb793d9bf81e0c188480',
+    'components/media/TvDetailModal/CompactLayout.tsx': 'be1094e5b8e4a00e0e95d885401d5c33e74a3c08b95c4c5c48c8dd331108b030',
     'components/media/TvDetailModal/EpisodeHeader.tsx': '396780530372314dced2ab5636b4b983772459a132500e82d65442a5f771c6bd',
     'components/media/TvDetailModal/ExpandedLayout.tsx': '95fa7795f1416614c429fcb644644069d3512650127dc2eed34ed29442a0780a',
     'components/media/TvDetailModal/OngoingShowPrompt.tsx': 'ec133144c725f4b95943b80f17eea6a369e373175bea24078a8d65e1df329429',
@@ -239,13 +239,13 @@ describe('v364: the mobile and TV sheets are unchanged', () => {
     'components/media/TvDetailModal/SonarrStatus.tsx': '5c413396c830e40a3b64a92a6dc76cc300ff806277001da822e744cedf96e64b',
     'components/media/TvDetailModal/TvSourcesPanel.tsx': 'b248687e6c52194144e8cf6ae0f2c20f30cc19a22b1fc5894a3e3558a97e37f4',
     'components/media/TvDetailModal/expandedLayoutTokens.ts': '941e5d76260c404efb3dd153db800d10a2a2eb02678d549166d2f664097286e6',
-    'components/media/TvDetailModal/index.tsx': 'cee743b1d232f06d574f58c8a337a43bdfea16d2518bb72d8138e13ee9b2fa26',
+    'components/media/TvDetailModal/index.tsx': '1cbf6ba70890c8589373bddb7a6cfad453a6ea6502613627d228e2ab2c7a0d6d',
     'components/media/TvDetailModal/seasonLabels.ts': '64a8b8657552c982d730e06266ea2fbe652f972ef63d00c7701c32e70fd3ad52',
     'components/media/TvDetailModal/tvSourcesUtils.ts': '998d8f7301412ffdecf8f37778bd86688d32b75e850f7e27f4cad5e11bc2c16c',
-    'components/media/TvDetailModal/types.ts': 'd200eb1ee4c5ac341c7d1a4968c493fe3fb4add47570fc8b1645dfe544e2ea76',
+    'components/media/TvDetailModal/types.ts': '7e076df77e0cb1f560afb35dd475638d438d5d858522ee17beebcc09b92f5b73',
     'components/media/TvDetailModal/useTvSourcesData.ts': '00097bcb94817c66a604a323e907562fefdc7507abeda09bf0ab7610739f337f',
   };
-  it('the phone sheet and every TV sheet file keep their SW 363 bytes', () => {
+  it('the phone sheet and every TV sheet file keep their SW 365 bytes (the open fix re-pinned the files it touches)', () => {
     for (const [file, hash] of Object.entries(PINNED)) expect(sha(file), file).toBe(hash);
   });
   it('the phone sheet still shows Similar, Collection and Upgrade for an owned movie in a collection', async () => {

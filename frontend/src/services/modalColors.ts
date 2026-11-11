@@ -20,6 +20,9 @@ const has = (c: UltraBlurColors | null | undefined): c is UltraBlurColors =>
 export const MISS_TTL_MS = 60_000;
 const missAt = new Map<string, number>();
 
+/** Palettes that have already answered (null: a definite miss), so a hook can read one on its first render. */
+const answered = new Map<string, UltraBlurColors | null>();
+
 /** Palette requests in flight (abortable): a tap drops other titles' ones so they never hold the connections the
  *  opened title's art needs (v341l: four background /api/tmdb/colors calls behind a slow TMDb starved the art). */
 const inflight = new Map<string, AbortController | null>();
@@ -27,7 +30,7 @@ export function dropOtherColors(keepIds: number[]): void {
   const keep = keepIds.map((x) => new RegExp(`/${x}(?:[/?&]|$)`));
   for (const [url, ac] of Array.from(inflight)) {
     if (keep.some((re) => re.test(url))) continue;
-    inflight.delete(url); cache.delete(url); missAt.delete(url); ac?.abort();
+    inflight.delete(url); cache.delete(url); missAt.delete(url); answered.delete(url); ac?.abort();
   }
 }
 
@@ -35,7 +38,7 @@ function cached(url: string): Promise<UltraBlurColors | null> {
   let p = cache.get(url);
   const miss = missAt.get(url);
   if (p && miss !== undefined && Date.now() - miss > MISS_TTL_MS) {
-    cache.delete(url); missAt.delete(url); p = undefined;
+    cache.delete(url); missAt.delete(url); answered.delete(url); p = undefined;
   }
   if (!p) {
     const ac = typeof AbortController === 'undefined' ? null : new AbortController();
@@ -44,8 +47,9 @@ function cached(url: string): Promise<UltraBlurColors | null> {
     p = apiFetch(url, ac ? { signal: ac.signal } : undefined)
       .then(r => (r.ok ? (r.json() as Promise<UltraBlurColors>) : null))
       .then(c => {
-        if (has(c)) return c;
+        if (has(c)) { answered.set(url, c); return c; }
         missAt.set(url, Date.now()); // answered, but nothing to show
+        answered.set(url, null);
         return null;
       }, () => {
         if (cache.get(url) === p) cache.delete(url); // offline / aborted: may work on the next try
@@ -55,7 +59,7 @@ function cached(url: string): Promise<UltraBlurColors | null> {
     cache.set(url, p);
     if (cache.size > MAX_ENTRIES) {
       const k = cache.keys().next().value as string;
-      cache.delete(k); missAt.delete(k);
+      cache.delete(k); missAt.delete(k); answered.delete(k);
     }
   }
   return p;
@@ -80,6 +84,17 @@ export async function modalColors(kind: ColorKind, ratingKey?: number, tmdbId?: 
   const plex = await plexP;
   if (plex) return plex;
   return early === undefined ? tmdbP : null;
+}
+
+/** The palette `modalColors` would answer right now without waiting, or undefined while it is still being fetched.
+ *  Lets a sheet that opens after the warm-up finished start on the final palette, never on a placeholder. */
+export function peekModalColors(kind: ColorKind, ratingKey?: number, tmdbId?: number): UltraBlurColors | null | undefined {
+  const tmdb = tmdbId ? answered.get(tmdbUrl(kind, tmdbId)) : undefined;
+  const plex = ratingKey ? answered.get(plexUrl(ratingKey)) : undefined;
+  if (!tmdbId) return ratingKey ? plex : undefined;
+  if (!ratingKey) return tmdb;
+  if (tmdb) return tmdb;
+  return tmdb === null ? plex : undefined;
 }
 
 /** Warm the palette from a card (hover, focus, tap) before the popup opens. */
@@ -107,5 +122,6 @@ export function getSeedColors(kind: ColorKind, ratingKey?: number, tmdbId?: numb
 export function _resetModalColors(): void {
   cache.clear();
   missAt.clear();
+  answered.clear();
   seeds.clear();
 }

@@ -183,6 +183,43 @@ function perceivedLuminance(color: string): number {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
 
+
+// ---------------------------------------------------------------------------
+// Phone sheet blobs: radial gradients, not blurred elements
+// ---------------------------------------------------------------------------
+// A blob blurred with filter: blur(100px) is re-rastered by the first commit of the sheet, and on the phone sheet that
+// raster (five filtered blobs per overlay, masked and contained) held the main thread for 250-350 ms right after the
+// slide's first frame, so the slide's own frames were never painted. The same soft color field is one element with
+// radial gradients that fall off like the blurred disk: no filter, nothing to re-raster, drawn with the sheet's own layer.
+
+/** CSS saturate() then brightness() applied to the blob color here, since the gradient has no filter. */
+function adjustColor(color: string, saturation: number, brightness: number): [number, number, number] {
+  const [r, g, b] = parseColor(color);
+  const s = saturation;
+  const m = [
+    0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s,
+    0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s,
+    0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s,
+  ];
+  const out = [0, 1, 2].map((i) => {
+    const v = (m[i * 3]! * r + m[i * 3 + 1]! * g + m[i * 3 + 2]! * b) * brightness;
+    return Math.max(0, Math.min(255, Math.round(v)));
+  });
+  return out as [number, number, number];
+}
+
+/** Alpha along the gradient's radius for a blob of the phone's size blurred by 100px: the blurred disk's own profile
+ *  (peak below 1, a tail about 260px past the disk), sampled at tenths of the gradient radius. */
+const FALLOFF = [0.752, 0.727, 0.655, 0.539, 0.403, 0.269, 0.154, 0.077, 0.032, 0.011, 0] as const;
+const BLUR_REACH_PX = 260;
+
+export function blobGradient(blob: BlobDef, size: number, opacity: number, saturation: number, brightness: number): string {
+  const [r, g, b] = adjustColor(blob.color, saturation, brightness);
+  const reach = `calc(${size / 2}% + ${BLUR_REACH_PX}px)`;
+  const stops = FALLOFF.map((a, i) => `rgba(${r},${g},${b},${+(a * opacity).toFixed(3)}) ${Math.round((i / (FALLOFF.length - 1)) * 100)}%`).join(',');
+  return `radial-gradient(ellipse ${reach} ${reach} at ${blob.x * 100}% ${blob.y * 100}%,${stops})`;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -238,6 +275,21 @@ function BlurLayer({
   if (saturation !== 1.0) filterParts.push(`saturate(${saturation})`);
   if (effectiveBrightness !== 1.0) filterParts.push(`brightness(${effectiveBrightness})`);
   const filterStr = filterParts.length > 0 ? filterParts.join(' ') : 'none';
+
+  const flat = variant === 'mobile' && !lite;
+  if (flat) {
+    // Last blob on top, as the blurred blobs stacked.
+    const layers = blobs.map((blob) => blobGradient(blob, effectiveBlobSize, effectiveBlobOpacity, saturation, effectiveBrightness)).reverse().join(',');
+    return (
+      <div data-ultrablur-overlay="" data-blur-flat=""
+        style={{
+          position: 'absolute', inset: 0, zIndex: 0, overflow: 'hidden', pointerEvents: 'none', contain: 'strict',
+          borderRadius: resolvedRadius, backfaceVisibility: 'hidden', backgroundImage: layers,
+          ...(hold !== undefined ? { opacity: hold ? 0 : 1, transition: instant ? 'none' : 'opacity var(--m-dur-reveal) var(--m-ease-reveal)' } : {}),
+        }}
+      />
+    );
+  }
 
   // Build animation style for delayed fade-in
   const hasAnimation = animationDelay > 0 && hold === undefined;

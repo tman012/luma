@@ -13,6 +13,8 @@ export interface MovieModalViewProps {
   ratingsSettled?: boolean;
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
+  /** The fetched palette alone (null until it answers): the phone sheet's blur draws this, never the poster seed. */
+  sheetColors?: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
   loading: boolean;
   error: boolean;

@@ -37,6 +37,8 @@ interface UseTvDetailResult {
   seasonsLoading: boolean;
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
+  /** The fetched palette alone (null until it answers): what the phone sheet's blur draws, never the poster seed. */
+  sheetColors: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
 }
 
@@ -446,7 +448,7 @@ export function useTvDetail(
   // -------------------------------------------------------------------------
   const colorsEnabled = !!tmdbId || (!loading && (!!show || error));
   const colorsTmdbId = ratingKey ? (plexTmdb === undefined ? tmdbId : (plexTmdb ?? undefined)) : resolvedTmdbId;
-  const { colors: ultraBlurColors, settled: colorsSettled } =
+  const { colors: ultraBlurColors, settled: colorsSettled, fetched: sheetColors } =
     useModalColors('tv', ratingKey, colorsTmdbId, colorsEnabled);
   // wl-images: a Watchlist open's server-stored backdrop / logo replace TMDb's (a failed one falls back: useLocalArt).
   const local = useLocalArt('tv', show?.tmdbId ?? tmdbId);
@@ -465,6 +467,7 @@ export function useTvDetail(
     seasonsLoading,
     trailerKey,
     ultraBlurColors,
+    sheetColors,
     resolvedTmdbId,
   };
 }

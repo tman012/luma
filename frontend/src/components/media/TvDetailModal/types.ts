@@ -46,6 +46,8 @@ export interface TvModalViewProps {
   error: boolean;
   seasonsLoading: boolean;
   ultraBlurColors: UltraBlurColors | null;
+  /** The fetched palette alone (null until it answers): the phone sheet's blur draws this, never the poster seed. */
+  sheetColors?: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
   // UI state
   selectedSeason: number;

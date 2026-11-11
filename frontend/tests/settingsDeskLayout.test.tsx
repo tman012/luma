@@ -38,7 +38,7 @@ const at = (path: string) => render(<MemoryRouter initialEntries={[path]}><Route
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('desktop Settings layout', () => {
-  it('heading and nav share the logo left edge, 16px under the logo; header unchanged otherwise', async () => {
+  it('heading and nav share the logo left edge, 16px under the logo; header spacing unchanged', async () => {
     setup(true);
     at('/settings/library-paths');
     const nav = await screen.findByTestId('settings-nav');
@@ -55,6 +55,7 @@ describe('desktop Settings layout', () => {
     expect((nav.firstElementChild as HTMLElement).style.margin).toBe('0px 0px 20px');
     expect([header.style.paddingTop, header.style.paddingRight, header.style.justifyContent]).toEqual(['20px', '60px', 'space-between']);
     expect(header.lastElementChild!.querySelector('[aria-label="Account"]') ?? header.lastElementChild).toBeTruthy();   // avatar last (top-right)
+    expect([header.style.position, header.style.background]).toEqual(['relative', '']);   // no top bar: nothing sticky, no backdrop (settingsNoTopBar365)
     // no centering container: nothing pushes the columns back toward the middle
     expect([page.style.maxWidth, page.style.margin]).toEqual(['', '']);
   });

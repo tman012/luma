@@ -31,7 +31,7 @@ describe('detail popup color blur', () => {
     await flush(200);
     const { result } = renderHook(() => useModalColors('movie', 9, 5));
     await flush(0);
-    expect(result.current).toEqual({ colors: TMDB, settled: true });
+    expect(result.current).toEqual({ colors: TMDB, settled: true, fetched: TMDB });
     expect(calls.sort()).toEqual(['/api/plex/ultrablur/9', '/api/tmdb/colors/5']);
   });
 
@@ -48,7 +48,7 @@ describe('detail popup color blur', () => {
     const { result } = renderHook(() => useModalColors('tv', undefined, 7));
     expect(result.current.settled).toBe(false);
     await flush(COLOR_WAIT_MS + 10);
-    expect(result.current).toEqual({ colors: null, settled: true });
+    expect(result.current).toEqual({ colors: null, settled: true, fetched: null });
     await flush(400);
     expect(result.current.colors).toBeNull(); // no late pop-in
   });
