@@ -122,7 +122,7 @@ describe('v341h: Designer NO on 876af98b', () => {
   });
   it('B2b: the desktop bottom content has no second fade of its own (the one reveal fades it)', () => {
     expect(src('components/media/TvDetailModal/ExpandedLayout.tsx')).toMatch(/opacity: shelfOpen \? 0 : 1, \/\/ the one reveal fades it/);
-    expect(src('components/media/MovieDetailModal/ExpandedLayout.tsx')).toMatch(/opacity: \(showSourcesShelf \|\| showCastShelf\) \? 0 : 1, \/\/ the one reveal fades it/);
+    expect(src('components/media/MovieDetailModal/ExpandedLayout.tsx')).toMatch(/opacity: \(showSourcesShelf \|\| showCastShelf \|\| showReviewsShelf\) \? 0 : 1, \/\/ the one reveal fades it/);
   });
 });
 

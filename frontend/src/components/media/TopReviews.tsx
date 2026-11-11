@@ -41,22 +41,42 @@ type Variant = 'compact' | 'expanded';
 // Data
 // ---------------------------------------------------------------------------
 
+function fetchTopReviews(title: string, year: number | null | undefined, mediaType: 'movie' | 'tv', signal: AbortSignal): Promise<TopReview[] | null> {
+  const params = new URLSearchParams({ title });
+  if (year) params.set('year', String(year));
+  if (mediaType === 'tv') params.set('media_type', 'tv');
+  return apiFetch(`/api/reviews/top?${params}`, { signal })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => (d && Array.isArray(d.reviews) ? (d.reviews as TopReview[]) : null));
+}
+
 export function useTopReviews(title?: string | null, year?: number | null, mediaType: 'movie' | 'tv' = 'movie') {
   const [reviews, setReviews] = useState<TopReview[]>([]);
   useEffect(() => {
     setReviews([]);
     if (!title) return;   // v217: minimal builds fetch reviews too (prod 1b4ea74's 'Cast & Reviews')
     const controller = new AbortController();
-    const params = new URLSearchParams({ title });
-    if (year) params.set('year', String(year));
-    if (mediaType === 'tv') params.set('media_type', 'tv');
-    apiFetch(`/api/reviews/top?${params}`, { signal: controller.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d && Array.isArray(d.reviews)) setReviews(d.reviews); })
+    fetchTopReviews(title, year, mediaType, controller.signal)
+      .then((list) => { if (list) setReviews(list); })
       .catch(() => {});
     return () => controller.abort();
   }, [title, year, mediaType]);
   return reviews;
+}
+
+/** The same fetch with a settled flag, for a view that must tell "still loading" from "no reviews". */
+export function useTopReviewsSettled(title?: string | null, year?: number | null, mediaType: 'movie' | 'tv' = 'movie') {
+  const [state, setState] = useState<{ reviews: TopReview[]; settled: boolean }>({ reviews: [], settled: false });
+  useEffect(() => {
+    setState({ reviews: [], settled: false });
+    if (!title) return;
+    const controller = new AbortController();
+    fetchTopReviews(title, year, mediaType, controller.signal)
+      .then((list) => setState({ reviews: list ?? [], settled: true }))
+      .catch(() => { if (!controller.signal.aborted) setState({ reviews: [], settled: true }); });
+    return () => controller.abort();
+  }, [title, year, mediaType]);
+  return state;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,18 +304,21 @@ export function TopReviewsRow({
   variant,
   onOpen,
   sidePadding,
+  last,
 }: {
   reviews: TopReview[];
   variant: Variant;
   onOpen: (r: TopReview) => void;
   /** Horizontal inset matching the surrounding section (px). */
   sidePadding?: number;
+  /** The row ends its section: no gap below it. */
+  last?: boolean;
 }) {
   if (reviews.length === 0) return null;
   const big = variant === 'expanded';
   const pad = sidePadding ?? (big ? 24 : 16);
   return (
-    <div data-reviews-section style={{ marginBottom: big ? 28 : 20, textAlign: 'left' }}>
+    <div data-reviews-section style={{ marginBottom: last ? 0 : big ? 28 : 20, textAlign: 'left' }}>
       <h2
         style={{
           fontSize: big ? 22 : 18,

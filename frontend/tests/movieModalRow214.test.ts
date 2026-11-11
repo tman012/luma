@@ -1,5 +1,6 @@
 // v214 (PM, Taylor): the movie popup's pill row is prod 1b4ea74's in every state, in prod's order and labels;
 // no Search automatically / Interactive search; the minimal hide never drops its pills.
+// v364: the desktop sheet drops Upgrade, Similar and Collection, and Cast & Reviews becomes Cast and Reviews.
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -40,18 +41,17 @@ function pills(code: string, state: 'notin' | 'in' | 'owned'): string[] {
 describe('movie popup pill row matches prod 1b4ea74 (v214)', () => {
   const prod = execSync(`git -C ${ROOT} show 1b4ea74:${DIR}/ExpandedLayout.tsx`, { encoding: 'utf8' });
   const test = src('ExpandedLayout.tsx');
+  const DROPPED = new Set(['Upgrade', 'Similar', 'Collection']);
+  const prodPills = (state: 'notin' | 'in' | 'owned') => pills(prod, state)
+    .filter((l) => !DROPPED.has(l))
+    .flatMap((l) => (l === 'Cast & Reviews' ? ['Cast', 'Reviews'] : [l]));
   for (const state of ['notin', 'in', 'owned'] as const) {
     it(`${state}: same pills, order and labels as prod`, () => {
-      expect(pills(test, state)).toEqual(pills(prod, state));
+      expect(pills(test, state)).toEqual(prodPills(state));
     });
   }
-  it('in watchlist: [In Watchlist] [Trailer] [Sources] [Similar] ... [Cast & Reviews]', () => {
-    const p = pills(test, 'in');
-    expect(p[0]).toBe('In Watchlist');
-    expect(p[1]).toBe('Trailer');
-    expect(p[2]).toBe('Sources');
-    expect(p.indexOf('Similar')).toBeGreaterThan(2);
-    expect(p[p.length - 1]).toBe('Cast & Reviews');
+  it('in watchlist: [In Watchlist] [Trailer] [Sources] [Cast] [Reviews]', () => {
+    expect(pills(test, 'in')).toEqual(['In Watchlist', 'Trailer', 'Sources', 'Cast', 'Reviews']);
     expect(pills(test, 'notin')[0]).toBe('Watchlist');
     expect(pills(test, 'owned')[0]).toBe('Play');
   });
