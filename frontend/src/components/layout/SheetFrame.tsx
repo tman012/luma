@@ -14,7 +14,7 @@ import { createContext, useContext, useLayoutEffect, useRef, useState, type CSSP
 import { createPortal } from 'react-dom';
 import { APP_BG, MODAL_MOTION, MOTION, REVEAL_TRANSITION, SHEET_NEUTRAL, reducedMotion } from '@/theme/motion';
 import { useCloseOnce } from '@/components/motion/useSurfacePresence';
-import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
+import { BACKDROP_HEIGHT, type BackdropEffects } from '@/hooks/useBackdropEffects';
 import { SHEET_MOVING_EVENT, tapShell } from '@/services/modalPrefetch';
 import type { UltraBlurColors } from '@/utils/modalParsers';
 
@@ -266,7 +266,24 @@ export function SheetCard({ background, tint, hold = true, children }: { backgro
 
 /** The sheet's first frame while details load (MOTION.md §1.2-1.3): the final layout's top (backdrop box,
  *  title block, reserved rows) filled from what the tapped card showed; the details crossfade in over it. */
-export interface SeedHero { art: ReactNode; wash: ReactNode; title: ReactNode }
+export interface SeedHero { art: ReactNode; wash: ReactNode; title: ReactNode;
+  /** The seed's art is the tapped card's poster, not the details' own hero: it fades out over the details' reveal
+   *  (SEED_HERO_FADE_OUT) instead of leaving at once. */
+  fade?: boolean }
+
+/** The tapped card's poster as the sliding sheet's hero from the slide's first frame (the card already decoded it, so
+ *  it paints with the sheet, nothing fades in): the details' own hero box, mask and crop, so the sheet that rises
+ *  already reads as the sheet it becomes. The details' backdrop fades in over it at the reveal. */
+export function SeedArt({ src, effects }: { src: string; effects: BackdropEffects }) {
+  return (
+    <div data-seed-art="" style={{ position: 'sticky', top: 0, width: '100%', height: BACKDROP_HEIGHT, overflow: 'hidden', zIndex: 0,
+      borderTopLeftRadius: '14px', borderTopRightRadius: '14px', background: APP_BG, ...effects.headerContainerMask }}>
+      <img src={src} alt="" decoding="sync" draggable={false} style={{ ...effects.headerImgStyle, objectPosition: '50% 25%' }} />
+      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '35%', pointerEvents: 'none',
+        background: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.25) 100%)' }} />
+    </div>
+  );
+}
 export function SeedShell({ overlap, rows, hero }: { overlap: number; rows?: ReactNode; hero?: SeedHero }) {
   const seed = tapShell();
   // Seeded hero: the layout's own BackdropHero, wash and title block with the frozen seed inputs (same pixels
@@ -311,22 +328,24 @@ export function SeedLayer({ show, ready, overlap, rows, hero }: { show: boolean;
   // animationend can be skipped (animations off, hidden tab): drop the seed after the fade's length + slack anyway.
   useLayoutEffect(() => {
     if (!show || !ready || done) return;
-    const t = window.setTimeout(() => setDone(true), MOTION.dur.crossfade + SEED_FALLBACK_SLACK_MS);
+    const t = window.setTimeout(() => setDone(true), Math.max(MOTION.dur.crossfade, hero?.fade ? MOTION.dur.reveal : 0) + SEED_FALLBACK_SLACK_MS);
     return () => window.clearTimeout(t);
-  }, [show, ready, done]);
-  // A seeded hero leaves at once: the details' hero underneath is pixel-identical; their boxes fade in themselves.
-  if (!show || done || (hero && ready)) return null;
+  }, [show, ready, done, hero?.fade]);
+  // A seeded hero whose art is the details' own leaves at once: the details' hero underneath is pixel-identical; their boxes fade in themselves.
+  if (!show || done || (hero && ready && !hero.fade)) return null;
   return (
     <div data-seed-layer={ready ? 'fading' : 'on'} aria-hidden="true"
       onAnimationEnd={(e) => { if (e.target === e.currentTarget && ready) setDone(true); }}
       style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, pointerEvents: 'none',
-        animation: ready ? SEED_FADE_OUT : 'none' }}>
+        animation: ready ? (hero?.fade ? SEED_HERO_FADE_OUT : SEED_FADE_OUT) : 'none' }}>
       <SeedShell overlap={overlap} rows={rows} hero={hero} />
     </div>
   );
 }
 export const SEED_FALLBACK_SLACK_MS = MOTION.dur.settleSlack;
 export const SEED_FADE_OUT = 'm-crossfade var(--m-dur-crossfade) var(--m-ease-standard) reverse both';
+/** A poster seed leaves on the details' own reveal fade (the backdrop and title fade in over it with the same duration and ease). */
+export const SEED_HERO_FADE_OUT = 'm-crossfade var(--m-dur-reveal) var(--m-ease-reveal) reverse both';
 
 /** Content that replaces a seed shell crossfades in (--m-dur-crossfade); content there from the first frame doesn't. */
 export const SHELL_CROSSFADE = 'm-crossfade var(--m-dur-crossfade) var(--m-ease-standard) both';

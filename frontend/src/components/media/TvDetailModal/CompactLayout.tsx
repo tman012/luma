@@ -2,7 +2,7 @@ import { StagedBox, StagedProvider } from '@/components/motion/useStagedMount';
 import { sheetBase } from '@/utils/posterColors';
 import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows, ratingsExpectedAtTap } from '../sheetRows';
 import { SHEET_NEUTRAL } from '@/theme/motion';
-import { SheetFrame, SheetCard, SeedLayer, useSeededHero, useSheetPaletteAt, PaletteFade, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { SheetFrame, SheetCard, SeedLayer, SeedArt, useSeededHero, useSheetPaletteAt, PaletteFade, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { detailSheetReady } from '@/loading/sheetOpenGate';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT, tapShell } from '@/services/modalPrefetch';
@@ -457,6 +457,8 @@ export function CompactLayout(props: TvModalViewProps) {
   const shellShown = useRef(false);
   if (loading && go) shellShown.current = true;
   const detailsIn = !loading && !error && !!show;
+  // A poster seed stays until the details' own hero is revealed (or the details failed), then fades out over it.
+  const seedDone = hero.art ? (detailsIn && reveal.revealed) || (!loading && !!error) : detailsIn;
   const washEl = (
 <>{/* UltraBlur — scrolls with content, slides up over backdrop */}
                 {ultraBlurColors && (
@@ -521,6 +523,16 @@ export function CompactLayout(props: TvModalViewProps) {
                   </div>
                 </div>
   </>);
+  // The seed layer's copy of the title box: the tapped card's title in the same box, visible from the slide's first frame
+  // (the details' own title above waits for the reveal and takes over as the seed fades out).
+  const seedTitleEl = (
+    <div data-hero-keep="" data-title-box="" data-seed-title=""
+      style={{ position: 'relative', margin: '0 auto 24px', maxWidth: '100%', width: '100%', height: '140px', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+        <h1 style={{ fontSize: '28px', fontWeight: 700, color: '#fff', lineHeight: 1.2, margin: 0, textShadow: '0 2px 8px rgba(0,0,0,0.5)' }}>{hero.title}</h1>
+      </div>
+    </div>
+  );
   // Enter/exit motion, scrim, scroll lock and the app background live in SheetFrame (MOTION.md §1).
   if (phase === 'gone') return null;
 
@@ -551,9 +563,9 @@ export function CompactLayout(props: TvModalViewProps) {
           }}
         >
           {/* Loading */}
-          <SeedLayer show={shellShown.current} ready={hero.seeded ? detailsIn : composed} overlap={220} hero={hero.seeded ? {
-            art: <BackdropHero backdropUrl={sheetArt} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
-            wash: washEl, title: titleEl } : undefined} rows={
+          <SeedLayer show={shellShown.current} ready={hero.seeded ? seedDone : composed} overlap={220} hero={hero.seeded ? {
+            art: hero.art ? <SeedArt src={hero.art} effects={backdropEffects} /> : <BackdropHero backdropUrl={sheetArt} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
+            wash: washEl, title: hero.art ? seedTitleEl : titleEl, fade: !!hero.art } : undefined} rows={
             <ReservedRows pillKept={seedOwned !== false} ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
               <div data-modal-actions="" style={{ display: 'flex', justifyContent: 'center', gap: '18px', padding: '20px 16px' }}>
                 <span data-modal-keep="" style={{ display: 'contents' }}><ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} /></span>

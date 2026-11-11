@@ -425,7 +425,9 @@ export function remainingCap(fallback: number): number {
 /** What the tapped card/row already shows (title, poster), for the sheet's seed shell (MOTION.md §1.2). */
 /** `owned`: in the library (a Plex rating key, or the card's resolved ownership orb, data-owned); null when the
  *  card didn't know yet; `plex`: opened by a Plex rating key. The seed reserves the owned-only rows from them. */
-export interface TapShell { title: string; year: string | null; poster: string | null; at: number; owned: boolean | null; plex: boolean }
+export interface TapShell { title: string; year: string | null; poster: string | null; at: number; owned: boolean | null; plex: boolean;
+  /** Seen by the click listener below, not by openWhenReady: it only counts if a sheet mounts within SHEET_MOUNT_WAIT_MS. */
+  generic?: boolean }
 function tapOwned(card: HTMLElement | null, ratingKey: number | undefined): boolean | null {
   if (ratingKey) return true;
   const o = card?.closest('[data-owned]')?.getAttribute('data-owned') ?? card?.querySelector('[data-owned]')?.getAttribute('data-owned');
@@ -457,7 +459,21 @@ function tapYear(card: HTMLElement): string | null {
 }
 /** The seed shell of the tap that is opening a sheet now (none after 5 s). */
 export function tapShell(): TapShell | null {
-  return shell && now() - shell.at < 5000 ? shell : null;
+  return shell && now() - shell.at < (shell.generic ? SHEET_MOUNT_WAIT_MS : 5000) ? shell : null;
+}
+
+/** A card that opens its sheet without openWhenReady (the Libraries grid, the full app's Home rails, a Similar shelf)
+ *  still hands the sheet its poster and title: the phone sheet rises carrying them instead of an empty blur. This runs
+ *  in the capture phase, before the card's own handler; openWhenReady, when the card uses it, then replaces this
+ *  with its richer shell (owned, plex). A click that opens no sheet leaves a seed that expires on its own. */
+function noteCardTap(e: Event): void {
+  const card = (e.target as Element | null)?.closest?.('button, [role="button"], a, [data-card]') as HTMLElement | null;
+  const img = card?.querySelector('img') ?? null;
+  if (!card || !img || card.closest(SHEET_SEL)) return;
+  const poster = img.currentSrc || img.src || null;
+  const title = tapTitle(card) || img.alt.trim();
+  if (!poster || !title) return;
+  shell = { title, year: tapYear(card), poster, at: now(), owned: tapOwned(card, undefined), plex: false, generic: true };
 }
 
 const SHEET_SEL = '[data-modal="MovieDetailModal"],[data-modal="TvDetailModal"]';
@@ -522,6 +538,7 @@ if (typeof window !== 'undefined' && !(window as { __lumaPress?: boolean }).__lu
   window.addEventListener('pointerup', () => { if (pressed && !pending) holdFor(pressed, 250); }, { capture: true, passive: true });
   window.addEventListener('pointercancel', () => release(), { capture: true, passive: true });
   window.addEventListener(SHEET_MOVING_EVENT, () => release());
+  document.addEventListener('click', noteCardTap, { capture: true, passive: true });
 }
 
 /** Home card and search result taps (one path): pressed state on the tapped element, warm details for up
