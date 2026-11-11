@@ -1,7 +1,7 @@
 /** Settings (/settings/<section>), docs/design/settings-page-spec.md and
  * docs/design/mobile-settings-spec.md (row behavior).
- * Desktop (>=1024px): a full page under the app header (logo back to Home,
- * avatar): a left section list and the section on the right. Home screen
+ * Desktop (>=1024px): a full page with no top bar (the logo back to Home and the
+ * avatar sit over the background): a left section list and the section on the right. Home screen
  * shows only Kiosk > Backdrop library, Hero source and count (owner/admin).
  * Phone: a full-screen sheet (X close, section list); a section pushes in
  * with a back chevron. Home screen shows only Libraries (drag to reorder,
@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { FONT, GlowLayer, LOGO_SRC, NAVY_BASE, NAVY_BG, glowPage } from '@/components/start/StartUI';
+import { FONT, GlowLayer, LOGO_SRC, NAVY_BG, glowPage } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { LUMA_BLUE } from '@/ui/lumaButton';
 import {
@@ -421,7 +421,7 @@ const tvTitle: React.CSSProperties = {
 };
 const deskHeader: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `20px 60px 0 ${LOGO_LEFT}px`,
-  position: 'sticky', top: 0, zIndex: 40, background: NAVY_BASE,
+  position: 'relative', zIndex: 40,
 };
 const deskPage: React.CSSProperties = {
   display: 'flex', gap: NAV_GAP, padding: `${HEADING_GAP}px 60px 32px ${LOGO_LEFT}px`, boxSizing: 'border-box',
