@@ -38,8 +38,6 @@ import { srcPanel, srcAbove, srcConfirmCard, srcPrimaryBtn, srcCancelBtn, SRC_RO
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useFocusable } from '@/hooks/useFocusable';
 import { useReviews } from '@/hooks/useReviews';
-import { SimilarPanel } from './SimilarPanel';
-import { CollectionsSheet } from '@/components/collections/CollectionsSheet';
 import { TOKENS } from './expandedLayoutTokens';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { MovieModalViewProps } from './types';
@@ -47,9 +45,56 @@ import { removeFromWatchlist } from '@/services/watchlistApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { FixMatchSheet, type FixMatchResult } from './FixMatchSheet';
 import { FileInfoSheet, FileInfoIcon } from './FileInfoSheet';
-import { TopReviewsRow, ReviewSheet, useTopReviews, type TopReview } from '@/components/media/TopReviews';
+import { TopReviewsRow, ReviewSheet, useTopReviewsSettled, type TopReview } from '@/components/media/TopReviews';
 import { apiFetch } from '../../../apiClient';
 import { isMinimal } from '@/minimal';
+
+// ---------------------------------------------------------------------------
+// ShelfSurface — the slide-up shelf frame shared by the Cast and Reviews views
+// ---------------------------------------------------------------------------
+
+function ShelfSurface({
+  ready,
+  scrim,
+  isTablet,
+  onClose,
+  children,
+}: {
+  /** The shelf slides up once its content is ready. */
+  ready: boolean;
+  /** Soft scrim behind the shelf so text stays legible over the (shifted) backdrop. */
+  scrim: boolean;
+  isTablet: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{ position: 'absolute', inset: 0, zIndex: 7 }}
+      />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 8,
+          background: scrim
+            ? 'linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0) 100%)'
+            : 'transparent',
+          padding: isTablet ? '40px 0 32px' : '48px 0 48px',
+          animation: ready ? 'castShelfBounce var(--m-dur-modal-enter) var(--m-ease-modal-enter)' : 'none',
+          transform: ready ? 'translateY(0)' : 'translateY(100%)',
+        }}
+      >
+        {children}
+      </div>
+    </>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // CastShelf — slide-up shelf with preloaded circular cast photos
@@ -60,19 +105,12 @@ function CastShelf({
   isTablet,
   onPersonSearch,
   onClose,
-  reviews = [],
-  onOpenReview,
 }: {
   cast: CastMember[];
   isTablet: boolean;
   onPersonSearch?: (name: string, tmdbPersonId?: number) => void;
   onClose: () => void;
-  /** Ratings & Reviews row shown above the cast (hidden when empty). */
-  reviews?: TopReview[];
-  onOpenReview?: (r: TopReview) => void;
 }) {
-  const hasReviews = reviews.length > 0 && !!onOpenReview;
-  const sidePad = isTablet ? 24 : 48;
   const [imagesReady, setImagesReady] = useState(false);
   const imgSize = isTablet ? 130 : 150;
 
@@ -99,104 +137,104 @@ function CastShelf({
   }, [cast]);
 
   return (
-    <>
-      <div
-        onClick={onClose}
-        style={{ position: 'absolute', inset: 0, zIndex: 7 }}
-      />
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          zIndex: 8,
-          // Soft scrim behind the taller shelf when reviews are shown so the
-          // review text stays legible over the (shifted) backdrop.
-          background: hasReviews
-            ? 'linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0) 100%)'
-            : 'transparent',
-          padding: isTablet ? '40px 0 32px' : '48px 0 48px',
-          animation: imagesReady ? 'castShelfBounce var(--m-dur-modal-enter) var(--m-ease-modal-enter)' : 'none',
-          transform: imagesReady ? 'translateY(0)' : 'translateY(100%)',
-        }}
-      >
-        {hasReviews && (
-          <TopReviewsRow reviews={reviews} variant="expanded" onOpen={onOpenReview!} sidePadding={sidePad} />
-        )}
-        {hasReviews && cast.length > 0 && (
-          <h2 style={{ fontSize: 22, fontWeight: 600, color: '#fff', margin: '0 0 14px', padding: `0 ${sidePad}px`, textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
-            Cast &amp; crew
-          </h2>
-        )}
-        <div style={{ position: 'relative' }}>
-          <div
-            style={{
-              display: 'flex',
-              gap: isTablet ? '24px' : '32px',
-              padding: isTablet ? '0 24px' : '0 48px',
-              overflowX: 'auto',
-              WebkitOverflowScrolling: 'touch',
-              scrollbarWidth: 'none',
-              paddingBottom: '8px',
-            }}
-          >
-            {cast.map((member, idx) => {
-              const imgUrl = getCastImageUrl(member);
-              return (
-                <div
-                  key={`cast-${member.name}-${idx}`}
-                  onClick={() => onPersonSearch?.(member.name, member.tmdbPersonId)}
+    <ShelfSurface ready={imagesReady} scrim={false} isTablet={isTablet} onClose={onClose}>
+      <div style={{ position: 'relative' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: isTablet ? '24px' : '32px',
+            padding: isTablet ? '0 24px' : '0 48px',
+            overflowX: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            scrollbarWidth: 'none',
+            paddingBottom: '8px',
+          }}
+        >
+          {cast.map((member, idx) => {
+            const imgUrl = getCastImageUrl(member);
+            return (
+              <div
+                key={`cast-${member.name}-${idx}`}
+                onClick={() => onPersonSearch?.(member.name, member.tmdbPersonId)}
+                style={{
+                  flexShrink: 0,
+                  width: `${imgSize}px`,
+                  textAlign: 'center',
+                  cursor: onPersonSearch ? 'pointer' : 'default',
+                }}
+              >
+                <img
+                  src={imgUrl ?? PERSON_FALLBACK_SVG}
+                  alt={member.name}
                   style={{
-                    flexShrink: 0,
                     width: `${imgSize}px`,
-                    textAlign: 'center',
-                    cursor: onPersonSearch ? 'pointer' : 'default',
+                    height: `${imgSize}px`,
+                    borderRadius: '50%',
+                    objectFit: 'cover',
+                    background: 'rgba(255,255,255,0.1)',
+                    marginBottom: '12px',
                   }}
-                >
-                  <img
-                    src={imgUrl ?? PERSON_FALLBACK_SVG}
-                    alt={member.name}
-                    style={{
-                      width: `${imgSize}px`,
-                      height: `${imgSize}px`,
-                      borderRadius: '50%',
-                      objectFit: 'cover',
-                      background: 'rgba(255,255,255,0.1)',
-                      marginBottom: '12px',
-                    }}
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src = PERSON_FALLBACK_SVG;
-                    }}
-                  />
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = PERSON_FALLBACK_SVG;
+                  }}
+                />
+                <p style={{
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: 'rgba(255,255,255,0.9)',
+                  margin: '0 0 3px',
+                  lineHeight: 1.3,
+                  wordWrap: 'break-word',
+                }}>
+                  {member.name}
+                </p>
+                {(member.character || member.role) && (
                   <p style={{
-                    fontSize: '14px',
-                    fontWeight: 500,
-                    color: 'rgba(255,255,255,0.9)',
-                    margin: '0 0 3px',
+                    fontSize: '13px',
+                    color: 'rgba(255,255,255,0.6)',
+                    margin: 0,
                     lineHeight: 1.3,
-                    wordWrap: 'break-word',
                   }}>
-                    {member.name}
+                    {member.character ?? member.role}
                   </p>
-                  {(member.character || member.role) && (
-                    <p style={{
-                      fontSize: '13px',
-                      color: 'rgba(255,255,255,0.6)',
-                      margin: 0,
-                      lineHeight: 1.3,
-                    }}>
-                      {member.character ?? member.role}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
-    </>
+    </ShelfSurface>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ReviewsShelf — the same slide-up shelf, holding the Rotten Tomatoes review cards
+// ---------------------------------------------------------------------------
+
+function ReviewsShelf({
+  reviews,
+  settled,
+  isTablet,
+  onOpenReview,
+  onClose,
+}: {
+  reviews: TopReview[];
+  settled: boolean;
+  isTablet: boolean;
+  onOpenReview: (r: TopReview) => void;
+  onClose: () => void;
+}) {
+  const sidePad = isTablet ? 24 : 48;
+  return (
+    <ShelfSurface ready scrim isTablet={isTablet} onClose={onClose}>
+      {reviews.length > 0 ? (
+        <TopReviewsRow reviews={reviews} variant="expanded" onOpen={onOpenReview} sidePadding={sidePad} last />
+      ) : settled ? (
+        <h2 data-reviews-empty style={{ fontSize: 22, fontWeight: 600, color: '#fff', margin: 0, padding: `0 ${sidePad}px`, textAlign: 'left', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
+          No reviews
+        </h2>
+      ) : null}
+    </ShelfSurface>
   );
 }
 
@@ -328,12 +366,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
     showTrailer,
     showFullPlot,
     onClose,
-    showSimilar,
-    showCollection,
     setShowTrailer,
     setShowFullPlot,
-    setShowSimilar,
-    setShowCollection,
     inWatchlist,
     onUpgradeAdded,
     onWatchlistRemoved,
@@ -375,8 +409,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   useEffect(() => { if (showSourcesShelf) fetchIndexerConfigured(); }, [showSourcesShelf]);
   // File Info sheet (ⓘ above the meta line)
   const [showFileInfo, setShowFileInfo] = useState(false);
-  // Ratings & Reviews (Rotten Tomatoes critics → audience) — row lives in the Cast shelf
-  const topReviews = useTopReviews(liveDetail?.title ?? null, liveDetail?.year ?? null);
+  // Reviews (Rotten Tomatoes critics → audience) — the Reviews view's cards
+  const topReviews = useTopReviewsSettled(liveDetail?.title ?? null, liveDetail?.year ?? null);
   const [openReview, setOpenReview] = useState<TopReview | null>(null);
   const { authenticated, user } = useAuth();
   const [fixMatchKey, setFixMatchKey] = useState<number | null>(null);
@@ -391,6 +425,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const [sourcesIndexerQuery, setSourcesIndexerQuery] = useState<string | null>(null);
   const sourcesShelfRef = useRef<HTMLDivElement>(null);
   const [showCastShelf, setShowCastShelf] = useState(false);
+  const [showReviewsShelf, setShowReviewsShelf] = useState(false);
   const modalHost = useModalHost();
   const [srcQuality, setSrcQuality] = useState<string | null>(null);
   const [srcSourceType, setSrcSourceType] = useState<string | null>(null);
@@ -425,10 +460,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);
   const actionsTrailer = reveal.trailer;
-  // The button row is decided at the reveal (v341l): Collection and the Cast label never change after it.
-  const collectionId = detail?.collectionId ?? null;
-  const castRow = useRevealFreeze({ reviews: topReviews.length > 0,
-    show: (liveDetail?.cast?.length ?? 0) > 0 || (liveDetail?.directors?.length ?? 0) > 0 || topReviews.length > 0 }, reveal.revealed, props.openKey, ['reviews', 'show'] as const);
+  // The button row is decided at the reveal (v341l): the Cast button never changes after it.
+  const castRow = useRevealFreeze({ show: (liveDetail?.cast?.length ?? 0) > 0 || (liveDetail?.directors?.length ?? 0) > 0 },
+    reveal.revealed, props.openKey, ['show'] as const);
   const ratingsRow = useRef(ratingsExpectedAtTap(true)).current || !!ratingsSettle.ratings;
 
 
@@ -443,12 +477,21 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const handleCastOpen = useCallback(() => {
     setShowSourcesShelf(false);
     setShowUpgradeShelf(false);
+    setShowReviewsShelf(false);
     setShowCastShelf(prev => !prev);
+  }, []);
+
+  const handleReviewsOpen = useCallback(() => {
+    setShowSourcesShelf(false);
+    setShowUpgradeShelf(false);
+    setShowCastShelf(false);
+    setShowReviewsShelf(prev => !prev);
   }, []);
 
   const handleUpgradeOpen = useCallback(() => {
     setShowSourcesShelf(false);
     setShowCastShelf(false);
+    setShowReviewsShelf(false);
     setShowUpgradeShelf(prev => !prev);
     setUpgradeAdding(null);
     setUpgradeError(null);
@@ -458,6 +501,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const handleSourcesOpen = useCallback(() => {
     setShowUpgradeShelf(false);
     setShowCastShelf(false);
+    setShowReviewsShelf(false);
     setShowSourcesShelf(prev => {
       if (prev) return false;
       setSrcQuality(null);
@@ -481,7 +525,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
 
   // Close shelf on Escape — capture phase so it fires before modal's Escape handler
   // (yields to the review sheet's own Escape handler while a review is open)
-  const shelfOpen = (showUpgradeShelf || showSourcesShelf || showCastShelf) && !openReview;
+  const shelfOpen = (showUpgradeShelf || showSourcesShelf || showCastShelf || showReviewsShelf) && !openReview;
   useEffect(() => {
     if (!shelfOpen) return;
     const handler = (e: KeyboardEvent) => {
@@ -495,6 +539,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
         setShowUpgradeShelf(false);
         setShowSourcesShelf(false);
         setShowCastShelf(false);
+        setShowReviewsShelf(false);
       }
     };
     window.addEventListener('keydown', handler, true);
@@ -631,7 +676,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // Derived
   // ---------------------------------------------------------------------------
   const isOwned = reveal.revealed ? reveal.owned : (detail?.isOwned ?? false);
-  const similarTmdbId = detail?.tmdbId ?? props.resolvedTmdbId ?? null;
   // ⓘ File Info — Plex items only, signed-in users only (shows NAS paths)
   const canShowFileInfo = authenticated && isOwned && !!detail?.ratingKey;
   const fileInfoCopies = detail?.libraryKeys
@@ -936,7 +980,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 // v341m: no fade of its own: the row sits in the content layer and rides its CONTENT_WITH_HERO fade (one
                 // compositor start for title and content; its own animation/transition started a frame or two late, B3/I1440).
                 animation: 'none',
-                transform: showCastShelf ? 'translateY(-15vh)' : 'translateY(0)',
+                transform: showCastShelf || showReviewsShelf ? 'translateY(-15vh)' : 'translateY(0)',
               }}>
                 {/* v341l: the candidate logo is mounted (hidden: the row is at opacity 0) while the hero holds, so the
                     same <img> is complete when the latch picks it and paints in the reveal frame (no +30 ms logo). */}
@@ -978,8 +1022,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
 
             {/* === CONTENT — meta+plot+pills at bottom === */}
             <div style={{
-              opacity: (showSourcesShelf || showCastShelf) ? 0 : 1, // the one reveal fades it (a warm open mounts it before `phase`: no second fade)
-              transition: (showSourcesShelf || showCastShelf) ? 'none' : 'opacity var(--m-dur-reveal) var(--m-ease-reveal)',
+              opacity: (showSourcesShelf || showCastShelf || showReviewsShelf) ? 0 : 1, // the one reveal fades it (a warm open mounts it before `phase`: no second fade)
+              transition: (showSourcesShelf || showCastShelf || showReviewsShelf) ? 'none' : 'opacity var(--m-dur-reveal) var(--m-ease-reveal)',
               willChange: 'opacity',
               display: 'flex',
               flexDirection: 'column',
@@ -1117,22 +1161,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                       onClick={() => setShowTrailer(true)}
                     />
                   )}
-                  {isOwned && (
-                    <PillButton
-                      focusKey="mm-info-upgrade"
-                      zoneId="movie-detail-modal"
-                      padding={t.pill.padding}
-                      fontSize={t.pill.fontSize}
-                      icon={
-                        <svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="12" y1="19" x2="12" y2="5" />
-                          <polyline points="5 12 12 5 19 12" />
-                        </svg>
-                      }
-                      label="Upgrade"
-                      onClick={handleUpgradeOpen}
-                    />
-                  )}
                   {/* Sources — admins only (grabs are admin-only), like TV */}
                   {isOwner && (
                   <span data-modal-sources="" style={{ display: 'contents' }}>
@@ -1153,41 +1181,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   />
                   </span>
                   )}
-                  {similarTmdbId && (
-                    <PillButton
-                      focusKey="mm-info-similar"
-                      zoneId="movie-detail-modal"
-                      padding={t.pill.padding}
-                      fontSize={t.pill.fontSize}
-                      icon={
-                        <svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polygon points="12 2 2 7 12 12 22 7 12 2" />
-                          <polyline points="2 17 12 22 22 17" />
-                          <polyline points="2 12 12 17 22 12" />
-                        </svg>
-                      }
-                      label="Similar"
-                      onClick={() => setShowSimilar(true)}
-                    />
-                  )}
-                  {collectionId != null && (
-                    <PillButton
-                      focusKey="mm-info-collection"
-                      zoneId="movie-detail-modal"
-                      padding={t.pill.padding}
-                      fontSize={t.pill.fontSize}
-                      icon={
-                        <svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="3" width="7" height="7" rx="1" />
-                          <rect x="14" y="3" width="7" height="7" rx="1" />
-                          <rect x="3" y="14" width="7" height="7" rx="1" />
-                          <rect x="14" y="14" width="7" height="7" rx="1" />
-                        </svg>
-                      }
-                      label="Collection"
-                      onClick={() => setShowCollection(true)}
-                    />
-                  )}
                   {!!castRow?.show && (
                     <PillButton
                       focusKey="mm-info-cast"
@@ -1202,10 +1195,23 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                         </svg>
                       }
-                      label={castRow?.reviews ? 'Cast & Reviews' : 'Cast'}
+                      label="Cast"
                       onClick={handleCastOpen}
                     />
                   )}
+                  <PillButton
+                    focusKey="mm-info-reviews"
+                    zoneId="movie-detail-modal"
+                    padding={t.pill.padding}
+                    fontSize={t.pill.fontSize}
+                    icon={
+                      <svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                    }
+                    label="Reviews"
+                    onClick={handleReviewsOpen}
+                  />
                 </div>
 
               </div>{/* end bottom group */}
@@ -1383,8 +1389,17 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               }
             }}
             onClose={() => setShowCastShelf(false)}
-            reviews={topReviews}
+          />
+        )}
+
+        {/* Reviews shelf */}
+        {showReviewsShelf && detail && (
+          <ReviewsShelf
+            reviews={topReviews.reviews}
+            settled={topReviews.settled}
+            isTablet={isTablet}
             onOpenReview={setOpenReview}
+            onClose={() => setShowReviewsShelf(false)}
           />
         )}
 
@@ -1773,15 +1788,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           />
         )}
 
-        {showCollection && collectionId != null && (
-          <CollectionsSheet
-            open={showCollection}
-            initialCollectionId={collectionId}
-            overlayZIndex={10050}
-            onClose={() => setShowCollection(false)}
-          />
-        )}
-
         {openReview && (
           <ReviewSheet review={openReview} variant="expanded" onClose={() => setOpenReview(null)} />
         )}
@@ -1807,17 +1813,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
             onMatched={handleFixMatched}
           />
         )}
-
-        {showSimilar && detail && (
-          <SimilarPanel
-            tmdbId={similarTmdbId}
-            ratingKey={detail.ratingKey ?? null}
-            title={detail.title}
-            onClose={() => setShowSimilar(false)}
-          />
-        )}
-
-
 
         {/* Grab success toast */}
         {props.grabToast && (
