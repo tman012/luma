@@ -1,7 +1,7 @@
 /** v179: a tab left open across a deploy reloads into the new build (Taylor's v178 report: a v177 tab drew
  * v178's still-less calendar data in v177's reserved 16:9 boxes). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BUILD_CHECK_MS, BUILD_FOCUS_GAP_MS, checkBuild, entryOf, runningEntry, watchBuild } from '@/utils/buildWatch';
+import { BUILD_CHECK_MS, BUILD_FOCUS_GAP_MS, BUILD_RELOAD_GUARD_MS, checkBuild, entryOf, runningEntry, watchBuild } from '@/utils/buildWatch';
 
 const shell = (entry: string, appShell = true, ok = true) => vi.fn(async () => ({
   ok, status: ok ? 200 : 503,
@@ -33,6 +33,25 @@ describe('build watch', () => {
     // a reload that still came back on the old bundle never loops
     expect(await checkBuild({ base: '', fetchImpl: f, reload, storage })).toBe('skipped');
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+  it('v366: the loop guard is a time window, so a reload that missed the new bundle tries again on a later resume', async () => {
+    const reload = vi.fn(); const storage = mem(); let t = 1_000;
+    const f = shell('/assets/index-NEW366cc.js');
+    expect(await checkBuild({ base: '', fetchImpl: f, reload, storage, now: () => t })).toBe('reloaded');
+    t += 60_000;
+    expect(await checkBuild({ base: '', fetchImpl: f, reload, storage, now: () => t })).toBe('skipped');
+    t += BUILD_RELOAD_GUARD_MS;
+    expect(await checkBuild({ base: '', fetchImpl: f, reload, storage, now: () => t })).toBe('reloaded');
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+  it('v366: every watch check also asks the service worker for an update (an installed iOS app that resumes never reloads)', async () => {
+    vi.useFakeTimers();
+    let t = 0; const onCheck = vi.fn();
+    const stop = watchBuild({ base: '', fetchImpl: shell('/assets/index-OLD177aa.js'), reload: vi.fn(), storage: mem(), now: () => t, onCheck });
+    t += BUILD_FOCUS_GAP_MS + 1;
+    window.dispatchEvent(new Event('focus'));
+    expect(onCheck).toHaveBeenCalledTimes(1);
+    stop();
   });
   it('never reloads while a field has focus, offline, on an error or on a page that is not the app', async () => {
     const reload = vi.fn();
