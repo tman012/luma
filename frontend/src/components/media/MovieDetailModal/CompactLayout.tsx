@@ -1,8 +1,8 @@
 import { StagedBox, StagedProvider } from '@/components/motion/useStagedMount';
 import { sheetBase } from '@/utils/posterColors';
 import { ACTION_CIRCLE_SLOT, ACTION_LABEL_LINE, META_ROW, ratingsExpectedAtTap, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
-import { APP_BG } from '@/theme/motion';
-import { SheetFrame, SheetCard, SeedLayer, useSeededHero, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { SHEET_NEUTRAL } from '@/theme/motion';
+import { SheetFrame, SheetCard, SeedLayer, useSeededHero, useSheetPaletteAt, PaletteFade, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { SURFACE_FADE } from '@/theme/motion';
 import { detailSheetReady } from '@/loading/sheetOpenGate';
 import { CastPhoto } from '@/components/media/CastPhoto';
@@ -125,7 +125,7 @@ export function CompactLayout(props: MovieModalViewProps) {
     ratings,
     ratingsLoading,
     trailerKey,
-    ultraBlurColors: paletteColors,
+    sheetColors: paletteColors = null,
     loading,
     error,
     phase,
@@ -159,7 +159,8 @@ export function CompactLayout(props: MovieModalViewProps) {
   const heroHold = hero.seeded ? false : titleState === 'hold';
   // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
   const ultraBlurColors = hero.colors;
-  const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
+  const paletteAt = useSheetPaletteAt(ultraBlurColors);
+  const sheetBg = sheetBase(ultraBlurColors) ?? SHEET_NEUTRAL;
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
   }, [composed]);
@@ -402,7 +403,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                       ...(hero.seeded ? SEEDED_WASH : {}),
                     }}
                   >
-                    <UltraBlurOverlay hold={heroHold} instant colors={ultraBlurColors} variant="mobile" animationDelay={300} />
+                    <PaletteFade colors={ultraBlurColors} at={paletteAt}><UltraBlurOverlay hold={heroHold} instant colors={ultraBlurColors} variant="mobile" /></PaletteFade>
                   </div>
                 )}</>
   );
@@ -453,7 +454,7 @@ export function CompactLayout(props: MovieModalViewProps) {
 
   return (
     <SheetFrame name="MovieDetailModal" phase={phase} composed={composed} go={go} onScrimClick={onClose}>
-      <SheetCard background={APP_BG} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>
+      <SheetCard background={SHEET_NEUTRAL} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>
         {/* No sheet spinner past the deadline (Taylor 2026-11-02): the pre-reveal surface stays as is. */}
         {/* Scrollable content */}
         <StagedProvider total={1} enabled={detailsIn && reveal.revealed} resetKey={props.openKey}>
@@ -1116,7 +1117,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                 willChange: 'transform',
               }}
             >
-              <UltraBlurOverlay hold={heroHold} instant colors={ultraBlurColors} variant="mobile" />
+              <PaletteFade colors={ultraBlurColors} at={paletteAt}><UltraBlurOverlay hold={heroHold} instant colors={ultraBlurColors} variant="mobile" /></PaletteFade>
             </div>
           )}
         </div>

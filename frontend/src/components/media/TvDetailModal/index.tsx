@@ -40,6 +40,7 @@ export function TvDetailModal({
     error,
     seasonsLoading,
     ultraBlurColors,
+    sheetColors,
     resolvedTmdbId,
   } = tvData;
 
@@ -191,6 +192,7 @@ export function TvDetailModal({
     error,
     seasonsLoading,
     ultraBlurColors,
+    sheetColors,
     resolvedTmdbId,
     selectedSeason,
     setSelectedSeason,

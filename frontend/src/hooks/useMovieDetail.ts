@@ -33,6 +33,8 @@ interface UseMovieDetailResult {
   error: boolean;
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
+  /** The fetched palette alone (null until it answers): what the phone sheet's blur draws, never the poster seed. */
+  sheetColors: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
 }
 
@@ -396,7 +398,7 @@ export function useMovieDetail(
   // the popup leaves its loading state so it fades in with the backdrop.
   // With a Plex key, Plex's validated tmdb_id wins over the search hint.
   const effectiveTmdbId = ratingKey && detail ? (detail.tmdbId ?? undefined) : tmdbId;
-  const { colors: ultraBlurColors, settled: colorsSettled } = useModalColors('movie', ratingKey, effectiveTmdbId);
+  const { colors: ultraBlurColors, settled: colorsSettled, fetched: sheetColors } = useModalColors('movie', ratingKey, effectiveTmdbId);
 
   // -------------------------------------------------------------------------
   // Fetch clearlogo from TMDb — always prefer TMDb over Plex (Plex sometimes
@@ -501,6 +503,7 @@ export function useMovieDetail(
     error,
     trailerKey,
     ultraBlurColors,
+    sheetColors,
     resolvedTmdbId,
   };
 }

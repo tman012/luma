@@ -12,7 +12,7 @@
  */
 import { createContext, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { APP_BG, MODAL_MOTION, MOTION, REVEAL_TRANSITION, reducedMotion } from '@/theme/motion';
+import { APP_BG, MODAL_MOTION, MOTION, REVEAL_TRANSITION, SHEET_NEUTRAL, reducedMotion } from '@/theme/motion';
 import { useCloseOnce } from '@/components/motion/useSurfacePresence';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
 import { SHEET_MOVING_EVENT, tapShell } from '@/services/modalPrefetch';
@@ -49,10 +49,37 @@ export function useSeededHero(composed: boolean, colors: UltraBlurColors | null)
   const tap = useRef(tapShell()).current;
   const seeded = useRef<boolean | null>(null);
   if (seeded.current === null) seeded.current = !composed && !!tap;
-  const frozen = useRef<{ colors: UltraBlurColors | null } | null>(null);
-  if (seeded.current && !frozen.current) frozen.current = { colors };
   const on = seeded.current === true;
-  return { go: true, seeded: on, art: on ? tap!.poster : null, title: on ? tap!.title : '', colors: on ? frozen.current!.colors : colors };
+  return { go: true, seeded: on, art: on ? tap!.poster : null, title: on ? tap!.title : '', colors };
+}
+
+/** When the sheet's palette arrived: null while it is not here, -1 when it was here at the sheet's first render (it
+ *  shows at once, nothing fades), else the time it landed. The blur and the sheet's tint both start their one fade
+ *  from it, so a wash that mounts later (the details under the seed) continues the same fade. */
+export function useSheetPaletteAt(colors: UltraBlurColors | null): number | null {
+  const first = useRef<boolean | null>(null);
+  if (first.current === null) first.current = !!colors;
+  const at = useRef<number | null>(null);
+  if (colors && at.current === null) at.current = first.current ? -1 : performance.now();
+  return at.current;
+}
+
+/** The sheet's palette blur fades in once, from the neutral sheet color, on the sheet itself (opacity only): a negative
+ *  delay resumes the fade at its progress when this wrapper mounts after the palette landed. A palette that was there
+ *  from the first render, or whose fade has run, draws at full opacity. */
+export function PaletteFade({ colors, at, children }: { colors: UltraBlurColors | null; at: number | null; children: ReactNode }) {
+  return colors ? <PaletteFadeIn at={at}>{children}</PaletteFadeIn> : null;
+}
+function PaletteFadeIn({ at, children }: { at: number | null; children: ReactNode }) {
+  const age = useRef(at === null || at < 0 ? null : Math.round(performance.now() - at)).current;
+  const fading = age !== null && age < MOTION.dur.reveal && !reducedMotion();
+  return (
+    <div data-palette-fade={fading ? '' : undefined}
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
+        ...(fading ? { animation: 'm-crossfade var(--m-dur-reveal) var(--m-ease-reveal) both', animationDelay: `${-age}ms` } : null) }}>
+      {children}
+    </div>
+  );
 }
 
 /** Seeded hero: the wash box has one fixed height in the seed and in the details (its blobs scale with the box),
@@ -199,6 +226,8 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go = tru
     document.body,
   );
 }
+
+export { SHEET_NEUTRAL };
 
 /** The sheet card: rounded top, full height under the safe area, slides with the frame. */
 export function SheetCard({ background, tint, hold = true, children }: { background: string; tint?: string | null; hold?: boolean; children: ReactNode }) {
