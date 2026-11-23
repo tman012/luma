@@ -33,12 +33,14 @@ export function matchTier(query: string, title: string | null | undefined): numb
 
 export interface Rankable {
   title?: string; name?: string; isOwned?: boolean;
+  /** Another title for the same item (an owned title's TMDb title: Plex's "Dune: Part One" is TMDb's "Dune"). */
+  alt_title?: string;
   vote_count?: number; popularity?: number; relevance_rank?: number;
 }
 
 /** Best first; loose matches dropped when any title fits. Stable for equal keys. */
 export function rankTitles<T extends Rankable>(query: string, items: T[]): T[] {
-  const list = items.map((x, i) => ({ x, i, tier: matchTier(query, x.title || x.name) }));
+  const list = items.map((x, i) => ({ x, i, tier: Math.min(matchTier(query, x.title || x.name), x.alt_title ? matchTier(query, x.alt_title) : 4) }));
   const strong = list.some(r => r.tier < 4);
   const kept = strong ? list.filter(r => r.tier < 4) : list;
   kept.sort((a, b) => a.tier - b.tier

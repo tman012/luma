@@ -611,6 +611,11 @@ describe('v246 D3: filter chips over a 7-column grid', () => {
     await type('dune part');
     expect(screen.getByTestId('d3-chip-all').getAttribute('aria-pressed')).toBe('true');
   });
+  it('v301: an owned title also ranks by its TMDb title (Plex "Dune: Part One" is TMDb "Dune")', async () => {
+    const { rankTitles } = await import('@/services/searchRank');
+    const r = rankTitles('dune', [{ title: 'Dune 2', vote_count: 5 }, { title: 'Dune: Part One', alt_title: 'Dune', isOwned: true, vote_count: 13000 }, { title: 'The Dune', vote_count: 3 }]);
+    expect(r.map(x => x.title)).toEqual(['Dune: Part One', 'The Dune', 'Dune 2']);
+  });
   it('v301: an In Library badge on each owned poster, none on TMDb titles', async () => {
     render(<HomeSearchR3 />);
     await type('dune');

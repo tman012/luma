@@ -42,6 +42,8 @@ export interface SearchMovie {
   popularity?: number;
   /** TMDb cross-type relevance position from /search — lower is more relevant. */
   relevance_rank?: number;
+  /** v301: an owned row's TMDb title when it differs (ranked by either). */
+  alt_title?: string;
   // enriched fields
   isOwned?: boolean;
 }
@@ -168,6 +170,7 @@ export async function performSearch(
   const notOwned = (m: SearchMovie) => {
     const o = ownedTwin(m);
     if (!o) return true;
+    if (!o.alt_title && getTitle(m) && getTitle(m) !== getTitle(o)) o.alt_title = getTitle(m);
     if (o.vote_count == null && m.vote_count != null) o.vote_count = m.vote_count;
     if (o.popularity == null && m.popularity != null) o.popularity = m.popularity;
     if (m.relevance_rank != null && (o.relevance_rank == null || m.relevance_rank < o.relevance_rank)) o.relevance_rank = m.relevance_rank;
