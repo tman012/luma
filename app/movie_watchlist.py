@@ -32,6 +32,17 @@ def _guard(write: bool = False):
     return _off() or ms._guard(write)
 
 
+def _guard_or_service(write: bool = False):
+    """v300: as _guard, but the service key (a trusted companion) is accepted too."""
+    from app import minimal, start_flow
+    off = _off()
+    if off:
+        return off
+    if start_flow.service_key_request() and minimal.enabled():
+        return None
+    return ms._guard(write)
+
+
 def tmdb_ids() -> List[int]:
     with ms.connect() as conn:
         return [r['tmdb_id'] for r in conn.execute('SELECT tmdb_id FROM watchlist ORDER BY added_at')]
@@ -94,7 +105,7 @@ def remove(tid: int) -> bool:
 
 @bp.route('/api/movies/watchlist/tmdb-ids', methods=['GET'])
 def ids_get():
-    return _guard() or ms._out({'tmdb_ids': tmdb_ids()})
+    return _guard_or_service() or ms._out({'tmdb_ids': tmdb_ids()})
 
 
 @bp.route('/api/movies/watchlist/profiles', methods=['GET'])
@@ -119,7 +130,7 @@ def list_get():
 
 @bp.route('/api/movies/watchlist', methods=['POST'])
 def add_post():
-    err = _guard(write=True)
+    err = _guard_or_service(write=True)
     if err:
         return err
     try:
@@ -130,7 +141,7 @@ def add_post():
 
 @bp.route('/api/movies/watchlist/<int:tid>', methods=['DELETE'])
 def remove_delete(tid: int):
-    err = _guard(write=True)
+    err = _guard_or_service(write=True)
     if err:
         return err
     if not remove(tid):

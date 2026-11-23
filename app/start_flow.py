@@ -789,6 +789,19 @@ def _owner_or_error(allow_implicit: bool = False):
 SIGN_IN_FIRST = 'Sign in first'
 
 
+def service_key_request() -> bool:
+    """v300: True when this request is authenticated by Luma's service key
+    (X-API-Key, the companion apps' key; load_current_user validated it and
+    set the synthetic user id 0). Used only by the routes that opt in: the
+    native movie watchlist's ids/add/remove, so a trusted companion
+    (SmartHome's Media popup) can add to and remove from the watchlist. The
+    watchlist's searches and grabs and the TV Sources grab stay owner-only."""
+    from flask import g, request as _rq
+    user = getattr(g, 'current_user', None) or {}
+    return bool(user.get('id') == 0 and user.get('is_admin') and _rq.headers.get('X-API-Key')
+                and not getattr(g, 'implicit_user', False))
+
+
 def require_signed_in_owner():
     """(user, None) or (None, error response) for destructive file actions
     (manual downloads cleanup, and any TV or movie delete): only the owner
