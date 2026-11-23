@@ -103,10 +103,19 @@ def _ha_wake_sequence(device: dict, room: dict,
 def _adb_wake_sequence(device: dict, room: dict,
                        host: str, port: int, platform: str,
                        timeout: int, steps: list[str]) -> dict:
-    """Standard ADB-based wake sequence (WoL, Harmony, ADB keyevents)."""
+    """Standard ADB-based wake sequence (WoL, Harmony, ADB keyevents).
+
+    v300: when the room uses a Harmony Hub, the Harmony activity is checked
+    first, before the "player already awake" shortcut. A Shield can stay awake
+    while the TV and receiver are off; Harmony owns that whole chain, so it
+    must get the chance to start the activity. After a switch the player's
+    screen state is read again, so KEYCODE_POWER (a toggle) is only sent when
+    the player is really still off.
+    """
 
     # 1. Wake-on-LAN (skip when Harmony handles power — it controls the whole chain)
-    has_harmony = room.get('useHarmonyHub') and device.get('harmonyActivity')
+    has_harmony = bool(room.get('useHarmonyHub') and device.get('harmonyActivity')
+                       and room.get('harmonyHubIp'))
     mac = device.get('macAddress', '')
     if mac and is_valid_mac(mac) and not has_harmony:
         _step_wol(mac, steps)
@@ -117,19 +126,26 @@ def _adb_wake_sequence(device: dict, room: dict,
     # 3. Check display state
     state = _step_check_display(host, port, steps)
 
-    if state == 'Awake':
-        return {"ok": True, "detail": "Device already awake", "steps": steps}
+    if has_harmony:
+        # 4. Harmony first: turns on the TV and receiver even when the player is awake
+        switched, harmony_confirmed = _harmony_switch(room, device, steps)
+        if harmony_confirmed:
+            return {"ok": True, "detail": "Device awake (confirmed by Harmony poll)", "steps": steps}
+        if switched:
+            # Harmony may have woken (or power-cycled) the player: reconnect and re-read
+            _step_adb_connect(host, port, steps)
+            state = _step_check_display(host, port, steps)
+        if state == 'Awake':
+            return {"ok": True, "detail": "Device already awake", "steps": steps}
+        if not switched:
+            _step_adb_connect(host, port, steps)
+    else:
+        if state == 'Awake':
+            return {"ok": True, "detail": "Device already awake", "steps": steps}
+        # 5. Reconnect ADB
+        _step_adb_connect(host, port, steps)
 
-    # 4. Harmony switch (if configured) — may confirm awake via polling
-    harmony_confirmed = _step_harmony_switch(room, device, steps)
-
-    if harmony_confirmed:
-        return {"ok": True, "detail": "Device awake (confirmed by Harmony poll)", "steps": steps}
-
-    # 5. Reconnect ADB (Harmony may have power-cycled the HDMI-CEC chain)
-    _step_adb_connect(host, port, steps)
-
-    # 6. ADB wakeup keyevent
+    # 6. ADB wakeup keyevent (POWER only when the fresh state says the player is off)
     _step_adb_wake(host, port, platform, state, steps)
 
     # 7. Poll until awake
@@ -182,12 +198,20 @@ def _step_check_display(host: str, port: int, steps: list[str]) -> str:
 def _step_harmony_switch(room: dict, device: dict,
                          steps: list[str]) -> bool:
     """Switch Harmony activity via direct Hub connection. Returns True if device confirmed awake."""
+    return _harmony_switch(room, device, steps)[1]
+
+
+def _harmony_switch(room: dict, device: dict, steps: list[str]) -> tuple:
+    """Start the device's Harmony activity unless the hub already runs it.
+
+    Returns ``(switched, confirmed_awake)``.
+    """
     if not (room.get('useHarmonyHub') and device.get('harmonyActivity')):
-        return False
+        return False, False
     hub_ip = room.get('harmonyHubIp', '')
     activity = device.get('harmonyActivity', '')
     if not (hub_ip and activity):
-        return False
+        return False, False
 
     from app.harmony_service import get_current_activity, start_activity
 
@@ -197,14 +221,14 @@ def _step_harmony_switch(room: dict, device: dict,
 
         if current.lower() == activity.lower():
             steps.append("harmony_switch: already correct")
-            return False
+            return False, False
 
         ok = start_activity(hub_ip, activity)
         if not ok:
             steps.append("harmony_switch: start_activity returned False")
-            return False
+            return False, False
 
-        if current in ('off', 'unknown'):
+        if current.lower() in ('off', 'unknown', 'poweroff'):
             # Brief poll — if not awake yet, ADB wake step handles the rest
             steps.append("harmony_switch: power on — polling for wake")
             for elapsed in range(1, 6):  # max 5s
@@ -215,15 +239,16 @@ def _step_harmony_switch(room: dict, device: dict,
                 )
                 if state == 'Awake':
                     steps.append(f"harmony_switch: device awake after {elapsed}s")
-                    return True  # confirmed awake — caller can skip remaining steps
+                    return True, True  # confirmed awake — caller can skip remaining steps
             steps.append("harmony_switch: not confirmed awake after 5s, continuing")
         else:
             steps.append(f"harmony_switch: '{current}' → '{activity}' — waiting 3s")
             time.sleep(3)
+        return True, False
     except Exception as e:
         logger.warning("Harmony switch failed: %s", e)
         steps.append(f"harmony_switch: failed — {e}")
-    return False
+    return False, False
 
 
 def _step_ha_power(device: dict, display_state: str,
