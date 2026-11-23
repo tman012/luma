@@ -73,6 +73,8 @@ export interface PersonCredit {
 }
 
 export interface SearchResults {
+  /** v301: every title, owned or not, best match first (services/searchRank). */
+  ranked?: SearchMovie[];
   owned: SearchMovie[];
   unowned: SearchMovie[];
   ownedPeople: SearchPerson[];
@@ -91,6 +93,7 @@ export const TMDB_BUSY_TEXT = 'TMDB is busy. Try again in a minute.';
 // ---------------------------------------------------------------------------
 
 import { posterUrl as tmdbPosterUrl, tmdbImg, backdropUrl as tmdbBackdrop, finalBackdropUrl, plexSheetArt, plexArtFromPath } from '@/utils/image';
+import { rankTitles } from '@/services/searchRank';
 import { openWhenReady, resetWarmGroup, scheduleWarm, startSearchWarms, warmDetail } from '@/services/modalPrefetch';
 
 function titleKey(title: string, year: number | string | null | undefined): string {
@@ -155,24 +158,36 @@ export async function performSearch(
   const ownedTV: SearchMovie[] = (libraryData.tv_shows ?? []).map(
     (s: SearchMovie) => ({ ...s, media_type: 'tv' as const, isOwned: true }),
   );
-  const owned = [...ownedMovies, ...ownedTV];
+  const ownedAll = [...ownedMovies, ...ownedTV];
 
-  // Build set of owned title keys for dedup
-  const ownedKeys = new Set(owned.map((o) => titleKey(getTitle(o), getYear(o))));
+  // Owned titles by title+year and by TMDb id: a TMDb row for an owned title is dropped, and its popularity and
+  // relevance go to the owned row (v301), so the owned title ranks where TMDb would put it.
+  const ownedByKey = new Map(ownedAll.map((o) => [`${o.media_type}|${titleKey(getTitle(o), getYear(o))}`, o] as const));
+  const ownedById = new Map(ownedAll.filter((o) => o.tmdb_id).map((o) => [`${o.media_type}|${o.tmdb_id}`, o] as const));
+  const ownedTwin = (m: SearchMovie) => ownedById.get(`${m.media_type}|${m.id}`) ?? ownedByKey.get(`${m.media_type}|${titleKey(getTitle(m), getYear(m))}`);
+  const notOwned = (m: SearchMovie) => {
+    const o = ownedTwin(m);
+    if (!o) return true;
+    if (o.vote_count == null && m.vote_count != null) o.vote_count = m.vote_count;
+    if (o.popularity == null && m.popularity != null) o.popularity = m.popularity;
+    if (m.relevance_rank != null && (o.relevance_rank == null || m.relevance_rank < o.relevance_rank)) o.relevance_rank = m.relevance_rank;
+    return false;
+  };
 
   // -- Unowned results (from TMDb), filtering out already-owned --
   const tmdbMovies: SearchMovie[] = (tmdbData.movies ?? [])
     .map((m: SearchMovie) => ({ ...m, media_type: 'movie' as const }))
-    .filter((m: SearchMovie) => !ownedKeys.has(titleKey(getTitle(m), getYear(m))));
+    .filter(notOwned);
   const tmdbTV: SearchMovie[] = (tmdbData.tv_shows ?? [])
     .map((s: SearchMovie) => ({ ...s, media_type: 'tv' as const }))
-    .filter((s: SearchMovie) => !ownedKeys.has(titleKey(getTitle(s), getYear(s))));
-  // Interleave by TMDb's cross-type relevance rank. Plain concatenation put
-  // every movie ahead of every TV show — "Severance" listed 12 movies before
-  // the show. Ties and older payloads without a rank keep their arrival order.
-  const unowned = [...tmdbMovies, ...tmdbTV].sort(
-    (a, b) => (a.relevance_rank ?? Number.MAX_SAFE_INTEGER) - (b.relevance_rank ?? Number.MAX_SAFE_INTEGER),
-  );
+    .filter(notOwned);
+
+  // v301: one ranking for every title, owned or not: how well the title fits the query, then popularity
+  // (services/searchRank). Loose library matches (the typo-tolerant index answers "The Boy" for "the box") are
+  // dropped when anything fits. `ranked` is the one list; owned/unowned keep that order for the older layouts.
+  const ranked = rankTitles(query, [...ownedAll, ...tmdbMovies, ...tmdbTV]);
+  const owned = ranked.filter((m) => m.isOwned);
+  const unowned = ranked.filter((m) => !m.isOwned);
 
   // -- People: Plex-owned vs TMDb-unowned, sorted by popularity --
   const ownedPeople: SearchPerson[] = libraryData.people ?? [];
@@ -189,7 +204,7 @@ export async function performSearch(
       return (b.popularity ?? 0) - (a.popularity ?? 0);
     });
 
-  return { owned, unowned, ownedPeople, unownedPeople, rateLimited: !!tmdbData.rate_limited, failed: misses === 2 };
+  return { ranked, owned, unowned, ownedPeople, unownedPeople, rateLimited: !!tmdbData.rate_limited, failed: misses === 2 };
 }
 
 // ---------------------------------------------------------------------------

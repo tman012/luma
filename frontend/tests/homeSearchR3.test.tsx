@@ -30,7 +30,7 @@ let tm: unknown = TM;
 let tvShows: { tmdb_id: number }[] = [];
 let tvPaths = [{ id: 'p1', name: 'TV', path: '/media/tv', status: 'ok' }];
 const tvPosts: unknown[] = [];
-const fetchMock = vi.fn(async (u: string, init?: RequestInit) => {
+const defaultFetch = async (u: string, init?: RequestInit) => {
   const url = String(u); calls.push(url);
   // the native watchlist and the profile sheet, mocked
   if (url.includes('/api/movies/watchlist/tmdb-ids')) return wlStatus === 200 ? json({ tmdb_ids: wl }) : new Response('{}', { status: wlStatus });
@@ -43,7 +43,8 @@ const fetchMock = vi.fn(async (u: string, init?: RequestInit) => {
   if (url.includes('/api/library/search')) return json(LIB);
   if (url.startsWith('/search?') || url.includes('/search?q=')) return json(tm);
   return json({});
-});
+};
+const fetchMock = vi.fn(defaultFetch);
 beforeEach(() => { calls.length = 0; posts.length = 0; wl = []; wlStatus = 200; tm = TM; tvShows = []; tvPosts.length = 0; tvPaths = [{ id: 'p1', name: 'TV', path: '/media/tv', status: 'ok' }]; window.__LUMA_MINIMAL__ = true; vi.useFakeTimers({ shouldAdvanceTime: true }); vi.stubGlobal('fetch', fetchMock); modals.openMovie.mockReset(); modals.openTv.mockReset(); });
 afterEach(() => { delete window.__LUMA_MINIMAL__; cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -99,8 +100,9 @@ describe('R3 layout (1440 and 1024)', () => {
     expect(screen.queryByTestId('r3-top')).toBeNull();
     expect(screen.queryByTestId('find-more')).toBeNull();
     const cards = screen.getAllByTestId('r3-card');
-    expect(cards.map(c => c.textContent)).toEqual(['Dune2021 · Movie', 'Dune: Part Two2024 · Movie', 'Dune: Prophecy2024 · TV',
-      'Dune1984 · Movie', "Frank Herbert's Dune2000 · TV"]);
+    // v301: one ranking (fit, then popularity), owned or not; owned titles carry the In Library badge
+    expect(cards.map(c => c.textContent)).toEqual(['In LibraryDune2021 · Movie', 'Dune1984 · Movie', 'In LibraryDune: Part Two2024 · Movie',
+      'In LibraryDune: Prophecy2024 · TV', "Frank Herbert's Dune2000 · TV"]);
     expect(screen.getAllByTestId('r3-person').map(p => p.textContent)).toEqual(['Denis VilleneuvePerson']);
     expect(screen.getByTestId('r3-grid').lastElementChild).toBe(screen.getByTestId('r3-person'));
     expect(screen.queryByText('Play')).toBeNull();
@@ -446,7 +448,7 @@ describe('v358 nav bar on Home: Search opens the search modal, nothing drops dow
     const cards = screen.getAllByTestId('r3-card');
     fireEvent.click(cards[0]!);
     await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 1, tmdbId: 438631, origin: 'search' }));
-    fireEvent.click(cards[2]!);
+    fireEvent.click(cards[3]!);
     await waitFor(() => expect(modals.openTv).toHaveBeenCalledWith({ ratingKey: 2, tmdbId: 90228, origin: 'search' }));
     expect(isOpen()).toBe(true);
     expect(screen.getAllByTestId('r3-card')).toHaveLength(cards.length);
@@ -522,11 +524,11 @@ describe('v244: uniform 2:3 tiles, no overlap, 2-line titles, a placeholder for 
     render(<HomeSearchR3 />);
     await type('dune');
     const cards = screen.getAllByTestId('r3-card');
-    const ph = cards[3]!.querySelector('[data-testid="r3-placeholder"]') as HTMLElement;
+    const ph = cards[1]!.querySelector('[data-testid="r3-placeholder"]') as HTMLElement;
     expect(ph.dataset.title).toBe('Dune');
-    expect(cards[3]!.querySelector('img')).toBeNull();
+    expect(cards[1]!.querySelector('img')).toBeNull();
     expect(ph.parentElement!.className).toBe('r3-po');
-    const w = cards[3]!.parentElement!;
+    const w = cards[1]!.parentElement!;
     expect(w.className).toBe('r3-cardw');
     expect(w.querySelector('[data-testid="r3-wl-add"]')!.parentElement).toBe(w);
   });
@@ -591,7 +593,7 @@ describe('v246 D3: filter chips over a 7-column grid', () => {
     const n = calls.length;
     fireEvent.click(screen.getByTestId('d3-chip-movie'));
     expect(screen.getByTestId('d3-chip-movie').getAttribute('aria-pressed')).toBe('true');
-    expect(labels()).toEqual(['Dune', 'Dune: Part Two', 'Dune']); expect(people()).toEqual([]);
+    expect(labels()).toEqual(['Dune', 'Dune', 'Dune: Part Two']); expect(people()).toEqual([]);
     fireEvent.click(screen.getByTestId('d3-chip-tv'));
     expect(labels()).toEqual(['Dune: Prophecy', "Frank Herbert's Dune"]); expect(people()).toEqual([]);
     fireEvent.click(screen.getByTestId('d3-chip-people'));
@@ -609,12 +611,30 @@ describe('v246 D3: filter chips over a 7-column grid', () => {
     await type('dune part');
     expect(screen.getByTestId('d3-chip-all').getAttribute('aria-pressed')).toBe('true');
   });
-  it('no In library badge or overlay on any poster', async () => {
+  it('v301: an In Library badge on each owned poster, none on TMDb titles', async () => {
     render(<HomeSearchR3 />);
     await type('dune');
-    expect(screen.queryByTestId('r3-in-library')).toBeNull();
-    expect(document.querySelector('.r3-badge')).toBeNull();
-    expect(screen.getByTestId('r3-grid').textContent).not.toContain('In library');
+    const owned = screen.getAllByTestId('r3-card').filter(c => c.dataset.owned === 'true');
+    expect(owned).toHaveLength(3);
+    expect(screen.getAllByTestId('r3-in-library')).toHaveLength(3);
+    for (const c of owned) expect(c.querySelector('[data-testid="r3-in-library"]')?.textContent).toBe('In Library');
+  });
+  it('v301: "the box" puts The Box first; loose library matches are dropped', async () => {
+    const lib = { movies: [{ rating_key: 21, title: 'The Boxer', year: 1997 }, { rating_key: 22, title: 'The Boy', year: 2016 }, { rating_key: 23, title: 'A Bronx Tale', year: 1993 }], tv_shows: [], people: [] };
+    tm = { movies: [{ id: 22825, title: 'The Box', release_date: '2009-11-06', vote_count: 1977, relevance_rank: 1 }, { id: 4001, title: 'Girl in the Box', release_date: '2016-01-01', vote_count: 167, relevance_rank: 6 }],
+      tv_shows: [{ id: 5001, name: 'The Box', first_air_date: '2021-01-01', vote_count: 35, relevance_rank: 0 }, { id: 5003, name: 'Mystery in the Box', first_air_date: '2024-01-01', vote_count: 3, relevance_rank: 3 }], people: [] };
+    fetchMock.mockImplementation(async (u: string) => {
+      const url = String(u); calls.push(url);
+      if (url.includes('/api/library/search')) return json(lib);
+      if (url.includes('/search?q=')) return json(tm);
+      return json({});
+    });
+    try {
+      render(<HomeSearchR3 />);
+      await type('the box');
+      expect(screen.getAllByTestId('r3-card').map(c => c.textContent)).toEqual(['The Box2009 · Movie', 'The Box2021 · TV',
+        'Girl in the Box2016 · Movie', 'Mystery in the Box2024 · TV', 'In LibraryThe Boxer1997 · Movie']);
+    } finally { fetchMock.mockImplementation(defaultFetch); }
   });
   it('v247: chips and grid in one centered max-width container; auto-fill columns; D3 chip styles', () => {
     expect(r3Css).toContain('.d3{max-width:1600px;margin:0 auto}');

@@ -9118,7 +9118,9 @@ def library_search():
                         seen_tv[key] = formatted
                         all_tv.append(formatted)
             
-            return jsonify({'movies': all_movies, 'tv_shows': all_tv})
+            # v301: real title matches first; the typo-tolerant index also returns loose ones
+            from app.search_rank import order_by_match
+            return jsonify({'movies': order_by_match(query, all_movies), 'tv_shows': order_by_match(query, all_tv)})
         
         # Fallback to Plex API if index not ready
         plex = get_plex_for_request()
@@ -9180,9 +9182,10 @@ def library_search():
         # so we skip this for now (was DB-only feature)
         people = []
 
+        from app.search_rank import order_by_match
         return jsonify({
-            'movies': all_movies[:30],
-            'tv_shows': all_tv[:30],
+            'movies': order_by_match(query, all_movies)[:30],
+            'tv_shows': order_by_match(query, all_tv)[:30],
             'people': people,
             'search_time': 'api',
         })

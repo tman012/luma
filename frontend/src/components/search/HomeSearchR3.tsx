@@ -27,7 +27,8 @@ import { loadTv, loadTvLibrary } from '@/components/library/tvLibraryApi';
 import { addShow, loadProfiles, type MonitorOption } from '@/components/library/tvCalendarApi';
 import type { LibPath } from '@/components/library/libraryPathsApi';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
-import { DEBOUNCE_MS, MIN_QUERY, SKELETON_DELAY_MS, unownedRows } from './HomeSearchPalette';
+import { DEBOUNCE_MS, MIN_QUERY, SKELETON_DELAY_MS } from './HomeSearchPalette';
+import { rankTitles } from '@/services/searchRank';
 
 type Phase = 'idle' | 'loading' | 'done' | 'error';
 
@@ -46,20 +47,16 @@ export const GRID_MAX = 6;
  * TMDb title (its count is all of them). */
 export function buildR3(res: SearchResults | null, q: string): R3View {
   if (!res) return { top: null, grid: [], people: [], more: [] };
-  const tmdb = unownedRows(res, 'all', q).map(r => r.item as SearchMovie);
-  const owned = res.owned;
-  const top = owned[0] ?? tmdb[0] ?? null;
-  const tmdbRest = owned.length ? tmdb : tmdb.slice(1);
-  const rest = owned.slice(1, 1 + GRID_MAX);
-  const grid = [...rest, ...tmdbRest.slice(0, Math.max(0, GRID_MAX - rest.length))];
-  // v231 (PM): On TMDb (and Find more's count) lists only titles not already shown above
-  const shown = new Set([top, ...grid].filter(Boolean).map(m => r3Key(m!)));
-  const more = tmdbRest.filter(m => !shown.has(r3Key(m)));
+  // v301: one list ranked by how well each title fits, then popularity, whether or not it is in your library
+  // (performSearch's `ranked`); an owned title carries the In Library badge instead of being pinned first.
+  const all = res.ranked ?? rankTitles(q, [...res.owned, ...res.unowned]);
+  const top = all[0] ?? null;
+  const grid = all.slice(1, 1 + GRID_MAX);
+  const more = all.slice(1 + GRID_MAX);
   return { top, grid, people: [...res.ownedPeople, ...res.unownedPeople], more };
 }
 
 /** The watchlist '+' shows on TMDb movie cards on the test install (the native watchlist is movies only). */
-const r3Key = (m: SearchMovie) => `${m.media_type === 'tv' ? 'tv' : 'movie'}-${m.tmdb_id || m.id}`;
 /** v231 (PM): the TMDb id a TV card adds to the TV library with (not already in your Plex library). */
 export const tvAddId = (m: SearchMovie): number | null => (!m.isOwned && m.media_type === 'tv' && (m.tmdb_id || m.id)) || null;
 export const wlId = (m: SearchMovie): number | null =>
@@ -370,6 +367,12 @@ function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: (el: HTML
         <span className="r3-po">
           {img && broken !== img ? <img key={img} src={img} alt="" loading="lazy" onError={() => setBroken(img)} />
             : <span className="r3-ph" data-testid="r3-placeholder" data-title={title} aria-hidden="true" />}
+          {item.isOwned && (
+            <span className="r3-own" data-testid="r3-in-library">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+              In Library
+            </span>
+          )}
         </span>
         <span className="r3-ct">{title}</span>
         <span className="r3-cm">{metaR3(item)}</span>
@@ -393,6 +396,7 @@ export const R3_MODAL_W = 1040;
 export const R3_MODAL_REST = 88;
 export const R3_MODAL_OPEN = 760;
 export const r3Css = `
+.r3-own{position:absolute;left:6px;bottom:6px;z-index:1;display:inline-flex;align-items:center;gap:3px;height:22px;padding:0 8px 0 5px;border-radius:11px;font-size:11px;font-weight:700;line-height:1;color:#4ade80;background:rgba(10,12,20,.78);box-shadow:inset 0 0 0 1px rgba(74,222,128,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 [data-r3-search]{--r3-pad:clamp(32px, 3.4vw, 48px);--r3-top:clamp(300px, 29vw, 420px);--r3-po:clamp(112px, 9.5vw, 136px);color:rgba(255,255,255,.95);line-height:normal}
 [data-r3-search]{--a1-dur:var(--m-dur-standard);--a1-ease:var(--m-ease-standard)}
 /* Over the nav bar (z 56) and under the person view (z 60/70) and the detail sheets. */

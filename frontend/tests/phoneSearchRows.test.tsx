@@ -16,7 +16,7 @@ describe('phone search rows (Designer spec)', () => {
     vi.stubGlobal('fetch', vi.fn(async (u: string) => String(u).includes('/api/library/search')
       ? json({ movies: [], tv_shows: [], people: [] })
       : json({ movies: [{ id: 1, title: 'Interstellar', release_date: '2014-11-05', poster_path: '/i.jpg', media_type: 'movie', relevance_rank: 0 }],
-               tv_shows: [{ id: 2, name: 'Breaking Bad', first_air_date: '2008-01-20', poster_path: null, media_type: 'tv', relevance_rank: 1 }],
+               tv_shows: [{ id: 2, name: 'Interview with the Vampire', first_air_date: '2008-01-20', poster_path: null, media_type: 'tv', relevance_rank: 1 }],
                people: [{ id: 3, name: 'Matthew McConaughey', profile_path: '/m.jpg', popularity: 9 }] })));
     (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = true; // posters load through the proxy
     render(<MobileSearchOverlay initialQuery="inter" onClose={() => {}} />);
@@ -27,7 +27,7 @@ describe('phone search rows (Designer spec)', () => {
     expect(metas).toContain('2014 · Movie');
     expect(metas).toContain('2008 · TV show');
     const thumbs = screen.getAllByTestId('row-thumb');
-    const tv = rows.find((r) => r.textContent?.includes('Breaking Bad'))!;
+    const tv = rows.find((r) => r.textContent?.includes('Interview with the Vampire'))!;
     expect(tv.querySelector('[data-testid="row-icon-tv"]')).toBeTruthy();
     expect(tv.querySelector('img')).toBeNull();
     const movie = rows.find((r) => r.textContent?.includes('Interstellar'))!;
