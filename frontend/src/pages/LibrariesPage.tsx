@@ -24,11 +24,13 @@ import { UserMenu } from '@/components/nav/UserMenu';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { PlexSettings, usePlexOwner } from '@/components/home/PlexSettings';
 import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
+import { TrackersSettings, useTrackersAccess } from '@/components/trackers/TrackersSettings';
 
 export const SETTINGS_SECTIONS = [
   { slug: 'home-screen', label: 'Home screen' },
   { slug: 'plex', label: 'Plex' },   // owner only
   { slug: 'connectors', label: 'Connectors' },   // owner only
+  { slug: 'trackers', label: 'Trackers' },   // owner with a session only
 ] as const;
 const DEFAULT_SECTION = SETTINGS_SECTIONS[0].slug;
 export const SAVE_FAILED = "Couldn't save";
@@ -45,6 +47,8 @@ export function SettingsPage() {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const owner = usePlexOwner(!!user?.is_admin);
+  // Trackers: the API serves only the owner signed in with a session (never the implicit LAN owner).
+  const trackersOk = useTrackersAccess(!!user?.is_admin && !implicit && authenticated);
   useBodyScroll();
   if (loading) return null;
   if (!authenticated) return <Navigate to="/login" replace />;
@@ -52,13 +56,18 @@ export function SettingsPage() {
   if (section && !known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors';
   if (known && ownerOnly(known.slug) && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
+  if (known?.slug === 'trackers' && trackersOk === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   const admin = !!user?.is_admin;
-  const sections = SETTINGS_SECTIONS.filter(s => !ownerOnly(s.slug) || owner);
+  const sections = SETTINGS_SECTIONS.filter(s => (s.slug === 'trackers' ? trackersOk : !ownerOnly(s.slug) || owner));
   const content = (slug: string) => slug === 'plex'
     ? (owner ? <PlexSettings /> : null)
     : slug === 'connectors'
       ? (owner ? <ConnectorsSettings /> : null)
-      : <HomeScreenSection admin={admin} wide={wide} />;
+      : slug === 'trackers'
+        ? (trackersOk ? <TrackersSettings wide={wide} onExit={() => navigate('/settings')} /> : null)
+        : <HomeScreenSection admin={admin} wide={wide} />;
+  // Trackers draws its own title row (desktop) and header (phone: Plus, pushed pages).
+  const ownChrome = known?.slug === 'trackers';
 
   if (wide) {
     if (!known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
@@ -93,7 +102,7 @@ export function SettingsPage() {
             </ul>
           </nav>
           <main style={{ flex: 1, minWidth: 0, maxWidth: 720 }}>
-            <h2 style={deskTitle}>{known.label}</h2>
+            {!ownChrome && <h2 style={deskTitle}>{known.label}</h2>}
             {content(known.slug)}
           </main>
         </div>
@@ -123,7 +132,7 @@ export function SettingsPage() {
           </div>
         ) : (
           <div key={known.slug} className="luma-push" data-testid="settings-section">
-            <SheetHeader title={known.label} onBack={() => navigate('/settings')} onClose={() => navigate('/')} />
+            {!ownChrome && <SheetHeader title={known.label} onBack={() => navigate('/settings')} onClose={() => navigate('/')} />}
             <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 24px)' }}>{content(known.slug)}</div>
           </div>
         )}
