@@ -14142,6 +14142,15 @@ def _play_via_plex(service, rating_key, resume_offset, room_name, device_ip, adb
         # appears in PMS /clients, so HTTP playMedia (direct or PMS-proxied)
         # cannot work. Only use the legacy HTTP path when :32500 is actually
         # open (older app build); otherwise start playback with an ADB deep link.
+        # Plezy (com.edde746.plezy) is the player when the TV has it: a plezy://play link
+        # opens the exact item there. Without Plezy the Plex app paths below are used.
+        if _plezy_wanted():
+            plezy = _plezy_play_deeplink(
+                run_adb, target, device_ip, machine_id, play_rk, room_name,
+                play_queue_id=play_queue_id, source_rating_key=rating_key,
+            )
+            if plezy is not None:
+                return plezy
         client_port = int(service.get('plex_client_port') or settings.get('plex.client_port', 32500) or 32500)
         legacy_http = platform != 'chromecast_gtv' and _tcp_port_open(device_ip, client_port)
         logger.info(
@@ -14163,6 +14172,138 @@ def _play_via_plex(service, rating_key, resume_offset, room_name, device_ip, adb
         logger.error(f"Plex playback failed: {e}")
         return jsonify({'success': False, 'message': _public_error(e, 'Plex playback error')}), 500
 
+
+
+PLEZY_PACKAGE = 'com.edde746.plezy'
+
+
+def _plezy_wanted():
+    """Room playback uses Plezy unless plex.player_app is set to 'plex'."""
+    return str(settings.get('plex.player_app') or 'plezy').strip().lower() != 'plex'
+
+
+def _plezy_link(machine_id, rating_key, shuffle=False):
+    """plezy://play link for one item on one server (Plex machineIdentifier + ratingKey).
+    shuffle: the item is a show or season, played shuffled by Plezy."""
+    from urllib.parse import urlencode
+    q = {'server': machine_id, 'id': str(rating_key)}
+    if shuffle:
+        q['mode'] = 'shuffle'
+    return 'plezy://play?' + urlencode(q)
+
+
+def _plezy_installed(run_adb, target):
+    from app.adb_utils import shell_command
+    res = run_adb(['adb', '-s', target, 'shell', shell_command('pm', 'path', PLEZY_PACKAGE)], timeout=5)
+    return bool(res.get('ok')) and 'package:' in (res.get('stdout') or '')
+
+
+def _plezy_foreground(run_adb, target):
+    res = run_adb(['adb', '-s', target, 'shell', 'dumpsys', 'window'], timeout=5)
+    out = res.get('stdout') or ''
+    for line in out.splitlines():
+        if 'mCurrentFocus' in line or 'mFocusedApp' in line:
+            if PLEZY_PACKAGE in line:
+                return True
+    return False
+
+
+def _plezy_play_deeplink(run_adb, target, device_ip, machine_id, rating_key, room_name,
+                         play_queue_id=None, source_rating_key=None):
+    """Play on a room TV in Plezy via an ADB VIEW intent with a plezy://play link.
+
+    Returns None when the TV doesn't have Plezy (the caller then uses Plex).
+    Plezy resumes from the Plex watch state itself; a shuffle (play_queue_id)
+    sends the show/season with mode=shuffle. Success: a PMS session on the TV
+    for the item, or Plezy in the foreground after the link.
+    """
+    import time as _t
+    from app.adb_utils import shell_command
+
+    report_rk = source_rating_key or rating_key
+    run_adb(["adb", "connect", target], timeout=5)
+    shell_ready = False
+    for probe_attempt in range(5):
+        probe = run_adb(["adb", "-s", target, "shell", "echo", "ok"], timeout=3)
+        if probe.get('ok') and 'ok' in (probe.get('stdout') or ''):
+            shell_ready = True
+            break
+        logger.info("Plezy readiness probe %d: %s — reconnecting",
+                    probe_attempt + 1, (probe.get('stderr') or '').strip())
+        run_adb(["adb", "disconnect", target], timeout=3)
+        _t.sleep(1)
+        run_adb(["adb", "connect", target], timeout=3)
+        _t.sleep(2)
+    if not shell_ready:
+        return jsonify({
+            'success': False,
+            'message': f"The TV in {room_name} didn't come online in time",
+            'rating_key': report_rk,
+        }), 409
+
+    if not _plezy_installed(run_adb, target):
+        logger.info("Plezy not installed on %s — using Plex", target)
+        return None
+
+    shuffle = bool(play_queue_id)
+    link_rk = str(source_rating_key or rating_key) if shuffle else str(rating_key)
+    uri = _plezy_link(machine_id, link_rk, shuffle=shuffle)
+    before = _plex_session_on(device_ip)
+
+    # Stop the Plex app so nothing keeps playing there; a Plezy link replaces
+    # whatever Plezy itself is playing.
+    run_adb(["adb", "-s", target, "shell", "am", "force-stop", "com.plexapp.android"], timeout=5)
+    _t.sleep(0.3)
+    result = run_adb(['adb', '-s', target, 'shell',
+                      shell_command('am', 'start', '-a', 'android.intent.action.VIEW', '-d', uri, PLEZY_PACKAGE)],
+                     timeout=15)
+    out = ((result.get('stdout') or '') + (result.get('stderr') or '')).strip().replace('\n', ' | ')
+    logger.info("Plezy link on %s: ok=%s %s (%s)", target, result.get('ok'), out[:200], uri)
+    if not result.get('ok') or 'Error:' in out:
+        return jsonify({
+            'success': False,
+            'message': f'Plezy playback failed in {room_name}',
+            'rating_key': report_rk,
+            'method': 'plezy',
+            'error': out[:300],
+        }), 409
+
+    session = None
+    for _ in range(35):
+        _t.sleep(1)
+        seen = _plex_session_on(device_ip)
+        if not seen or seen.get('state') not in ('playing', 'buffering', 'paused'):
+            continue
+        if shuffle:
+            if not before or str(seen.get('ratingKey')) != str(before.get('ratingKey')):
+                session = seen
+                break
+        elif str(seen.get('ratingKey')) == str(rating_key):
+            session = seen
+            break
+
+    verified = 'session' if session else ('foreground' if _plezy_foreground(run_adb, target) else None)
+    if not verified:
+        logger.error("Plezy: nothing started rk=%s pq=%s on %s", link_rk, play_queue_id, device_ip)
+        return jsonify({
+            'success': False,
+            'message': f'Plezy playback failed in {room_name}',
+            'rating_key': report_rk,
+            'play_queue_id': play_queue_id,
+            'method': 'plezy',
+        }), 409
+
+    logger.info("Plezy OK (%s) rk=%s pq=%s on %s session=%s", verified, link_rk, play_queue_id, device_ip, session)
+    return jsonify({
+        'success': True,
+        'message': f'{"Shuffling" if shuffle else "Playing"} in {room_name}',
+        'rating_key': report_rk,
+        'play_queue_id': play_queue_id,
+        'method': 'plezy',
+        'verified': verified,
+        'start_rating_key': (session or {}).get('ratingKey') or link_rk,
+        'start_title': (session or {}).get('title'),
+    })
 
 
 def _tcp_port_open(host, port, timeout=0.8):
@@ -14931,6 +15072,7 @@ def _query_adb_activity(device: dict) -> dict | None:
         current_app = 'Unknown'
         _app_names = {
             'com.plexapp.android': 'Plex',
+            'com.edde746.plezy': 'Plezy',
             'com.google.android.youtube.tv': 'YouTube',
             'com.netflix.ninja': 'Netflix',
             'com.amazon.avod.thirdpartyclient': 'Prime Video',
@@ -19972,6 +20114,7 @@ def adb_shield_activity():
                 # Map package names to friendly names
                 app_names = {
                     'com.plexapp.android': 'Plex',
+                    'com.edde746.plezy': 'Plezy',
                     'com.google.android.youtube.tv': 'YouTube',
                     'com.netflix.ninja': 'Netflix',
                     'com.amazon.avod.thirdpartyclient': 'Prime Video',
@@ -20026,6 +20169,7 @@ def adb_shield_activity():
                         media_info['package'] = session_pkg
                         media_info['app_name'] = {
                             'com.plexapp.android': 'Plex',
+                            'com.edde746.plezy': 'Plezy',
                             'com.google.android.youtube.tv': 'YouTube',
                             'com.netflix.ninja': 'Netflix',
                             'com.amazon.avod.thirdpartyclient': 'Prime Video',
@@ -20094,7 +20238,7 @@ def adb_shield_activity():
         # Try to get metadata from Plex sessions API if Plex is playing
         media_info['artwork_url'] = None
         media_info['backdrop_url'] = None
-        if media_info['package'] == 'com.plexapp.android' and media_info['is_active']:
+        if media_info['package'] in ('com.plexapp.android', 'com.edde746.plezy') and media_info['is_active']:
             try:
                 plex_url = settings.get('plex.url')
                 plex_token = settings.get('plex.token')
