@@ -284,7 +284,7 @@ def refresh_dates(now: float, fetch=None, limit: int = 20, only: Optional[List[i
                 conn.execute('UPDATE movie_scan SET released_at = ? WHERE tmdb_id = ?', (at, r['tmdb_id']))
                 row['released_at'] = at
             row['tmdb_id'] = r['tmdb_id']
-            if available(row, now) and int(row.get('search_attempts') or 0) == 0:
+            if available(row, now, ms.availability(conn)) and int(row.get('search_attempts') or 0) == 0:
                 nxt = row.get('next_search_at')
                 if nxt is None:
                     _set(conn, r['tmdb_id'], next_search_at=now)
