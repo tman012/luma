@@ -46,16 +46,17 @@ describe('v366: the seed is the tapped poster and title, carried by the sliding 
     expect(on.querySelector('[data-title]')).not.toBeNull();
   });
 
-  it('movie and TV phone sheets build the same seed (poster art, visible title, fade until the reveal)', () => {
+  it('movie and TV phone sheets never seed the tapped poster as a backdrop', () => {
     for (const f of LAYOUTS) {
       const s = read(f);
-      expect(s, f).toContain('SeedArt');
-      expect(s, f).toContain('<SeedArt src={hero.art} effects={backdropEffects} />');
-      expect(s, f).toContain('fade: !!hero.art');
-      expect(s, f).toContain('title: hero.art ? seedTitleEl : titleEl');
+      expect(s, f).not.toContain('SeedArt');
+      expect(s, f).not.toContain('<SeedArt src={hero.art} effects={backdropEffects} />');
+      expect(s, f).toContain('posterUrl={null}');
+      expect(s, f).toContain('fade: false');
+      expect(s, f).toContain('title: titleEl');
       expect(s, f).toContain('ready={hero.seeded ? seedDone : composed}');
-      expect(s, f).toContain('const seedDone = hero.art ? (detailsIn && reveal.revealed) || (!loading && !!error) : detailsIn;');
-      expect(s, f).toContain('data-seed-title=""');
+      expect(s, f).toContain('const seedDone = detailsIn && reveal.revealed || (!loading && !!error);');
+      expect(s, f).not.toContain('data-seed-title=""');
     }
   });
 });
@@ -121,8 +122,8 @@ describe('v366: close, drag-to-dismiss and the edge-swipe back keep their SW 365
 describe('v366: service worker and update path', () => {
   const root = path.resolve(__dirname, '../..');
   it('the worker is v366 and the stamp names it', () => {
-    expect(fs.readFileSync(path.join(root, 'static/sw.js'), 'utf8')).toContain("const CACHE_VERSION = 'media-kiosk-v366';");
-    expect(JSON.parse(fs.readFileSync(path.join(root, 'static/sw-stamp.json'), 'utf8')).cache_version).toBe('media-kiosk-v366');
+    expect(fs.readFileSync(path.join(root, 'static/sw.js'), 'utf8')).toContain("const CACHE_VERSION = 'media-kiosk-v367';");
+    expect(JSON.parse(fs.readFileSync(path.join(root, 'static/sw-stamp.json'), 'utf8')).cache_version).toBe('media-kiosk-v367');
   });
   it('a resumed installed app asks the worker for an update on every watch check', () => {
     const m = read('main.tsx');

@@ -69,6 +69,6 @@ def test_ios_launch_images_are_solid_splash_color():
 
 
 def test_the_service_worker_is_v366_and_the_stamp_is_truthful():
-    assert "const CACHE_VERSION = 'media-kiosk-v366';" in (ROOT / 'static' / 'sw.js').read_text()
+    assert "const CACHE_VERSION = 'media-kiosk-v367';" in (ROOT / 'static' / 'sw.js').read_text()
     stamp = json.loads((ROOT / 'static' / 'sw-stamp.json').read_text())
-    assert stamp['cache_version'] == 'media-kiosk-v366'
+    assert stamp['cache_version'] == 'media-kiosk-v367'

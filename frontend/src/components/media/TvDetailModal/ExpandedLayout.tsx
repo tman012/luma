@@ -1187,8 +1187,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
   const artCandidate = finalBackdropUrl(liveShow?.backdropTextlessUrl ?? liveShow?.backdropUrl);
   const sheetHero = useSheetHero(artCandidate, !!liveShow && !liveShow.backdropPending, liveShow?.clearLogoUrl, logoInput(liveShow) !== undefined, props.openKey, !!liveShow);
   const sheetArt = sheetHero.art;
-  // The backdrop img mounts (hidden) as soon as its URL is known, so it has painted by the one reveal.
-  const artEl = sheetArt ?? (sheetHero.state === 'hold' ? artCandidate : null);
+  // Mount the backdrop only after useSheetHero has latched the final decoded URL. Never paint the in-flight
+  // candidate or a poster during hold — that is the first-then-swap flash.
+  const artEl = sheetArt;
   // The one reveal waits for that img element itself to have loaded (a warm open: the decoded art still needs its
   // element's load), so the backdrop is in the reveal frame; an error settles it too.
   // Per open: a reopen mounts a new img, so the last open's load doesn't count.
@@ -1439,8 +1440,6 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     ...(t.backdrop.imgFilter ? { filter: t.backdrop.imgFilter } : {}),
                   }}
                 />
-              ) : !show.backdropUrl && show.posterUrl ? (
-                <img key={show.posterUrl} src={show.posterUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: titleState === 'hold' ? 0 : 0.6, transition: 'opacity var(--m-dur-reveal) var(--m-ease-reveal)' }} />
               ) : null}
               {show.backdropUrl && (
                 <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 30%, transparent 40%, rgba(0,0,0,0.2) 100%)', pointerEvents: 'none' }} />

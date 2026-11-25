@@ -32,10 +32,10 @@ describe('v341e: the opening sheet\'s art owns the network', () => {
     expect(src('hooks/useOneReveal.ts')).toMatch(/if \(ready\) endSheetPriority\(\)/);
     expect(src('hooks/useSheetBackdrop.ts')).toMatch(/fetchPriority = 'high'/);
   });
-  it('desktop: the backdrop img mounts hidden once its URL is known (painted by the reveal), at high priority', () => {
+  it('desktop: the backdrop img mounts only after the hero latches the final decoded URL, at high priority', () => {
     for (const k of ['MovieDetailModal', 'TvDetailModal']) {
       const s = src(`components/media/${k}/ExpandedLayout.tsx`);
-      expect(s, k).toMatch(/const artEl = sheetArt \?\? \(sheetHero\.state === 'hold' \? artCandidate : null\);/);
+      expect(s, k).toMatch(/const artEl = sheetArt;/);
       expect(s, k).toMatch(/key=\{`\$\{String\(props\.openKey\)\}\|\$\{artEl\}`\}[\s\S]{0,400}alt="" fetchPriority="high"/);
     }
   });

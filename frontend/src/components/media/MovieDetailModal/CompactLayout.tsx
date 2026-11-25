@@ -2,7 +2,7 @@ import { StagedBox, StagedProvider } from '@/components/motion/useStagedMount';
 import { sheetBase } from '@/utils/posterColors';
 import { ACTION_CIRCLE_SLOT, ACTION_LABEL_LINE, META_ROW, ratingsExpectedAtTap, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows } from '../sheetRows';
 import { SHEET_NEUTRAL } from '@/theme/motion';
-import { SheetFrame, SheetCard, SeedLayer, SeedArt, useSeededHero, useSheetPaletteAt, PaletteFade, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { SheetFrame, SheetCard, SeedLayer, useSeededHero, useSheetPaletteAt, PaletteFade, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { SURFACE_FADE } from '@/theme/motion';
 import { detailSheetReady } from '@/loading/sheetOpenGate';
 import { CastPhoto } from '@/components/media/CastPhoto';
@@ -152,7 +152,8 @@ export function CompactLayout(props: MovieModalViewProps) {
   // The sheet stays closed until that hero and a real title are ready. A cap does not open it early.
   const sheetHero = useSheetHero(finalBackdropUrl(liveDetail?.backdropUrl), !!liveDetail && !liveDetail.backdropPending, liveDetail?.clearLogoUrl, logoInput(liveDetail) !== undefined, props.openKey, !!liveDetail, finalBackdropUrl(liveDetail?.plexArtUrl));
   const sheetArt = sheetHero.art;
-  const posterFill = liveDetail && !liveDetail.backdropUrl && !sheetArt ? liveDetail.posterUrl : null;
+  // Never fill the hero with a poster: only the latched final backdrop, or the dark sheet.
+  const posterFill = null;
   const ownedKnown = !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey);
   const composed = detailSheetReady(loading, !!error, !!liveDetail, liveDetail?.title, sheetHero.state, ownedKnown);
   const hero = useSeededHero(composed, paletteColors);
@@ -385,8 +386,8 @@ export function CompactLayout(props: MovieModalViewProps) {
   const shellShown = useRef(false);
   if (loading && go) shellShown.current = true;
   const detailsIn = !loading && !error && !!detail;
-  // A poster seed stays until the details' own hero is revealed (or the details failed), then fades out over it.
-  const seedDone = hero.art ? (detailsIn && reveal.revealed) || (!loading && !!error) : detailsIn;
+  // Do not seed the tapped poster or rail art as a backdrop. The sheet stays dark until the latched hero is ready.
+  const seedDone = detailsIn && reveal.revealed || (!loading && !!error);
   const washEl = (
 <>{/* UltraBlur — scrolls with content, slides up over backdrop */}
                 {ultraBlurColors && (
@@ -451,16 +452,6 @@ export function CompactLayout(props: MovieModalViewProps) {
                   </div>
                 </div>
   </>);
-  // The seed layer's copy of the title box: the tapped card's title in the same box, visible from the slide's first frame
-  // (the details' own title above waits for the reveal and takes over as the seed fades out).
-  const seedTitleEl = (
-    <div data-hero-keep="" data-title-box="" data-seed-title=""
-      style={{ position: 'relative', margin: '0 auto 24px', maxWidth: '100%', width: '100%', height: '140px', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-        <h1 style={{ fontSize: '28px', fontWeight: 700, color: '#fff', lineHeight: 1.2, margin: 0, textShadow: '0 2px 8px rgba(0,0,0,0.5)' }}>{hero.title}</h1>
-      </div>
-    </div>
-  );
   // Enter/exit motion, scrim, scroll lock and the app background live in SheetFrame (MOTION.md §1).
   if (phase === 'gone') return null;
 
@@ -494,8 +485,8 @@ export function CompactLayout(props: MovieModalViewProps) {
           {/* Loading — the sheet now slides up before the data lands, so this
               placeholder is what the user sees for the first few hundred ms. */}
           <SeedLayer show={shellShown.current} ready={hero.seeded ? seedDone : composed} overlap={100} hero={hero.seeded ? {
-            art: hero.art ? <SeedArt src={hero.art} effects={backdropEffects} /> : <BackdropHero backdropUrl={sheetArt} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
-            wash: washEl, title: hero.art ? seedTitleEl : titleEl, fade: !!hero.art } : undefined} rows={
+            art: <BackdropHero backdropUrl={sheetArt} posterUrl={null} effects={backdropEffects} phase={phase} instant />,
+            wash: washEl, title: titleEl, fade: false } : undefined} rows={
             <ReservedRows ratingsH={ratingsExpected ? RATINGS_SLOT_SM : 0} actions={
               <div data-action-row="" data-modal-actions="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', padding: '20px 16px', maxWidth: `${76 + 32}px`, margin: '0 auto', boxSizing: 'border-box' }}>
                 <ActionButton icon={<svg width="18" height="18" aria-hidden="true" />} label={'\u00a0'} onClick={() => {}} />

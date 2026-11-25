@@ -485,8 +485,8 @@ describe('the native launch matches the splash', () => {
   });
 
   it('the service worker is v366 and the build stamp names it', () => {
-    expect(read('../static/sw.js')).toContain("const CACHE_VERSION = 'media-kiosk-v366';");
-    expect(JSON.parse(read('../static/sw-stamp.json')).cache_version).toBe('media-kiosk-v366');
+    expect(read('../static/sw.js')).toContain("const CACHE_VERSION = 'media-kiosk-v367';");
+    expect(JSON.parse(read('../static/sw-stamp.json')).cache_version).toBe('media-kiosk-v367');
   });
 });
 
