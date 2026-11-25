@@ -1454,7 +1454,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
               WebkitMaskImage: t.ultraBlurMask,
               maskImage: t.ultraBlurMask,
             }}>
-              <UltraBlurOverlay hold={titleState === 'hold'} colors={ultraBlurColors} variant={t.ultraBlurVariant} animationDelay={300} />
+              <UltraBlurOverlay hold={titleState === 'hold' || !reveal.revealed} colors={ultraBlurColors} variant={t.ultraBlurVariant} animationDelay={300} />
             </div>
           )}
 

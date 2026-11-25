@@ -219,8 +219,6 @@ export function CompactLayout(props: TvModalViewProps) {
   const composed = detailSheetReady(loading, !!error, !!liveShow, liveShow?.title, sheetHero.state, true);
   const hero = useSeededHero(composed, detailColors);
   const heroHold = hero.seeded ? false : titleState === 'hold';
-  const ultraBlurColors = hero.colors;
-  const paletteAt = useSheetPaletteAt(ultraBlurColors);
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
   }, [composed]);
@@ -237,6 +235,10 @@ export function CompactLayout(props: TvModalViewProps) {
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const show = useRevealFreeze(liveShow, reveal.revealed, props.openKey, TV_TEXT);
+  // The color blur and the sheet tint wait for the one reveal: before it the sheet stays plain dark (no gradient
+  // ahead of the backdrop); at the reveal they fade in with the backdrop and the content (Taylor 11/25).
+  const ultraBlurColors = reveal.revealed ? hero.colors : null;
+  const paletteAt = useSheetPaletteAt(ultraBlurColors);
     // Known at tap time: outside minimal builds the ratings row has a source (OMDb/RT); the seed reserves it and the
   // row keeps that box, so a late ratings fetch never moves the rows below.
   const ratingsExpected = useRef(ratingsExpectedAtTap(false)).current;

@@ -158,10 +158,6 @@ export function CompactLayout(props: MovieModalViewProps) {
   const composed = detailSheetReady(loading, !!error, !!liveDetail, liveDetail?.title, sheetHero.state, ownedKnown);
   const hero = useSeededHero(composed, paletteColors);
   const heroHold = hero.seeded ? false : titleState === 'hold';
-  // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
-  const ultraBlurColors = hero.colors;
-  const paletteAt = useSheetPaletteAt(ultraBlurColors);
-  const sheetBg = sheetBase(ultraBlurColors) ?? SHEET_NEUTRAL;
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
   }, [composed]);
@@ -179,6 +175,12 @@ export function CompactLayout(props: MovieModalViewProps) {
     sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, ownedKnown, sheetHero.artDeadline);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);
+  // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
+  // The color blur and the sheet tint wait for the one reveal: before it the sheet stays plain dark (no gradient
+  // ahead of the backdrop); at the reveal they fade in with the backdrop and the content (Taylor 11/25).
+  const ultraBlurColors = reveal.revealed ? hero.colors : null;
+  const paletteAt = useSheetPaletteAt(ultraBlurColors);
+  const sheetBg = sheetBase(ultraBlurColors) ?? SHEET_NEUTRAL;
     // Known at tap time: a ratings source exists (Plex for a library title, OMDb/RT outside minimal builds). The seed
   // reserves the ratings row from it and the row keeps that box, so a late ratings fetch never moves the rows below.
   const ratingsExpected = useRef(ratingsExpectedAtTap(true)).current;

@@ -122,8 +122,8 @@ describe('v366: close, drag-to-dismiss and the edge-swipe back keep their SW 365
 describe('v366: service worker and update path', () => {
   const root = path.resolve(__dirname, '../..');
   it('the worker is v366 and the stamp names it', () => {
-    expect(fs.readFileSync(path.join(root, 'static/sw.js'), 'utf8')).toContain("const CACHE_VERSION = 'media-kiosk-v367';");
-    expect(JSON.parse(fs.readFileSync(path.join(root, 'static/sw-stamp.json'), 'utf8')).cache_version).toBe('media-kiosk-v367');
+    expect(fs.readFileSync(path.join(root, 'static/sw.js'), 'utf8')).toContain("const CACHE_VERSION = 'media-kiosk-v368';");
+    expect(JSON.parse(fs.readFileSync(path.join(root, 'static/sw-stamp.json'), 'utf8')).cache_version).toBe('media-kiosk-v368');
   });
   it('a resumed installed app asks the worker for an update on every watch check', () => {
     const m = read('main.tsx');

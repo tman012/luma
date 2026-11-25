@@ -15,7 +15,7 @@ describe('v276 movie phone colorblur (prod match)', () => {
     expect(t).not.toMatch(/isMinimal\(\)\s*\?\s*null/);
     expect(t).not.toMatch(/import \{ isMinimal \} from '@\/minimal'/);
     expect(t).toMatch(/useSeededHero\(composed, paletteColors\)/);
-    expect(t).toMatch(/const ultraBlurColors = hero\.colors/);
+    expect(t).toMatch(/const ultraBlurColors = reveal\.revealed \? hero\.colors : null/);
     expect(t).toMatch(/sheetBase\(ultraBlurColors\)/);
     expect(t).toMatch(/<UltraBlurOverlay[^>]*colors=\{ultraBlurColors\}/);
   });
