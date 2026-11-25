@@ -6,6 +6,7 @@ import { MOTION } from '@/theme/motion';
 import { MovieDetailModal } from '@/components/media/MovieDetailModal';
 import { TvDetailModal } from '@/components/media/TvDetailModal';
 import { PersonDetailModal } from '@/components/media/PersonDetailModal';
+import { heldSheetMounted } from '@/loading/sheetPresent';
 
 const VibeEngineModal = lazy(() =>
   import('@/components/media/VibeEngineModal').then((m) => ({ default: m.VibeEngineModal })),
@@ -102,7 +103,10 @@ export function AppModalHost({ children }: { children: ReactNode }) {
       if (replaceStack) { backHandlersRef.current.clear(); return [entry]; }
       // A person opened over a person replaces it; everything else stacks on what is open.
       const replacedPerson = layer.kind === 'person' && top?.kind === 'person' ? top.uid : null;
-      return [...prev.filter((l) => l.uid !== replacedPerson), entry];
+      // A detail sheet still held hidden (useSheetPresent: it never showed) is superseded by the next title's open.
+      const replacedHeld = layer.kind !== 'person' && top && top.kind !== 'person' && heldSheetMounted() ? top.uid : null;
+      if (replacedHeld !== null) backHandlersRef.current.delete(replacedHeld);
+      return [...prev.filter((l) => l.uid !== replacedPerson && l.uid !== replacedHeld), entry];
     });
     window.dispatchEvent(new Event('modal-opened'));
   }, [commit]);

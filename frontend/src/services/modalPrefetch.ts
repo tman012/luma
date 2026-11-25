@@ -478,7 +478,7 @@ function noteCardTap(e: Event): void {
 
 const SHEET_SEL = '[data-modal="MovieDetailModal"],[data-modal="TvDetailModal"]';
 /** A sheet that is on screen and not on its way out. One that is exiting no longer swallows a tap. */
-const LIVE_SHEET_SEL = '[data-modal="MovieDetailModal"]:not([data-phase="exiting"]),[data-modal="TvDetailModal"]:not([data-phase="exiting"])';
+const LIVE_SHEET_SEL = '[data-modal="MovieDetailModal"]:not([data-phase="exiting"]):not([data-sheet-held]),[data-modal="TvDetailModal"]:not([data-phase="exiting"]):not([data-sheet-held])';
 /** How long a tap waits for a detail sheet to mount before giving up on it (no sheet: release). */
 export const SHEET_MOUNT_WAIT_MS = 1500;
 

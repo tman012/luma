@@ -1,8 +1,10 @@
 import { useOneReveal, useEndPriorityOnError, useRevealFreeze, TV_TEXT } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
+import { useSheetPresent } from '@/loading/sheetPresent';
+import { APP_BG } from '@/theme/motion';
 import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO } from '@/hooks/useSheetBackdrop';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   PERSON_FALLBACK_SVG,
@@ -1223,9 +1225,13 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // The card's own enter motion (scale 0.96 -> rest, 320 ms) runs first: a warm open revealed inside it, so the
   // buttons crept 1-3 px as the scale finished (N1440 Tulsa). The reveal waits for the card to rest.
   const cardRef = useRef<HTMLDivElement>(null);
-  const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', phase !== 'gone');
+  const [sheetHeld, setSheetHeld] = useState(true);
+  const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', phase !== 'gone', sheetHeld);
   const reveal = useOneReveal(props.openKey, !loading && !!liveShow, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
+  // Opens finished (useSheetPresent): held hidden until this reveal (or the error panel) is in, at most SHEET_READY_HOLD_MS.
+  const sheetPresent = useSheetPresent(reveal.revealed || (!loading && !!error));
+  useLayoutEffect(() => { if (sheetPresent.present) setSheetHeld(false); }, [sheetPresent.present]);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const show = useRevealFreeze(liveShow, reveal.revealed, props.openKey, TV_TEXT);
   const ratingsRow = useRef(ratingsExpectedAtTap(false)).current || !!ratingsSettle.ratings;
@@ -1339,7 +1345,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
   if (phase === 'gone') return null;
 
   return (
-    <Hold hold={modalEntering}>
+    <Hold hold={modalEntering && !sheetHeld}>
     <LumaMonitorContext.Provider value={lumaMon}>
     <>
     {createPortal(
@@ -1370,7 +1376,8 @@ export function ExpandedLayout(props: TvModalViewProps) {
             height: t.card.height,
             borderRadius: t.card.borderRadius,
             overflow: 'hidden',
-            backgroundColor: ultraBlurColors ? t.card.bgUltraBlur : CARD_BG,
+            // Opened at the hold cap before its reveal: a neutral dark card, never the sheet color (useSheetPresent).
+            backgroundColor: sheetPresent.early ? APP_BG : ultraBlurColors ? t.card.bgUltraBlur : CARD_BG,
             boxShadow: t.card.boxShadow,
             display: 'flex',
             flexDirection: 'column',

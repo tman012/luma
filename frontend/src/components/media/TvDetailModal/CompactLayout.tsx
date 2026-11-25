@@ -1,7 +1,8 @@
 import { StagedBox, StagedProvider } from '@/components/motion/useStagedMount';
 import { sheetBase } from '@/utils/posterColors';
 import { META_ROW, OVERVIEW_CLAMP, OVERVIEW_TEXT, OVERVIEW_WRAP, PILL, ReservedRows, ratingsExpectedAtTap } from '../sheetRows';
-import { SHEET_NEUTRAL } from '@/theme/motion';
+import { APP_BG, SHEET_NEUTRAL } from '@/theme/motion';
+import { useSheetPresent } from '@/loading/sheetPresent';
 import { SheetFrame, SheetCard, SeedLayer, useSeededHero, useSheetPaletteAt, PaletteFade, SEEDED_WASH, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { detailSheetReady } from '@/loading/sheetOpenGate';
 import { CastPhoto } from '@/components/media/CastPhoto';
@@ -233,6 +234,8 @@ export function CompactLayout(props: TvModalViewProps) {
   useEndPriorityOnError(!loading && !!error && !liveShow);
   const reveal = useOneReveal(props.openKey, !loading && !error && !!liveShow, sheetHero.state !== 'hold', ratingsSettle.shown,
     sheetHero.deadline, false, false, true, sheetHero.artDeadline);
+  // Opens finished (useSheetPresent): held hidden until this reveal (or the error panel) is in, at most SHEET_READY_HOLD_MS.
+  const sheetPresent = useSheetPresent(reveal.revealed || (!loading && !!error), !!detailColors || !reveal.revealed);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const show = useRevealFreeze(liveShow, reveal.revealed, props.openKey, TV_TEXT);
   // The color blur and the sheet tint wait for the one reveal: before it the sheet stays plain dark (no gradient
@@ -529,8 +532,8 @@ export function CompactLayout(props: TvModalViewProps) {
   if (phase === 'gone') return null;
 
   return (
-    <SheetFrame name="TvDetailModal" phase={phase} composed={composed} go={go} onScrimClick={onClose}>
-      <SheetCard background={SHEET_NEUTRAL} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>
+    <SheetFrame name="TvDetailModal" phase={phase} composed={composed} go={go} present={sheetPresent.present} onScrimClick={onClose}>
+      <SheetCard background={sheetPresent.early ? APP_BG : SHEET_NEUTRAL} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>
         {/* No sheet spinner past the deadline (Taylor 2026-11-02): the pre-reveal surface stays as is. */}
         {/* Scrollable content */}
         <StagedProvider total={1} enabled={detailsIn && reveal.revealed} resetKey={props.openKey}>

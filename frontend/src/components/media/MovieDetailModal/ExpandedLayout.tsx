@@ -1,8 +1,9 @@
 import { useOneReveal, useEndPriorityOnError, useRevealFreeze, MOVIE_TEXT } from '@/hooks/useOneReveal';
 import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
+import { useSheetPresent } from '@/loading/sheetPresent';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatRuntime, finalBackdropUrl } from '@/utils/image';
 import { useSheetHero, HERO_ANIM, CONTENT_WITH_HERO } from '@/hooks/useSheetBackdrop';
@@ -455,9 +456,13 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // buttons crept 1-3 px as the scale finished (N1440 Tulsa). The reveal waits for the card to rest.
   const cardRef = useRef<HTMLDivElement>(null);
   const ownedKnown = !!liveDetail && (!!liveDetail.isOwned || !!liveDetail.ownershipSettled || !!liveDetail.ratingKey);
-  const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', phase !== 'gone');
+  const [sheetHeld, setSheetHeld] = useState(true);
+  const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', phase !== 'gone', sheetHeld);
   const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,
     sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, ownedKnown, sheetHero.artDeadline);
+  // Opens finished (useSheetPresent): held hidden until this reveal (or the error panel) is in, at most SHEET_READY_HOLD_MS.
+  const sheetPresent = useSheetPresent(reveal.revealed || (!loading && !!error));
+  useLayoutEffect(() => { if (sheetPresent.present) setSheetHeld(false); }, [sheetPresent.present]);
   // The revealed text stays for the open: a late TMDb answer changes nothing visible.
   const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);
   const actionsTrailer = reveal.trailer;
@@ -714,7 +719,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   if (phase === 'gone') return null;
 
   return (
-    <Hold hold={modalEntering}>
+    <Hold hold={modalEntering && !sheetHeld}>
     {createPortal(
     <div className="luma-fullscreen luma-bleed"
       data-modal="MovieDetailModal"

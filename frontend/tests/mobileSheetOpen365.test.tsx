@@ -69,7 +69,7 @@ describe('v365: the phone sheet draws one palette', () => {
     expect(SHEET_NEUTRAL).toBe('#15102a');
     for (const f of ['components/media/MovieDetailModal/CompactLayout.tsx', 'components/media/TvDetailModal/CompactLayout.tsx']) {
       const s = read(f);
-      expect(s, f).toContain('<SheetCard background={SHEET_NEUTRAL} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>');
+      expect(s, f).toContain('<SheetCard background={sheetPresent.early ? APP_BG : SHEET_NEUTRAL} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>');
       expect(s, f).toContain('useSheetPaletteAt(ultraBlurColors)');
       expect(s, f).toContain('<PaletteFade colors={ultraBlurColors} at={paletteAt}>');
       expect(s, f).not.toContain('animationDelay={300}');
@@ -113,6 +113,6 @@ describe('v365: close, drag-to-dismiss and the edge-swipe back are untouched', (
     const s = read('components/layout/SheetFrame.tsx');
     const frame = s.slice(s.indexOf('export function SheetFrame('), s.indexOf('/** The sheet card'));
     const body = frame.replace('export { SHEET_NEUTRAL };\n\n', '');
-    expect(crypto.createHash('sha256').update(body).digest('hex')).toBe('103719ba2de0438abdff15517639d9af8f2a80a59dde6fc939b40be3824d3151');
+    expect(crypto.createHash('sha256').update(body).digest('hex')).toBe('aba74b5135e20f23e6ed3e8d7dddb003a000b077ed512d53f87e55436bc50d1c');
   });
 });

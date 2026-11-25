@@ -204,9 +204,9 @@ describe('v364: the Reviews view uses the shared motion tokens and no new litera
 describe('v364: the sheet opens exactly as SW 363 does', () => {
   const x = read('components/media/MovieDetailModal/ExpandedLayout.tsx');
   it('one reveal, the card motion hold and the frame are untouched', () => {
-    expect(x).toContain("const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', phase !== 'gone');");
+    expect(x).toContain("const modalEntering = useModalMotion(phase, overlayRef, cardRef, 'modal', phase !== 'gone', sheetHeld);");
     expect(x).toContain("const reveal = useOneReveal(props.openKey, !loading && !!liveDetail, sheetHero.state !== 'hold' && artInFrame, ratingsSettle.shown,\n    sheetHero.deadline, !!trailerKey, liveDetail?.isOwned ?? false, ownedKnown, sheetHero.artDeadline);");
-    expect(x).toContain('<Hold hold={modalEntering}>');
+    expect(x).toContain('<Hold hold={modalEntering && !sheetHeld}>');
     expect(x).toContain('const detail = useRevealFreeze(liveDetail, reveal.revealed, props.openKey, MOVIE_TEXT);');
     expect(x).toContain("...((loading && !liveDetail) || error ? revealStyle('text') : reveal.revealed ? { opacity: 1, ...CONTENT_WITH_HERO } : { opacity: 0, transition: 'none' }),");
     expect(x).toMatch(/\{\(loading \|\| \(!reveal\.revealed && !error\)\) && \(\s*<div data-sheet-pending=""/);
@@ -221,9 +221,9 @@ describe('v364: the sheet opens exactly as SW 363 does', () => {
 
 describe('v364: the mobile and TV sheets are unchanged', () => {
   const sha = (p: string) => createHash('sha256').update(readFileSync(resolve(SRC, p))).digest('hex');
-  // SHA-256 of each file as it shipped in SW 363 (5678619).
+  // SHA-256 of each file as it shipped in SW 363 (5678619); the three sheet layouts re-pinned for SW 369 (sheet-ready open).
   const PINNED: Record<string, string> = {
-    'components/media/MovieDetailModal/CompactLayout.tsx': '7660e4dbcd7ab5c589c89cd85106ec7af9b7a034f6ad852d789af655b5fc0ca2',
+    'components/media/MovieDetailModal/CompactLayout.tsx': '63bf0f8e2823c670372dcffd3789409e3ed1acec2e85de353b4ce4fea9b9dd3a',
     'components/media/MovieDetailModal/SimilarPanel.tsx': '0b6acd98f4510146457337e974635c9a341369ea935a586dac2b9fd4d80ea582',
     'components/media/MovieDetailModal/MobileUpgradeSheet.tsx': 'a175a6f84de94419051b878cf5152e840ea596eb44622c1391211f3af6e2ab11',
     'components/media/MovieDetailModal/index.tsx': '6a51154c8cb2deafd0d8499b8903d695b902387e5e8cf43de5017d0e59aa071d',
@@ -231,9 +231,9 @@ describe('v364: the mobile and TV sheets are unchanged', () => {
     'components/collections/CollectionsSheet.tsx': 'c25377c101f0aea8771da402cbefbadcdd227ef4d70d5899fd7a46d7ce083e15',
     'hooks/useSimilarMovies.ts': '298b40c12ea1fb3ba767bfa84b12ecfa0f49b3b76349bb926d7dd2c83cf7ca88',
     'components/media/TvDetailModal/AddToSonarrModal.tsx': '2ccd05f06723398003a484561dce1262ad1cbffe3057dc4cc328f3c38db39a1b',
-    'components/media/TvDetailModal/CompactLayout.tsx': '1a76d565d341b9e34382f996792e937682a7b3dd711c4f3dbc21c6cf2b6faf40',
+    'components/media/TvDetailModal/CompactLayout.tsx': 'dbc7d3dc1c2f40f11ae867c3c8e81f598e33c07a9de7469580ccbd4041ca51a5',
     'components/media/TvDetailModal/EpisodeHeader.tsx': '396780530372314dced2ab5636b4b983772459a132500e82d65442a5f771c6bd',
-    'components/media/TvDetailModal/ExpandedLayout.tsx': '52d3f24082355cbe923c171887328ec2fb459c310b536fc221cbead930f36ab2',
+    'components/media/TvDetailModal/ExpandedLayout.tsx': 'd3cd413934e0d2cf56db895b7b45408980c90dc856f2e6c65d6b990f55ad5401',
     'components/media/TvDetailModal/OngoingShowPrompt.tsx': 'ec133144c725f4b95943b80f17eea6a369e373175bea24078a8d65e1df329429',
     'components/media/TvDetailModal/ShowMonitorSheet.tsx': 'c8de7b0b09dc0bf9a4f156a2fbcfb45008bb1cf01ec9469a9dd25a5b551eee4c',
     'components/media/TvDetailModal/SonarrStatus.tsx': '5c413396c830e40a3b64a92a6dc76cc300ff806277001da822e744cedf96e64b',

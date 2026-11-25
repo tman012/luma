@@ -17,6 +17,7 @@ import { useCloseOnce } from '@/components/motion/useSurfacePresence';
 import { BACKDROP_HEIGHT, type BackdropEffects } from '@/hooks/useBackdropEffects';
 import { SHEET_MOVING_EVENT, tapShell } from '@/services/modalPrefetch';
 import type { UltraBlurColors } from '@/utils/modalParsers';
+import { SHEET_HELD_ATTR, settleAnimations } from '@/loading/sheetPresent';
 
 export type SheetPhase = 'entering' | 'visible' | 'exiting' | 'gone';
 
@@ -90,12 +91,15 @@ export const SEEDED_WASH: CSSProperties = {
   maskImage: 'linear-gradient(to bottom, transparent 0%, black 80px, black calc(100% - 160px), transparent 100%)',
 };
 
-export function SheetFrame({ name, variant = 'mobile', phase, composed, go = true, onScrimClick, children }: {
+export function SheetFrame({ name, variant = 'mobile', phase, composed, go = true, present = true, onScrimClick, children }: {
   name: string; variant?: string; phase: SheetPhase; composed: boolean; go?: boolean;
+  /** False while the sheet is held (useSheetPresent): mounted and loading, but hidden, with no scrim and no slide. */
+  present?: boolean;
   onScrimClick?: () => void; children: ReactNode;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const scrimRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const anims = useRef<Animation[]>([]);
   const entered = useRef(false);
   const prevPhase = useRef<SheetPhase>(phase);
@@ -106,7 +110,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go = tru
 
   // Scroll lock + app background paint, from the frame the sheet is actually shown until unmount.
   useLayoutEffect(() => {
-    if (!go) return;
+    if (!go || !present) return;
     const prevOverflow = document.body.style.overflow;
     const h = document.documentElement;
     const n = Number(h.dataset.lumaSheet || 0) + 1;   // index.css: html[data-luma-sheet] paints #111318
@@ -117,7 +121,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go = tru
       const left = Number(h.dataset.lumaSheet || 1) - 1;
       if (left > 0) h.dataset.lumaSheet = String(left); else delete h.dataset.lumaSheet;
     };
-  }, [go]);
+  }, [go, present]);
 
   useLayoutEffect(() => {
     if (!go) {
@@ -131,13 +135,21 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go = tru
     if (!card || !scrim || typeof card.animate !== 'function') { setEntering(false); return; }
     // Held off-screen until it can show composed: no frame is drawn before the slide.
     // Closed during the hold and the details landed later: it never entered, so there is no exit to play.
-    if ((!go || phase === 'exiting') && !entered.current) {
-      // The scrim stays hit-testable (opacity 0): a tap on it closes the sheet during the hold (Reviewer).
+    if ((!go || !present || phase === 'exiting') && !entered.current) {
+      // Held (not present): hidden, and the root lets taps through to the screen under it (a tap on another title
+      // supersedes this open; useSheetPresent).
       card.style.visibility = 'hidden'; scrim.style.opacity = '0';
+      rootRef.current?.setAttribute(SHEET_HELD_ATTR, '');
       prevPhase.current = phase;
       return;
     }
     card.style.visibility = '';
+    if (rootRef.current?.hasAttribute(SHEET_HELD_ATTR)) {
+      rootRef.current.removeAttribute(SHEET_HELD_ATTR);
+      scrim.style.opacity = String(MOTION.scrim);
+      // The reveal's fades ran while it was held: the open motion starts on the finished frame.
+      settleAnimations(card);
+    }
     const rm = reducedMotion();
     const stop = () => { anims.current.forEach((a) => a.cancel()); anims.current = []; };
     if (phase === 'exiting') {
@@ -204,19 +216,21 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, go = tru
     enter.finished.then(finish, () => { window.clearTimeout(fallback); setEntering(false); });
     };
     start();
-  }, [phase, go]);
+  }, [phase, go, present]);
 
   // Closed until the slide may start, and closed again if readiness drops (a reload).
   // `entered` must reset or the next open skips its slide and a held reload stays on screen.
   if (!go) entered.current = false;
   if (phase === 'gone' || !go) return null;
   return createPortal(
-    <div className="luma-fullscreen luma-bleed"
+    <div className="luma-fullscreen luma-bleed" ref={rootRef}
       data-modal={name}
       data-variant={variant}
       data-composed={composed ? 'true' : 'false'}
       data-phase={phase}
-      style={{ position: 'fixed', inset: 0, zIndex: MOTION.z.sheet, pointerEvents: phase === 'exiting' ? 'none' : undefined }}
+      style={{ position: 'fixed', inset: 0, zIndex: MOTION.z.sheet, pointerEvents: phase === 'exiting' || (!present && !entered.current) ? 'none' : undefined,
+        // Held: nothing inside may paint (a child's own visibility or a reveal fade can't show through opacity 0).
+        opacity: !entered.current && (!present || phase === 'exiting') ? 0 : undefined }}
     >
       <div ref={scrimRef} data-sheet-scrim="" aria-hidden="true"
         onClick={entering ? undefined : onScrimClick}
@@ -358,23 +372,32 @@ export const SHELL_CROSSFADE = 'm-crossfade var(--m-dur-crossfade) var(--m-ease-
 export const MODAL_ENTER_MS = MODAL_MOTION.enterMs;
 export const MODAL_EXIT_MS = MODAL_MOTION.exitMs;
 export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElement | null>,
-  cardRef: React.RefObject<HTMLElement | null>, kind: 'modal' | 'side' | 'bottom' = 'modal', armed = true) {
+  cardRef: React.RefObject<HTMLElement | null>, kind: 'modal' | 'side' | 'bottom' = 'modal', armed = true, held = false) {
   const anims = useRef<Animation[]>([]);
   const entered = useRef(false);
   const [entering, setEntering] = useState(true);
   // html[data-luma-modal] while a modal is up: surfaces under it drop their backdrop blur (index.css /
   // the palette css), so the enter/exit stay compositor-only instead of re-blurring every frame.
   useLayoutEffect(() => {
-    if (!armed) return;
+    if (!armed || held) return;
     const h = document.documentElement;
     h.dataset.lumaModal = String(Number(h.dataset.lumaModal || 0) + 1);
     return () => { const n = Number(h.dataset.lumaModal || 1) - 1; if (n > 0) h.dataset.lumaModal = String(n); else delete h.dataset.lumaModal; };
-  }, [armed]);
+  }, [armed, held]);
   useLayoutEffect(() => {
     if (!armed) return;
     const card = cardRef.current; const scrim = scrimRef.current;
     const ok = (el: HTMLElement | null): el is HTMLElement => !!el && typeof el.animate === 'function';
     card?.setAttribute('data-modal-card', kind);
+    // Held (useSheetPresent): mounted and loading but hidden, taps pass through; a close before it shows plays nothing.
+    if (!entered.current && (held || phase === 'exiting')) {
+      if (scrim) { scrim.style.visibility = 'hidden'; scrim.style.opacity = '0'; scrim.style.pointerEvents = 'none'; scrim.setAttribute(SHEET_HELD_ATTR, ''); }
+      return;
+    }
+    if (scrim?.hasAttribute(SHEET_HELD_ATTR)) {
+      scrim.removeAttribute(SHEET_HELD_ATTR); scrim.style.visibility = ''; scrim.style.opacity = ''; scrim.style.pointerEvents = '';
+      settleAnimations(card);
+    }
     const rm = reducedMotion();
     const stop = () => { anims.current.forEach((a) => a.cancel()); anims.current = []; };
     // 'bottom': the phone sheet rule (opaque card slides from translateY(100%); --m-dur-sheet-enter/exit).
@@ -418,7 +441,7 @@ export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElem
     const fallback = window.setTimeout(finish, (rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetEnter : MODAL_ENTER_MS) + ENTER_FALLBACK_SLACK_MS);
     enter.finished.then(finish, () => { window.clearTimeout(fallback); setEntering(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase === 'exiting', armed]);
+  }, [phase === 'exiting', armed, held]);
   return entering;
 }
 

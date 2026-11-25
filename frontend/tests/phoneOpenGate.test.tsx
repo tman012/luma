@@ -104,7 +104,7 @@ describe('phone sheet markup', () => {
       expect(s).toContain('hold={heroHold} instant');
       expect(s).toContain("const heroHold = hero.seeded ? false : titleState === 'hold';");
       expect(s).toContain('ready={composed}');
-      expect(s).toContain('<SheetCard background={SHEET_NEUTRAL} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>');
+      expect(s).toContain('<SheetCard background={sheetPresent.early ? APP_BG : SHEET_NEUTRAL} tint={sheetBase(ultraBlurColors)} hold={reveal.revealed}>');
       expect(s).not.toContain('#15102a');
     });
   }

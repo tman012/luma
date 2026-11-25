@@ -10,6 +10,7 @@ import { exitMs } from '@/theme/motion';
 import { detailSurfaceOpen } from '@/loading/sheetOpenGate';
 import { _resetImageLoader } from '@/loading/imageLoader';
 import { _resetModalPrefetch } from '@/services/modalPrefetch';
+import { SHEET_READY_HOLD_MS } from '@/loading/sheetPresent';
 
 const layout = vi.hoisted(() => ({ mode: 'compact' as 'compact' | 'expanded' }));
 vi.mock('@/contexts/LayoutModeContext', async (orig) => ({
@@ -90,6 +91,7 @@ describe.each(['compact', 'expanded'] as const)('modal host (%s)', (mode) => {
     host();
     fireEvent.click(screen.getByText('Open A'));
     const [parent] = sheets();
+    await tick(SHEET_READY_HOLD_MS + 50);   // the parent is on screen (a held sheet is superseded instead)
     fireEvent.click(screen.getByText('Open B'));
     expect(sheets()).toHaveLength(2);
     expect(sheets()[0]).toBe(parent);
@@ -102,6 +104,7 @@ describe.each(['compact', 'expanded'] as const)('modal host (%s)', (mode) => {
   it('only the top sheet answers Escape; the parent under it stays open', async () => {
     host();
     fireEvent.click(screen.getByText('Open A'));
+    await tick(SHEET_READY_HOLD_MS + 50);
     fireEvent.click(screen.getByText('Open B'));
     fireEvent.keyDown(window, { key: 'Escape' });
     await tick(900);

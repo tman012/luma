@@ -102,7 +102,7 @@ describe('v366: nothing full-viewport shows before or apart from the sliding she
 
   it('the phone blur stays one gradient element inside the card (no filter raster, from SW 365)', () => {
     expect(read('components/media/UltraBlurOverlay.tsx')).toContain('backgroundImage: layers');
-    for (const f of LAYOUTS) expect(read(f), f).toContain('<SheetCard background={SHEET_NEUTRAL}');
+    for (const f of LAYOUTS) expect(read(f), f).toContain('<SheetCard background={sheetPresent.early ? APP_BG : SHEET_NEUTRAL}');
   });
 });
 
@@ -115,15 +115,15 @@ describe('v366: close, drag-to-dismiss and the edge-swipe back keep their SW 365
   it('SheetFrame keeps its enter, exit, drag-follow and edge-back code (frame, scrim, card)', () => {
     const s = read('components/layout/SheetFrame.tsx');
     const body = s.slice(s.indexOf('export function SheetFrame('), s.indexOf('/** The sheet card')).replace('export { SHEET_NEUTRAL };\n\n', '');
-    expect(crypto.createHash('sha256').update(body).digest('hex')).toBe('103719ba2de0438abdff15517639d9af8f2a80a59dde6fc939b40be3824d3151');
+    expect(crypto.createHash('sha256').update(body).digest('hex')).toBe('aba74b5135e20f23e6ed3e8d7dddb003a000b077ed512d53f87e55436bc50d1c');
   });
 });
 
 describe('v366: service worker and update path', () => {
   const root = path.resolve(__dirname, '../..');
   it('the worker is v366 and the stamp names it', () => {
-    expect(fs.readFileSync(path.join(root, 'static/sw.js'), 'utf8')).toContain("const CACHE_VERSION = 'media-kiosk-v368';");
-    expect(JSON.parse(fs.readFileSync(path.join(root, 'static/sw-stamp.json'), 'utf8')).cache_version).toBe('media-kiosk-v368');
+    expect(fs.readFileSync(path.join(root, 'static/sw.js'), 'utf8')).toContain("const CACHE_VERSION = 'media-kiosk-v369';");
+    expect(JSON.parse(fs.readFileSync(path.join(root, 'static/sw-stamp.json'), 'utf8')).cache_version).toBe('media-kiosk-v369');
   });
   it('a resumed installed app asks the worker for an update on every watch check', () => {
     const m = read('main.tsx');
