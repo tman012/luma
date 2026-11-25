@@ -11,6 +11,7 @@ DELETE /api/movies/watchlist/<tmdb_id>
 """
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -19,6 +20,7 @@ from flask import Blueprint, request
 from app import instance, movie_settings as ms
 
 bp = Blueprint('movie_watchlist', __name__)
+logger = logging.getLogger(__name__)
 MAX_ID = 10 ** 9
 
 
@@ -82,7 +84,13 @@ def add(body: Any, now: Optional[float] = None) -> Dict[str, Any]:
         conn.execute('INSERT INTO watchlist (tmdb_id, title, year, profile_id, added_at) VALUES (?, ?, ?, ?, ?)'
                      ' ON CONFLICT(tmdb_id) DO UPDATE SET profile_id = excluded.profile_id',
                      (tid, title.strip(), year, pid, time.time() if now is None else now))
-        return dict(conn.execute('SELECT * FROM watchlist WHERE tmdb_id = ?', (tid,)).fetchone())
+        row = dict(conn.execute('SELECT * FROM watchlist WHERE tmdb_id = ?', (tid,)).fetchone())
+    try:
+        from app import movie_scanner as _sc
+        _sc.on_watchlist_added(tid, now)
+    except Exception:  # noqa: BLE001 - a kick never fails the add
+        logger.exception('Movie scanner kick after watchlist add failed')
+    return row
 
 
 # wl-images: called with the tmdb id after a removal (main prunes the stored sheet images at once).

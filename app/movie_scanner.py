@@ -1,15 +1,16 @@
 """v203 the movie scanner and grab (native movie watchlist, piece 3): test install only.
 
 Every TICK_S, when LUMA_INSTANCE is test and Settings > Movies monitoring is on (on by default on test):
-  * feed: every FEED_S, each movie-enabled tracker's newest movie releases (the guard's 'feed' purpose: no cap
-    or slot, backoff and 429/Retry-After only, like TV). A release matching a watchlist movie is grabbed when
-    it passes the movie's profile and the movie is available (v256: Settings > Movies availability, Radarr's
-    minimum availability: announced, in cinemas, or released, the default; see available_at).
-  * searches: a watchlist movie is due once available; then every FAST_S for FAST_WINDOW_S, then every
-    SLOW_S, like TV. Automatic
-    searches share TV's budget and guard (tv_search.query_trackers, purpose 'tv' in the guard): the per-tracker
-    daily cap, skipped until the reset, the skip logged once per reset window. Every tracker capped: the movie
-    waits for the earliest reset.
+  * feed: every FEED_S (5 min; the guard's 'feed' purpose: no cap or slot, backoff and 429/Retry-After only).
+    A release matching a watchlist movie is grabbed when it passes the movie's profile and the movie is
+    available (v256: Settings > Movies availability). A title match that is not grabbed is logged with why.
+  * searches: due as soon as a movie becomes available, is added to the watchlist, or the availability
+    setting changes. After a real search with nothing to grab: 15 min, then 30, then 60. A tracker skip
+    (spacing, backoff, 429, empty bucket) does not count as an attempt; the retry is the earliest
+    tracker ready_at (movie bucket refill or purpose gap), not a tight 60 s loop. Automatic title
+    searches use the guard's 'movie' purpose and their own token bucket (same burst/refill as TV,
+    plus a 60 s min-gap) so they do not drain TV's budget; 429s, backoff, the global 120/h cap and
+    each strict tracker's 20/h cap still hold. search_log still labels them 'backlog'.
   * grab: the best release by the movie's profile (allowed qualities in order, MB/min limits by TMDB runtime),
     then tracker priority, preferred groups (empty: ranking unchanged), PROPER, freeleech, seeders; the
     blocklist is skipped. Sent through TV's download client path (tv_grab.fetch_link, the same scoped
@@ -36,15 +37,17 @@ from app import instance, movie_settings as ms, tv_match, tv_monitor, tv_release
 logger = logging.getLogger(__name__)
 
 TICK_S = 60
-FEED_S = 15 * 60
+FEED_S = 5 * 60                   # Radarr-style RSS; the guard's 'feed' purpose has no cap, slot or bucket
 FAST_S = 15 * 60
 FAST_WINDOW_S = 6 * 3600
 SLOW_S = 3600
+SKIP_RETRY_S = 60                 # floor for a skip retry when the guard has no ready_at
+RETRY_STEPS_S = (15 * 60, 30 * 60, 60 * 60)   # after a real search with nothing to grab
 DATES_S = 12 * 3600
 DEFAULT_RUNTIME = 110
 MOVIE_CATEGORIES = [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080]
 SECTION = 'movies'
-AUTO_PURPOSE = 'backlog'            # search_log's label for an automatic movie search (guard purpose: 'tv')
+AUTO_PURPOSE = 'backlog'            # search_log's label (LOG_PURPOSE); guard purpose is 'movie' via section
 JOB = 'movie_grab'                  # the instance job for a movie add on test (instance.scoped_add)
 CATEGORY_ENV = 'LUMA_MOVIE_CATEGORY'              # the same name piece 4's import watches
 DEFAULT_CATEGORY = 'movie'
@@ -254,14 +257,18 @@ def available(row: Dict[str, Any], now: float, mode: Optional[str] = None) -> bo
     return at is not None and at <= now
 
 
-def refresh_dates(now: float, fetch=None, limit: int = 20) -> int:
-    """Read each watchlist movie's dates and runtime again every DATES_S (a few per pass)."""
+def refresh_dates(now: float, fetch=None, limit: int = 20, only: Optional[List[int]] = None) -> int:
+    """Read each watchlist movie's dates and runtime again every DATES_S (a few per pass).
+    *only*: just these tmdb ids, ignoring the DATES_S age filter (a watchlist add)."""
     fetch = fetch or _tmdb
     with ms.connect() as conn:
         ensure(conn)
-        rows = [dict(r) for r in conn.execute(
-            'SELECT w.tmdb_id FROM watchlist w LEFT JOIN movie_scan s ON s.tmdb_id = w.tmdb_id'
-            ' WHERE s.dates_at IS NULL OR s.dates_at <= ? ORDER BY s.dates_at LIMIT ?', (now - DATES_S, limit))]
+        if only:
+            rows = [{'tmdb_id': tid} for tid in only]
+        else:
+            rows = [dict(r) for r in conn.execute(
+                'SELECT w.tmdb_id FROM watchlist w LEFT JOIN movie_scan s ON s.tmdb_id = w.tmdb_id'
+                ' WHERE s.dates_at IS NULL OR s.dates_at <= ? ORDER BY s.dates_at LIMIT ?', (now - DATES_S, limit))]
     n = 0
     for r in rows:
         d = dates_of(fetch(r['tmdb_id']))
@@ -275,6 +282,12 @@ def refresh_dates(now: float, fetch=None, limit: int = 20) -> int:
             at = released_at(row)
             if at is not None and (row['released_at'] is None or at < row['released_at']):
                 conn.execute('UPDATE movie_scan SET released_at = ? WHERE tmdb_id = ?', (at, r['tmdb_id']))
+                row['released_at'] = at
+            row['tmdb_id'] = r['tmdb_id']
+            if available(row, now) and int(row.get('search_attempts') or 0) == 0:
+                nxt = row.get('next_search_at')
+                if nxt is None:
+                    _set(conn, r['tmdb_id'], next_search_at=now)
         n += 1
     return n
 
@@ -298,23 +311,81 @@ def _set(conn, tid: int, **vals: Any) -> None:
     conn.execute(f"UPDATE movie_scan SET {', '.join(f'{k} = ?' for k in vals)} WHERE tmdb_id = ?", (*vals.values(), tid))
 
 
-def schedule(now: float) -> int:
-    """An available (v256: Settings > Movies availability, available_at), never-searched movie is due now.
-    One scheduled under an earlier rule keeps its time; run_due skips it until it is available."""
+def schedule(now: float, ids: Optional[List[int]] = None) -> int:
+    """An available, never-successfully-searched movie is due now.
+    A skip retry (next_search_at already set, including a bucket refill or 429 backoff)
+    is left alone so the 60 s floor cannot loop while the bucket is empty. A time set
+    under an earlier availability rule is kept; run_due skips it until it is available."""
     n = 0
     mode = ms.availability()
     with ms.connect() as conn:
-        for m in wanted(conn):
+        for m in wanted(conn, ids):
             at = available_at(m, mode)
-            if at is not None and at <= now and m['last_search_at'] is None and m['next_search_at'] is None:
+            if at is None or at > now:
+                continue
+            nxt = m.get('next_search_at')
+            if m['last_search_at'] is None and nxt is None:
                 _set(conn, m['tmdb_id'], next_search_at=max(at, now - FAST_S))
                 n += 1
     return n
 
 
-def next_retry(m: Dict[str, Any], now: float) -> float:
-    at = m.get('released_at')
-    return now + (FAST_S if at is not None and now - at < FAST_WINDOW_S else SLOW_S)
+def next_retry(m: Dict[str, Any], now: float, attempts: Optional[int] = None) -> float:
+    """After a real search with nothing to grab: 15 min, then 30, then 60."""
+    n = int(attempts if attempts is not None else (m.get('search_attempts') or 0))
+    if n <= 1:
+        return now + RETRY_STEPS_S[0]
+    if n == 2:
+        return now + RETRY_STEPS_S[1]
+    return now + RETRY_STEPS_S[2]
+
+
+def mark_due(tids: List[int], now: Optional[float] = None) -> int:
+    """Set next_search_at to now for available movies in *tids* that have no active grab."""
+    now = time.time() if now is None else now
+    mode = ms.availability()
+    n = 0
+    with ms.connect() as conn:
+        for m in wanted(conn, tids):
+            if available(m, now, mode):
+                _set(conn, m['tmdb_id'], next_search_at=now)
+                n += 1
+    return n
+
+
+def _kick_if_running() -> None:
+    """If the background loop is on, run a pass now (availability change, a watchlist add)."""
+    if not _started['on'] or not enabled():
+        return
+
+    def go():
+        try:
+            tick()
+        except Exception:  # noqa: BLE001
+            logger.exception('Movie scanner kick failed')
+
+    threading.Thread(target=go, name='movie-scanner-kick', daemon=True).start()
+
+
+def on_availability_changed() -> int:
+    """Settings > Movies availability changed: never-searched and skip-backoff movies that are now
+    available become due, and a pass runs if the scanner loop is on."""
+    n = schedule(time.time())
+    _kick_if_running()
+    return n
+
+
+def on_watchlist_added(tid: int, now: Optional[float] = None) -> None:
+    """A movie was added: refresh its dates and, if it is already available, search it now."""
+    if not enabled() or not _started['on']:
+        return
+    now = time.time() if now is None else now
+    try:
+        refresh_dates(now, limit=1, only=[tid])
+    except Exception:  # noqa: BLE001
+        logger.exception('Movie dates refresh on add failed for %s', tid)
+    if mark_due([tid], now):
+        _kick_if_running()
 
 
 def _existing_trackers(session_factory, kind, payload, h, now):
@@ -488,6 +559,15 @@ def search_movie(tid: int, origin: str = 'auto', now: Optional[float] = None) ->
     return out
 
 
+def _skip_retry_at(statuses: List[Dict[str, Any]], now: float) -> float:
+    """When every tracker skipped: retry at the earliest guard ready_at (bucket refill,
+    purpose gap, 429 backoff). Fall back to SKIP_RETRY_S only when no tracker gave a time."""
+    times = [float(s['reset_at']) for s in (statuses or []) if s.get('reset_at')]
+    if not times:
+        return now + SKIP_RETRY_S
+    return max(min(times), now + 1)
+
+
 def _after(m: Dict[str, Any], out: Dict[str, Any], now: float, automatic: bool) -> None:
     from app import tv_search
     with ms.connect() as conn:
@@ -498,10 +578,15 @@ def _after(m: Dict[str, Any], out: Dict[str, Any], now: float, automatic: bool) 
             reset = min(s.get('reset_at') or now for s in out['statuses'])      # every tracker at its daily cap
             _set(conn, tid, next_search_at=max(reset, now), last_search_at=m.get('last_search_at') or now)
         elif out.get('answered'):
-            _set(conn, tid, last_search_at=now, search_attempts=int(m.get('search_attempts') or 0) + 1,
-                 **({'next_search_at': next_retry(m, now)} if automatic else {}))
-        elif automatic:                                     # nobody answered (backoff, skipped): an hour, not every pass
-            _set(conn, tid, next_search_at=now + SLOW_S, last_search_at=m.get('last_search_at') or now)
+            attempts = int(m.get('search_attempts') or 0) + 1
+            _set(conn, tid, last_search_at=now, search_attempts=attempts,
+                 **({'next_search_at': next_retry(m, now, attempts)} if automatic else {}))
+        elif automatic:                                     # nobody answered (spacing, backoff, empty bucket)
+            nxt = _skip_retry_at(out.get('statuses') or [], now)
+            why = ', '.join(f"{s.get('name')}:{s.get('status')}" for s in (out.get('statuses') or []) if s.get('status') != 'ok') or 'no answer'
+            logger.info('Movie search skipped %s (%s): %s; retry in %ss', m.get('title'), tid, why, int(max(0, nxt - now)))
+            _set(conn, tid, next_search_at=nxt)
+            # last_search_at and search_attempts stay as they were: this was not a real search
 
 
 def run_due(now: float, max_movies: int = 5) -> Dict[str, int]:
@@ -509,13 +594,16 @@ def run_due(now: float, max_movies: int = 5) -> Dict[str, int]:
         mode = ms.availability(conn)
         due = [m for m in wanted(conn) if m['next_search_at'] is not None and m['next_search_at'] <= now
                and available(m, now, mode)]                 # v256: never searched before it is available
-    due.sort(key=lambda m: m['next_search_at'])
+    due.sort(key=lambda m: (m['next_search_at'], m.get('search_attempts') or 0, m['tmdb_id']))
     out = {'movies': 0, 'grabbed': 0}
     for m in due[:max_movies]:
         r = search_movie(m['tmdb_id'], 'auto', now)
         out['movies'] += 1
         out['grabbed'] += int(bool(r.get('grabbed')))
         if r.get('error') == NO_TRACKERS:
+            break
+        if not r.get('answered') and not r.get('grabbed'):
+            # this movie used no slot or was spaced; leave the rest due for the next tick
             break
     return out
 
@@ -550,13 +638,26 @@ def feed(now: float) -> Dict[str, int]:
             if not hits:
                 continue
             if not available(m, now, mode):
+                at = available_at(m, mode)
+                when = datetime.fromtimestamp(at, TZ).strftime('%Y-%m-%d %H:%M %Z') if at else 'unknown'
+                logger.info('Movie feed skipped %s (%s): not available until %s', m.get('title'), m['tmdb_id'], when)
                 continue
+            picked = False
             for c in candidates(hits, m, profs[m['tmdb_id']], blocked[m['tmdb_id']], order):
                 g = grab(c['item'], m['tmdb_id'], 'auto', now)
                 if g.get('ok'):
                     out['grabbed'] += 1
+                    picked = True
                 if g.get('ok') or g.get('blocked'):
+                    if g.get('blocked'):
+                        logger.info('Movie feed skipped %s (%s): %s', c['item'].get('title'), m['tmdb_id'], g.get('error'))
+                    picked = True
                     break
+            if not picked:
+                for it in hits:
+                    rel = _release(it, m, profs[m['tmdb_id']], blocked[m['tmdb_id']], False)
+                    why = ', '.join(rel['rejections']) or 'no candidate'
+                    logger.info('Movie feed skipped %s (%s): %s', rel['title'], rel.get('tracker') or '?', why)
     return out
 
 

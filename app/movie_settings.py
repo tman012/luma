@@ -382,9 +382,16 @@ def apply_put(body: Any) -> Dict[str, str]:
             errors['picker_profiles'] = 'Invalid'
     if errors:
         return errors
+    before = availability() if 'availability' in vals else None
     with connect() as conn:
         for k, v in vals.items():
             _set_meta(conn, k, v)
+    if 'availability' in vals and vals['availability'] != before:
+        try:
+            from app import movie_scanner as _sc
+            _sc.on_availability_changed()
+        except Exception:  # noqa: BLE001 - a kick never fails the save
+            logger.exception('Movie scanner kick after availability change failed')
     return {}
 
 

@@ -120,7 +120,7 @@ BACKLOG = 'backlog'
 #: guard's pacing holds them; not part of TV's early-phase ordering (run_due)
 AUTOMATION = 'automation'
 #: search_log labels for purposes its CHECK constraint doesn't list (no table rebuild: the label is mapped)
-LOG_PURPOSE = {MANUAL_BACKGROUND: 'manual', AUTOMATION: 'backlog'}
+LOG_PURPOSE = {MANUAL_BACKGROUND: 'manual', AUTOMATION: 'backlog', 'movie': 'backlog'}
 
 
 def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bool, now: float,
@@ -133,6 +133,7 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
     from app.tracker_clients import NoIdSearch
     from app.tracker_search import TrackerError, TrackerSkipped, _match_categories, _secret_values, get_search, search_status
     from app import tv_budget
+    from app.tracker_guard import MOVIE_PURPOSE, get_guard, guard_key
     engine = get_search()
     items: List[Dict[str, Any]] = []
     statuses: List[Dict[str, Any]] = []
@@ -147,6 +148,14 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
             continue
         capped = tv_budget.capped(cfg)
         bg_manual = purpose == MANUAL_BACKGROUND        # v185: the owner's click, past its burst (guard background bucket)
+        if purpose == 'feed' and not interactive:
+            guard_purpose = 'feed'
+        elif section == 'movies' and not interactive and capped and not bg_manual:
+            guard_purpose = MOVIE_PURPOSE
+        elif not interactive and capped and not bg_manual:
+            guard_purpose = 'tv'
+        else:
+            guard_purpose = None
         # v196c (Taylor): post-air searches every 15 min for 6 h need only the daily cap, not a 3 h slot
         if not interactive and capped and not bg_manual and purpose != 'feed' and not tv_budget.under_daily(cfg, now):
             reset = tv_budget.daily_reset(cfg, now) or now + tv_budget.SLOT_S
@@ -157,14 +166,20 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
             raw = engine.search_one(cfg, query, cats, LIMIT, interactive,
                                     # v185.2a (PM): a feed poll is the guard's 'feed' purpose: no cap or slot of
                                     # any kind (Sonarr-style 15-min RSS); backoff and 429/Retry-After still apply
-                                    purpose='feed' if purpose == 'feed' and not interactive else
-                                    'tv' if not interactive and capped and not bg_manual else None,
+                                    # Movie automatic title searches use purpose 'movie' and their own bucket.
+                                    purpose=guard_purpose,
                                     **({'tv_ids': tv_ids} if tv_ids else {}))
         except NoIdSearch:
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': NO_ID})
             continue
         except TrackerSkipped as e:
-            statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
+            st = {'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)}
+            if guard_purpose and guard_purpose != 'feed':
+                try:
+                    st['reset_at'] = get_guard().ready_at(guard_key(cfg), now, purpose=guard_purpose)
+                except Exception:  # noqa: BLE001 - a skip still records; retry falls back to SKIP_RETRY_S
+                    pass
+            statuses.append(st)
             _log(cfg, purpose, sid, query, 0, 'skipped', now, section)
             continue
         except TrackerError as e:

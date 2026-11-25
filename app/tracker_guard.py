@@ -28,11 +28,15 @@ Rules:
   ban: 24 h; rejected credentials: 1 h (cleared when the credentials change);
   network/timeouts/5xx: 5 min (doubling, max 1 h); bad answers: 15 min.
 
-Purpose budgets: a background request may name a purpose ('tv'); it is then
-also held to that purpose's limits (tv_budget.GUARD_LIMITS: since v204a only a
-minimum gap per tracker, no daily cap), on top of all the limits above. The
-log records it as 'b:<purpose>'. A feed poll (purpose 'feed') takes no cap,
-bucket or slot; only the pause and the tracker's backoff stop it.
+Purpose budgets: a background request may name a purpose ('tv' or 'movie');
+it is then also held to that purpose's limits (a minimum gap per tracker, no
+daily cap), on top of all the limits above. Automatic movie title searches use
+a separate token bucket (movie_buckets; same burst and refill as TV) so they
+do not drain TV's budget. AvistaZ-family (strict) trackers still share the one
+20/h bucket: TV leaves a reserved token so a newly available movie can search
+without doubling that cap. The log records requests as 'b' (rollback-safe);
+the purpose is kept beside it in `purposes`. A feed poll (purpose 'feed')
+takes no cap, bucket or slot; only the pause and the tracker's backoff stop it.
 
 State persists in $LUMA_DATA_DIR/tracker_guard.json so a restart can't reset
 the counters. An unreadable state file is moved aside and searches pause for
@@ -70,10 +74,16 @@ LIMITS = {
 # fixed in code (app.tv_budget), not settings.
 def _purpose_limits() -> Dict[str, Dict[str, float]]:
     from app import tv_budget
-    return {tv_budget.PURPOSE: tv_budget.GUARD_LIMITS}
+    return {tv_budget.PURPOSE: tv_budget.GUARD_LIMITS, MOVIE_PURPOSE: MOVIE_GUARD_LIMITS}
 
 
 FEED_PURPOSE = 'feed'
+# Automatic movie title searches: own purpose and (except on strict sites) own bucket.
+MOVIE_PURPOSE = 'movie'
+MOVIE_GUARD_LIMITS: Dict[str, float] = {'min_gap_s': 60.0}
+# On a strict (AvistaZ-family) tracker, TV automatic take() leaves this many
+# tokens in the shared bucket so a movie search can still go (same 20/h cap).
+MOVIE_RESERVE = 1.0
 _PURPOSE_RE = __import__('re').compile(r'^[a-z]{1,16}$')
 _KIND_RE = __import__('re').compile(r'^[ib](:[a-z]{1,16})?$')
 # Rollback safety: `log` keeps only [ts, 'i'|'b'] pairs, the shape every
@@ -105,6 +115,7 @@ class TrackerGuard:
         self.log: Dict[str, List[list]] = {}          # key -> [[ts, 'i'|'b'], ...]
         self.purposes: Dict[str, List[list]] = {}     # key -> [[ts, purpose], ...] (background only)
         self.buckets: Dict[str, List[float]] = {}     # key -> [tokens, ts]
+        self.movie_buckets: Dict[str, List[float]] = {}  # movie auto searches; ignored by older guards
         self.cooldown: Dict[str, Tuple[float, str]] = {}   # key -> (until, kind)
         self.streak: Dict[str, int] = {}
         self.fail_closed_until = 0.0
@@ -172,6 +183,13 @@ class TrackerGuard:
                 continue
             ok = isinstance(v, list) and len(v) == 2 and _num(v[0]) is not None and _num(v[1])
             self.buckets[i] = [min(float(v[0]), LIMITS['burst']), float(v[1])] if ok else [0.0, now]
+        movie_raw = raw.get('movie_buckets')
+        for k, v in (movie_raw.items() if isinstance(movie_raw, dict) else ()):
+            i = key(k)
+            if i is None:
+                continue
+            ok = isinstance(v, list) and len(v) == 2 and _num(v[0]) is not None and _num(v[1])
+            self.movie_buckets[i] = [min(float(v[0]), LIMITS['burst']), float(v[1])] if ok else [0.0, now]
         for k, v in raw.get('cooldown', {}).items():
             i = key(k)
             if i is None or not isinstance(v, list) or len(v) != 2 or not _num(v[0]) or not isinstance(v[1], str):
@@ -191,6 +209,7 @@ class TrackerGuard:
             'log': {str(k): v for k, v in self.log.items() if v},
             'purposes': {str(k): v for k, v in self.purposes.items() if v},
             'buckets': {str(k): v for k, v in self.buckets.items()},
+            'movie_buckets': {str(k): v for k, v in self.movie_buckets.items()},
             'cooldown': {str(k): [u, kind] for k, (u, kind) in self.cooldown.items()},
             'streak': {str(k): v for k, v in self.streak.items() if v},
             _FAIL: self.fail_closed_until,
@@ -228,6 +247,26 @@ class TrackerGuard:
         b[0] = min(float(LIMITS['burst']), b[0] + max(0.0, now - b[1]) / LIMITS['refill_s'])
         b[1] = now
         return b
+
+    def _movie_tokens(self, tid: str, now: float) -> List[float]:
+        """Movie automatic title-search bucket: same class as TV, a separate counter."""
+        b = self.movie_buckets.get(tid)
+        if b is None:
+            b = self.movie_buckets[tid] = [float(LIMITS['burst']), now]
+        b[0] = min(float(LIMITS['burst']), b[0] + max(0.0, now - b[1]) / LIMITS['refill_s'])
+        b[1] = now
+        return b
+
+    def _strict_key(self, tid: str) -> bool:
+        from app import tracker_types as tt
+        return isinstance(tid, str) and tid.startswith('site:') and bool(tt.is_rate_strict(tid[5:]))
+
+    def _bucket_for(self, tid: str, now: float, purpose: Optional[str], strict: Optional[bool] = None) -> List[float]:
+        """The token bucket a request with *purpose* spends. Movies use their own
+        bucket except on strict sites, which keep the single 20/h shared bucket."""
+        if purpose == MOVIE_PURPOSE and not (self._strict_key(tid) if strict is None else strict):
+            return self._movie_tokens(tid, now)
+        return self._tokens(tid, now)
 
     def counts(self, tid: str, now: float) -> Tuple[int, int, int]:
         day, hr = now - 86400, now - 3600
@@ -302,8 +341,10 @@ class TrackerGuard:
                 if hr >= LIMITS['interactive_per_hour']:
                     return f"hourly cap {LIMITS['interactive_per_hour']}"
             else:
-                b = self._tokens(tid, now)
-                if b[0] < 1.0:
+                # background, or interactive on a strict site (AvistaZ family).
+                b = self._bucket_for(tid, now, purpose, strict)
+                reserve = MOVIE_RESERVE if (purpose == 'tv' and strict) else 0.0
+                if b[0] < 1.0 + reserve:
                     return 'rate limit (bucket empty)'
                 b[0] -= 1.0
             self.log.setdefault(tid, []).append([now, 'i' if interactive else 'b'])
@@ -312,9 +353,11 @@ class TrackerGuard:
             self._save()
             return None
 
-    def ready_at(self, tid: str, now: Optional[float] = None) -> float:
-        """v204b (PM): when a background request to *tid* refused by the burst bucket, the 120/h total,
-        a backoff or the pause can go again (the earliest time it could; take() still decides)."""
+    def ready_at(self, tid: str, now: Optional[float] = None, purpose: Optional[str] = None) -> float:
+        """When a background request to *tid* refused by the burst bucket, a purpose
+        gap, the 120/h total, a backoff or the pause can go again (the earliest
+        time it could; take() still decides). *purpose* 'movie' uses the movie
+        bucket (or the shared bucket on a strict site) and the movie min-gap."""
         now = time.time() if now is None else now
         with self._lock:
             self._load()
@@ -324,9 +367,21 @@ class TrackerGuard:
             cd = self.cooldown.get(tid)
             if cd and cd[0] > now:
                 at = max(at, float(cd[0]))
-            b = self._tokens(tid, now)
-            if b[0] < 1.0:
-                at = max(at, now + (1.0 - b[0]) * LIMITS['refill_s'])
+            strict = self._strict_key(tid)
+            b = self._bucket_for(tid, now, purpose, strict)
+            reserve = MOVIE_RESERVE if (purpose == 'tv' and strict) else 0.0
+            if b[0] < 1.0 + reserve:
+                at = max(at, now + (1.0 + reserve - b[0]) * LIMITS['refill_s'])
+            if purpose and purpose != FEED_PURPOSE:
+                lim = _purpose_limits().get(purpose)
+                if lim:
+                    last = 0.0
+                    for t, k in self.purposes.get(tid, []):
+                        if k == purpose:
+                            last = max(last, t)
+                    gap = float(lim.get('min_gap_s') or 0)
+                    if last and gap and now - last < gap:
+                        at = max(at, last + gap)
             hr = sorted(t for v in self.log.values() for t, _ in v if t > now - 3600)
             if len(hr) >= LIMITS['global_per_hour']:
                 at = max(at, hr[len(hr) - LIMITS['global_per_hour']] + 3600)
