@@ -256,7 +256,19 @@ def _watch(tmdb_id: int) -> Optional[Dict[str, Any]]:
         if r:
             return dict(r)
     from app.automation import gr_store       # v252: a Genre Roulette grab is not on the watchlist
-    return gr_store.title_for(tmdb_id)
+    hit = gr_store.title_for(tmdb_id)
+    if hit:
+        return hit
+    from app.automation import remux4k        # v359: nor is a 4K Remux auto-grab
+    return remux4k.title_for(tmdb_id)
+
+
+def _is_4k_grab(h: str) -> bool:
+    try:
+        from app.automation import remux4k
+        return remux4k.owns(h)
+    except Exception:                                   # noqa: BLE001
+        return False
 
 
 def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[str], str]] = None,
@@ -282,7 +294,7 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
     src = _video(os.path.realpath(content) if not os.path.islink(content) else content)
     cfg = naming()
     release = str(g['release_title'] or t.get('name') or '')
-    lib_root = route(lib_root, release, os.path.basename(src), title, year, cfg, now)
+    lib_root = route(lib_root, release, os.path.basename(src), title, year, cfg, now, only_4k=_is_4k_grab(h))
     from app import remote_mover as _rm
     if not lib_root or not os.path.isdir(lib_root) or (
             not _rm.enabled() and not os.access(lib_root, os.W_OK | os.X_OK)):
@@ -344,7 +356,7 @@ ROUTE_FOLDERS = {'4k': '4K', 'remux': 'Full Rips', 'recent': 'Recently Released'
 
 
 def route(lib_root: str, release: str, fname: str, title: str, year: Any, cfg: Dict[str, Any],
-          now: Optional[float] = None) -> str:
+          now: Optional[float] = None, only_4k: bool = False) -> str:
     """v203b (PM, ported from prod auto_rename 1b4ea74): the sibling of *lib_root* this movie belongs in:
     4K, Full Rips (remux), Recently Released (year >= current-1), else Movies. A movie whose folder
     already exists in any of them stays there."""
@@ -355,6 +367,9 @@ def route(lib_root: str, release: str, fname: str, title: str, year: Any, cfg: D
     if os.path.normpath(lib_root) not in roots.values():
         return lib_root                                   # not the Video/<4K|Full Rips|...> layout: one root
     folder = render(cfg['folder'], title, year, release, cfg)
+    # v359: a 4K Remux auto-grab is always filed under 4K (Plex's 4K Movies), beside a 1080p copy, never over it
+    if only_4k:
+        return roots['4k'] if os.path.isdir(roots['4k']) else lib_root
     for k in ('4k', 'remux', 'recent', 'movies'):
         if os.path.isdir(roots[k]) and existing_folder(roots[k], folder):
             return roots[k]

@@ -413,11 +413,18 @@ def _existing_trackers(session_factory, kind, payload, h, now):
 
 # ------------------------------------------------------------------ grab
 
+def movie_dupes_is_4k(name: Any) -> bool:
+    from app import movie_dupes
+    return movie_dupes.is_4k(name)
+
+
 def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] = None, session_factory=None,
-         fetch=None, movie: Optional[Dict[str, Any]] = None, pending: bool = True) -> Dict[str, Any]:
+         fetch=None, movie: Optional[Dict[str, Any]] = None, pending: bool = True,
+         scope: Optional[str] = None) -> Dict[str, Any]:
     """Send *item* to qBittorrent with the movie category and tag, through TV's client path. Never twice.
     v252: *movie* ({title, year}) for a film not on the watchlist (Genre Roulette); *pending* False: a
-    rate-limited link fails now instead of being queued for grab_retry."""
+    rate-limited link fails now instead of being queued for grab_retry. v359: *scope* '4k' (4K Remux
+    auto-grab): only a 4K grab, a 4K library folder or a 2160p torrent counts as already having it."""
     import requests
     from app import library_mover as mover, tracker_sources, tv_grab
     now = time.time() if now is None else now
@@ -426,11 +433,15 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
     with ms.connect() as conn:
         ensure(conn)
     from app import movie_grabs
-    if any(g['state'] in ACTIVE for g in movie_grabs.for_movie(tmdb_id)):
+    active = [g for g in movie_grabs.for_movie(tmdb_id) if g['state'] in ACTIVE]
+    if scope == '4k':
+        active = [g for g in active if movie_dupes_is_4k(g.get('release_title'))]
+    if active:
         return {'ok': False, 'error': 'Already grabbed', 'existing': True}
     m = movie or _movie(tmdb_id) or {}
     from app import movie_dupes               # v204c (PM): never grab a movie the library or qBittorrent already has
-    dup = movie_dupes.check(m.get('title'), m.get('year'), session_factory or requests.Session, now)   # v206: no title fails closed
+    dup = movie_dupes.check(m.get('title'), m.get('year'), session_factory or requests.Session, now,   # v206: no title fails closed
+                            scope=scope)
     if dup:
         return {'ok': False, 'error': dup, 'duplicate': True, 'blocked': True}
     try:

@@ -42,11 +42,31 @@ def _has_video(path: str) -> bool:
     return False
 
 
-def on_disk(title: str, year: Any) -> Optional[str]:
-    """The library folder already holding this movie (a video file inside), else None."""
+def is_4k(name: Any) -> bool:
+    """v359: a 2160p release or torrent name (file_management.classify)."""
+    try:
+        from app import file_management as fm
+        return fm.classify(str(name or '')).get('resolution') == '2160p'
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def _roots_for(scope: Optional[str]) -> list:
+    if scope != '4k':
+        return _roots()
+    from app import movie_import as mi
+    lib = mi.root()
+    if not lib:
+        return []
+    return [os.path.join(os.path.dirname(os.path.normpath(lib)), mi.ROUTE_FOLDERS['4k'])]
+
+
+def on_disk(title: str, year: Any, scope: Optional[str] = None) -> Optional[str]:
+    """The library folder already holding this movie (a video file inside), else None. v359: *scope* '4k':
+    only the 4K folder counts."""
     from app import movie_import as mi
     folder = mi.render(mi.naming()['folder'], title, year, '', mi.naming())
-    for r in _roots():
+    for r in _roots_for(scope):
         if not os.path.isdir(r):
             continue
         hit = mi.existing_folder(r, folder)
@@ -56,8 +76,9 @@ def on_disk(title: str, year: Any) -> Optional[str]:
 
 
 def in_qbit(title: str, year: Any, session_factory: Callable = requests.Session,
-            now: Optional[float] = None) -> Optional[Dict[str, Any]]:
-    """{'hit': name or None} after asking qBittorrent; None when it can't be asked (fail closed)."""
+            now: Optional[float] = None, scope: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """{'hit': name or None} after asking qBittorrent; None when it can't be asked (fail closed). v359: *scope*
+    '4k': only a 2160p torrent counts."""
     from app import library_mover as mover, movie_scanner, tv_match
     sess, url = mover._qbit_session(session_factory, now)
     if not sess:
@@ -74,6 +95,8 @@ def in_qbit(title: str, year: Any, session_factory: Callable = requests.Session,
         y = int(year) if str(year or '').isdigit() else None
         for t in got:
             name = str((t or {}).get('name') or '') if isinstance(t, dict) else ''
+            if scope == '4k' and not is_4k(name):
+                continue
             n, ty = movie_scanner.parse(name)
             if n and n == want and (y is None or (ty is not None and abs(ty - y) <= 1)):   # v208: ±1 as the scanner
                 return {'hit': name}
@@ -83,17 +106,17 @@ def in_qbit(title: str, year: Any, session_factory: Callable = requests.Session,
 
 
 def check(title: str, year: Any, session_factory: Callable = requests.Session,
-          now: Optional[float] = None) -> Optional[str]:
+          now: Optional[float] = None, scope: Optional[str] = None) -> Optional[str]:
     """None: no duplicate, grab. Else the skip reason (logged at INFO). v206 (Reviewer): a missing or blank
     title can't be checked, so it fails closed too (skip)."""
     if not isinstance(title, str) or not title.strip():
         logger.info('Movie grab skipped: (%s): %s', year, NO_TITLE)
         return NO_TITLE
-    where = on_disk(title, year)
+    where = on_disk(title, year, scope) if scope else on_disk(title, year)
     if where:
         logger.info('Movie grab skipped: %s (%s) %s (%s)', title, year, ON_DISK, where)
         return ON_DISK
-    q = in_qbit(title, year, session_factory, now)
+    q = in_qbit(title, year, session_factory, now, scope) if scope else in_qbit(title, year, session_factory, now)
     if q is None:
         logger.info('Movie grab skipped: %s (%s): %s; retried later', title, year, NO_QBIT)
         return NO_QBIT

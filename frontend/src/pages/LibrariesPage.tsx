@@ -37,6 +37,7 @@ import { AnticipatedSettings } from '@/components/automation/AnticipatedSettings
 import { WhatsMissingSettings } from '@/components/automation/WhatsMissingSettings';
 import { DownloadsGuardSettings } from '@/components/automation/DownloadsGuardSettings';
 import { TrendingTvSettings } from '@/components/automation/TrendingTvSettings';
+import { Remux4kSettings } from '@/components/automation/Remux4kSettings';
 import { RoomsSettings } from '@/components/rooms/RoomsSettings';
 import { isMinimal } from '@/minimal';
 import { HeroSettingsRows } from '@/components/home/HeroSettings';
@@ -108,7 +109,7 @@ export function SettingsPage() {
           : slug === 'movies'
             ? (owner ? <MoviesSettings wide={wide} /> : null)
           : slug === 'automation'
-            ? (owner ? <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}><GenreRouletteSettings wide={wide} /><AnticipatedSettings wide={wide} /><TrendingTvSettings wide={wide} /><WhatsMissingSettings wide={wide} /><DownloadsGuardSettings wide={wide} /></div> : null)
+            ? (owner ? <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}><GenreRouletteSettings wide={wide} /><AnticipatedSettings wide={wide} /><TrendingTvSettings wide={wide} /><WhatsMissingSettings wide={wide} /><DownloadsGuardSettings wide={wide} /><section aria-labelledby="auto-4k-group" data-testid="auto-4k-group" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}><h2 id="auto-4k-group" style={{ margin: 0, fontSize: 13, fontWeight: 700, letterSpacing: '0.02em', color: '#a5b4fc' }}>4K &amp; upgrades</h2><Remux4kSettings wide={wide} /></section></div> : null)
           : slug === 'rooms'
             ? (owner ? <RoomsSettings wide={wide} onExit={() => navigate('/settings')} /> : null)
           : slug === 'tv'

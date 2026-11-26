@@ -22764,6 +22764,8 @@ from app.automation import antic_routes as _antic_routes  # noqa: E402  v253: Se
 app.register_blueprint(_antic_routes.bp)
 from app.automation import ttv_routes as _ttv_routes  # noqa: E402  v279: Settings > Automation > Trending TV
 app.register_blueprint(_ttv_routes.bp)
+from app.automation import remux4k_routes as _remux4k_routes  # noqa: E402  v359: Settings > Automation > 4K Remux auto-grab
+app.register_blueprint(_remux4k_routes.bp)
 from app.automation import wym_routes as _wym_routes  # noqa: E402  v254: What you're missing (rail + Settings > Automation)
 app.register_blueprint(_wym_routes.bp)
 from app.automation import dg_routes as _dg_routes  # noqa: E402  v260: Settings > Automation > Downloads guard
@@ -22845,6 +22847,11 @@ try:
         _ttv.start()               # v279: Trending TV (native; test install only; on by default)
     except Exception:
         logger.exception('Trending TV scheduler did not start')
+    try:
+        from app.automation import remux4k as _remux4k
+        _remux4k.start()           # v359: 4K Remux auto-grab (native, no Radarr; test install only)
+    except Exception:
+        logger.exception('4K Remux auto-grab scheduler did not start')
 except Exception as _e:  # noqa: BLE001
     logger.error('TV search not started: %s', type(_e).__name__)
 from app import tv_scan as _tv_scan_boot  # noqa: E402

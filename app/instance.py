@@ -221,6 +221,13 @@ def writes_allowed(job: str) -> bool:
     return _writes_allowed(job)
 
 
+def native_allowed(job: str) -> bool:
+    """v359 (Taylor 2026-11-26): the native, Radarr-free build of a MOVIE_AUTOMATIONS job (app.automation.remux4k
+    for upgrade_4k) follows LUMA_TEST_ALLOW like any other job. writes_allowed() keeps the legacy Radarr job and
+    its routes off on test."""
+    return _writes_allowed(job)
+
+
 def _writes_allowed(job: str) -> bool:
     """True on prod; on test only for the mover/TV link or, with LUMA_INSTANCE exactly 'test', a job named in
     LUMA_TEST_ALLOW (v176)."""

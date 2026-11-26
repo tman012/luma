@@ -70,6 +70,8 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/automation/anticipated',
     # v279 Settings > Automation > Trending TV (owner only; changes and Run now the signed-in owner; the routes check).
     '/api/settings/automation/trending-tv',
+    # v359 Settings > Automation > 4K Remux auto-grab (owner only; changes, runs and previews the signed-in owner).
+    '/api/settings/automation/4k-remux',
     # v254 What you're missing: the Home rail (signed in), dismiss, restore and refresh (the signed-in owner),
     # and Settings > Automation (owner only; changes the signed-in owner). The routes check. Not /dismissed (debug).
     '/api/rails/what-youre-missing', '/api/rails/what-youre-missing/dismiss',
@@ -102,7 +104,9 @@ ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts
                     # v253 Anticipated status and Run now (owner only; the routes check).
                     '/api/settings/automation/anticipated/',
                     # v279 Trending TV status and Run now (owner only; the routes check).
-                    '/api/settings/automation/trending-tv/')
+                    '/api/settings/automation/trending-tv/',
+                    # v359 4K Remux auto-grab status, run and preview (owner only; the routes check).
+                    '/api/settings/automation/4k-remux/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).
 # GET only, sign-in required like everything else in minimal mode.
 DETAIL_READ_PREFIXES = (
