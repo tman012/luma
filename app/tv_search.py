@@ -469,11 +469,12 @@ def candidates(items: List[Dict[str, Any]], show: Dict[str, Any], want: List[Dic
             _rej(title, 'blocklisted' if title else 'no title')
             continue
         rel = tv_release.parse(title)
-        if tv_match.release_key(rel.title or '') not in show['names']:
+        named, ryear = tv_match.release_reading(rel, show['names'])
+        if not named:
             _rej(title, 'title does not match the show')
             continue
-        if rel.year and show.get('year') and rel.year != show['year'] and str(rel.year) not in {str(e.get('air_date') or '')[:4] for e in want}:
-            _rej(title, f'year {rel.year} is not {show["year"]}')
+        if ryear and show.get('year') and ryear != show['year'] and str(ryear) not in {str(e.get('air_date') or '')[:4] for e in want}:
+            _rej(title, f'year {ryear} is not {show["year"]}')
             continue
         covers: List[int] = []
         if rel.kind in ('episode', 'multi') and rel.season is not None:
@@ -1161,9 +1162,10 @@ def covers(title: str, show: Dict[str, Any], eps: List[Dict[str, Any]]) -> Tuple
     """What a release title covers among the show's episodes: (why not, episode ids, season). A season pack
     covers every episode of that season (with a file or not: rule 2 then refuses it)."""
     rel = tv_release.parse(title)
-    if tv_match.release_key(rel.title or '') not in show['names']:
+    named, ryear = tv_match.release_reading(rel, show['names'])
+    if not named:
         return WRONG_SHOW, [], None
-    if rel.year and show.get('year') and rel.year != show['year']:
+    if ryear and show.get('year') and ryear != show['year']:
         return WRONG_YEAR, [], None
     ids: List[int] = []
     if rel.kind in ('episode', 'multi') and rel.season is not None:
@@ -1520,8 +1522,13 @@ def feed(now: float) -> Dict[str, int]:
                 names.setdefault(n, []).append(sid)
         hits: Dict[int, List[Dict[str, Any]]] = {}
         for it in items:
-            t = tv_match.release_key(tv_release.parse(str(it.get('title') or '')).title or '')
-            for sid in names.get(t, []):
+            rel = tv_release.parse(str(it.get('title') or ''))
+            sids = []
+            for t, _y in reversed(tv_match.release_keys(rel)):   # 'Blade Runner 2099 S01E01': with its number first, then the plain title
+                sids = names.get(t, [])
+                if sids:
+                    break
+            for sid in sids:
                 hits.setdefault(sid, []).append(it)
         for sid, its in hits.items():
             with tv_store.connect() as conn:

@@ -94,6 +94,31 @@ def release_key(title: Any) -> str:
     return re.sub(r'\b([0-9a-z]+) s\b', r'\1s', normalize(title))
 
 
+def release_keys(rel: Any) -> List[Tuple[str, Optional[int]]]:
+    """The ways a parsed release names its show, as [(release_key, year it implies)], most plain first.
+    tv_release.parse() strips a trailing year-like number off the title ('Blade Runner 2099 S01E01' reads
+    as 'Blade Runner', year 2099), but for a show whose own name ends in a number (Blade Runner 2099, 1923,
+    1883, Alien: Earth 2025...) that number is part of the name. So a release with a year also names the show
+    'title year' (that reading implies no year). Only an exact full-name match counts: 'Blade Runner 2049'
+    never names 'Blade Runner 2099'."""
+    plain = release_key(getattr(rel, 'title', '') or '')
+    year = getattr(rel, 'year', None)
+    out: List[Tuple[str, Optional[int]]] = [(plain, year)] if plain else []
+    if plain and year:
+        out.append((release_key(f'{rel.title} {year}'), None))
+    return out
+
+
+def release_reading(rel: Any, names: Iterable[str]) -> Tuple[bool, Optional[int]]:
+    """(whether the release is for a show called any of *names*, the year to hold it to): the plain title
+    first, then the title with its trailing number (release_keys)."""
+    names = names if isinstance(names, (set, frozenset, dict)) else set(names)
+    for key, year in release_keys(rel):
+        if key in names:
+            return True, year
+    return False, getattr(rel, 'year', None)
+
+
 def _colons(s: str) -> str:
     """' - ', '- ' and ' -' between words read as ':'."""
     s = re.sub(r'\s+-\s+|(?<=\w)-\s+|\s+-(?=\w)', ': ', s)
