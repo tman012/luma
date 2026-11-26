@@ -102,6 +102,31 @@ def test_quality_is_2160p_and_remux():
     assert not remux4k.is_2160p_remux('Sinners.2025.UHD.1080p.REMUX')
 
 
+def test_ipt_age_estimate_is_used_when_there_is_no_date(w):
+    from app import tracker_clients as tc
+    assert tc.ipt_age_s(['x', '2160p | 8.5 2024 | 1.6 hours ago by Up']) == 1.6 * 3600
+    assert tc.ipt_age_s(['3.2 days ago by A']) == 3.2 * 86400 and tc.ipt_age_s(['none']) is None
+    now = time.time()
+    fresh = item('Sinners.2025.2160p.UHD.BluRay.REMUX.DV-GRP', 400, age_h=None, now=now)
+    fresh['publishEstimate'] = now - 3 * H
+    old = item('Weapons.2025.2160p.UHD.BluRay.REMUX-GRP', 400, age_h=None, now=now)
+    old['publishEstimate'] = now - 40 * H
+    w.items['IPT'] = [fresh, old]
+    movie(w, 'sinners', 1, 'Sinners', 2025)
+    res = remux4k.run('preview', now=now)
+    assert by_release(res) == {fresh['title']: 'would_grab', old['title']: 'age'}
+
+
+def test_ipt_parser_keeps_pub_date_and_adds_the_estimate():
+    import os
+    from app import tracker_clients as tc
+    here = os.path.dirname(__file__)
+    path = next(os.path.join(dp, f) for dp, _, fs in os.walk(here) for f in fs if f == 'ipt_search_minified.html')
+    rows = tc.parse_iptorrents(open(path).read(), 'https://ipt.example', 10)
+    assert rows[0]['pub_date'] == '' and abs(rows[0]['pub_est'] - (time.time() - 1.6 * 3600)) < 5
+    assert abs(rows[1]['pub_est'] - (time.time() - 3.2 * 86400)) < 5
+
+
 def test_publish_dates():
     assert remux4k.published('2026-11-26T05:00:00Z') == remux4k.published('Thu, 26 Nov 2026 05:00:00 +0000')
     assert remux4k.published('') is None and remux4k.published('junk') is None

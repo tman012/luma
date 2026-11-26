@@ -579,8 +579,13 @@ def _search_all(trackers: List[Dict[str, Any]], res: Dict[str, Any]) -> List[Dic
     return items
 
 
+def _pub(it: Dict[str, Any]) -> Optional[float]:
+    """The tracker's publish date, else its estimate (IPT shows only "1.6 hours ago")."""
+    return published(it.get('publishDate')) or published(it.get('publishEstimate'))
+
+
 def _rec(it: Dict[str, Any], now: float) -> Dict[str, Any]:
-    pub = published(it.get('publishDate'))
+    pub = _pub(it)
     return {'release': str(it.get('title') or ''), 'tracker': it.get('indexer'), 'seeders': int(it.get('seeders') or 0),
             'size': int(it.get('size') or 0) or None, 'age_hours': round((now - pub) / 3600, 1) if pub else None,
             'guid': str(it.get('guid') or ''), 'decision': None, 'reason': None}
@@ -627,7 +632,7 @@ def _cycle(cfg: Dict[str, Any], now: float, dry: bool, run_id: Optional[int]) ->
         seen.add(key)
         res['remux'] += 1
         recs.append(rec)
-        pub = published(it.get('publishDate'))
+        pub = _pub(it)
         if rec['seeders'] < cfg['min_seeders']:
             _decide(rec, 'seeders')
             continue

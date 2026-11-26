@@ -475,6 +475,8 @@ class TrackerSearch:
             'infoHash': r.get('info_hash') or '', 'imdbId': r.get('imdb_id') or '', 'guid': guid,
             'protocol': r.get('protocol') or 'torrent', 'freeleech': bool(r.get('freeleech')),
             'tracker_type': cfg['type'],
+            # v359: an estimated publish time (IPT's "hours ago"); only the 4K Remux auto-grab reads it
+            **({'publishEstimate': r['pub_est']} if r.get('pub_est') else {}),
         }
 
     def search(self, query: str, categories: List[int], limit: int, interactive: bool,

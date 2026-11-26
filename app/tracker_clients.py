@@ -858,6 +858,20 @@ def on_host(url: str, base: str) -> bool:
         return False
 
 
+_IPT_AGE_RE = re.compile(r'(\d+(?:\.\d+)?)\s*(minute|min|hour|hr|day|week|month|year)s?\s+ago', re.I)
+_IPT_AGE_S = {'minute': 60, 'min': 60, 'hour': 3600, 'hr': 3600, 'day': 86400, 'week': 7 * 86400,
+              'month': 30 * 86400, 'year': 365 * 86400}
+
+
+def ipt_age_s(cells: List[str]) -> Optional[float]:
+    """v359: seconds since upload from an IPT row's '1.6 hours ago by ...' line, else None."""
+    for c in cells:
+        m = _IPT_AGE_RE.search(c or '')
+        if m:
+            return float(m.group(1)) * _IPT_AGE_S[m.group(2).lower()]
+    return None
+
+
 def parse_iptorrents(html: str, base: str, limit: int, counts: Optional[Dict[str, int]] = None
                      ) -> List[Dict[str, Any]]:
     p = _IPTParser()
@@ -894,9 +908,15 @@ def parse_iptorrents(html: str, base: str, limit: int, counts: Optional[Dict[str
             # A download or details link on another host: never IPT's own row.
             offhost += 1
             continue
-        out.append(_result(title, dl_abs, _parse_size(size_cell), seeders, leechers,
-                           freeleech=row['free'], category=cat,
-                           guid=info or dl_abs, info_url=info))
+        res = _result(title, dl_abs, _parse_size(size_cell), seeders, leechers,
+                      freeleech=row['free'], category=cat,
+                      guid=info or dl_abs, info_url=info)
+        # v359 (4K Remux auto-grab's max age): IPT shows no date, only "1.6 hours ago". Kept apart from pub_date
+        # (the feed's last-seen marker and every other reader stay as they were).
+        age = ipt_age_s(cells)
+        if age is not None:
+            res['pub_est'] = round(time.time() - age)
+        out.append(res)
         if len(out) >= limit:
             break
     if counts is not None:
