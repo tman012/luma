@@ -41,6 +41,9 @@ IMDB_MAX_FAILURES = 3
 # instead of aborting the night at 1/3. Cap waits so a real long rate backoff
 # still ends the run as trackers_capped (label kept from v297).
 MAX_PACE_WAITS = 12            # ~12 min of pure spacing waits; enough for movies_per_night=3 overnight
+# The guard's ready_at() reports one spacing gap plus 1 s; a wait up to the gap plus this slack is still
+# spacing (wait it out). Anything farther is a real backoff and ends the run as trackers_capped.
+PACE_SLACK_S = 5.0
 PICK_KEYS = ('tmdb_id', 'title', 'year', 'genre', 'poster_path', 'votes')
 
 STOP_TEXT = {
@@ -56,8 +59,8 @@ def pace_wait_seconds(sts: List[Dict[str, Any]], now: float, cfgs: Optional[List
 
     Prefers the earliest status ``reset_at`` when present. Otherwise waits a full
     ``AUTO_MIN_GAP_S`` (Luma tv spacing). Returns > AUTO_MIN_GAP_S when reset_at is
-    farther out so the caller aborts as trackers_capped instead of sleeping through
-    a multi-hour rate/ban backoff. ``cfgs`` kept for call-site compatibility.
+    farther out (past one gap plus PACE_SLACK_S) so the caller aborts as trackers_capped
+    instead of sleeping through a multi-hour rate/ban backoff. ``cfgs`` kept for call-site compatibility.
     """
     from app import tv_budget
     gap = float(tv_budget.AUTO_MIN_GAP_S)
@@ -65,11 +68,11 @@ def pace_wait_seconds(sts: List[Dict[str, Any]], now: float, cfgs: Optional[List
     if not resets:
         return gap
     raw = min(resets) - now
-    if raw > gap:
+    if raw > gap + PACE_SLACK_S:
         return raw
     if raw <= 0:
         return 1.0
-    return max(1.0, min(gap, raw))
+    return max(1.0, raw)
 
 
 _status: Dict[str, Any] = {'running': False, 'run_id': None, 'kind': None}
@@ -396,9 +399,12 @@ def _run(cfg, dry, kind, now, rng, run_id, sleep, clock) -> Dict[str, Any]:
             # continue the same run instead of aborting mid-night when films remain.
             if sts and all(s.get('status') in paced for s in sts):
                 from app import tv_budget as _tvb
+                # The guard's reset_at is wall-clock time: measure it from the real now, not the run's
+                # start (a search a few seconds in made every spacing wait look like a long backoff).
+                now_box[0] = max(now_box[0], now + (clock() - started))
                 wait_s = pace_wait_seconds(sts, now_box[0], cfgs)
                 remaining = time_budget - (clock() - started)
-                if (wait_s > float(_tvb.AUTO_MIN_GAP_S)
+                if (wait_s > float(_tvb.AUTO_MIN_GAP_S) + PACE_SLACK_S
                         or pace_waits['n'] >= MAX_PACE_WAITS
                         or wait_s > remaining):
                     abort[0] = 'trackers_capped'
